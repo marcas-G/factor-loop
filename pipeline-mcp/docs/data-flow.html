@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Quant Pipeline 数据流</title>
+<script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+body{font-family:-apple-system,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;max-width:1200px;margin:0 auto;padding:2rem;line-height:1.6;color:#222}
+h1{border-bottom:2px solid #333;padding-bottom:.5rem}
+h2{margin-top:2.5rem;color:#1565c0}
+.mermaid{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:1.5rem;text-align:center;margin:1rem 0;overflow-x:auto}
+.note{background:#fffde7;border-left:4px solid #fbc02d;padding:.6rem 1rem;margin:1rem 0;font-size:.92em}
+.legend{font-size:.88em;color:#555}
+ol li{margin:.3rem 0}
+table{border-collapse:collapse;margin:1rem 0;font-size:.92em;width:100%}
+td,th{border:1px solid #ccc;padding:.45rem .7rem;text-align:left;vertical-align:top}
+th{background:#f0f4f8}
+h3{margin-top:1.5rem;color:#37474f;font-size:1.05em}
+</style>
+</head>
+<body>
+<h1>Quant Pipeline 数据流图</h1>
+<p class="legend">state: <code>~/.quant-runs/&lt;run_id&gt;/state.json</code> · DB: <code>~/work/quant/factors.db</code> · MCP: <code>pipeline-mcp</code> · 触发: <code>/research-loop</code></p>
+<p class="legend">💡 如果下面的图没显示，是 mermaid.js CDN 加载失败（网络）——告诉我，换本地 graphviz 生成 SVG。</p>
+
+<h2>L1 · research-loop 全流程（4 步）</h2>
+<div class="mermaid">
+graph TD
+    U([用户 /research-loop]) --> S0["Step 0 run_init<br/>state: running, factors=[]"]
+    S0 --> S1["Step 1 brainstorm<br/>检索库 + persist_idea + run_save"]
+    S1 -.->|ideas 表| DB[(factors.db)]
+    S1 --> S2["Step 2 run-factor-agent ×N 并发<br/>每因子 write→submit→check"]
+    S2 --> S3{"Step 3 evaluate<br/>仅 check_done"}
+    S3 -->|有| S3a["读 evidence → verdict → persist_factor"]
+    S3 -->|无| S4["Step 4 收尾<br/>status=done + 报告"]
+    S3a -.->|factors/evals/lessons| DB
+    S3a --> S4
+    S4 --> R([报告用户])
+</div>
+<div class="note">state.json 是账本，每步 run_save 写字段（点路径深 merge，如 <code>factors.2.failure_layer</code>）。</div>
+
+<h2>L2 · run-factor-agent 状态机（单因子）</h2>
+
+<h3>主线流程（正向，4 步）</h3>
+<div class="mermaid">
+graph TD
+    W["write<br/>write-factor → .h<br/>state: factor_file, submitting"] --> SU["submit<br/>submit_factor"]
+    SU -->|ok=true| C["check<br/>check_factor → failureLayer<br/>★evidence 内部落盘"]
+    C --> FIN["最终态<br/>run_save status / failure_layer / retry_trace"]
+    FIN --> RET([return xname, failure_layer])
+</div>
+
+<h3>重试规则（失败时回到哪步）</h3>
+<table>
+<tr><th>步骤</th><th>失败情况</th><th>回到</th><th>budget</th></tr>
+<tr><td rowspan=3>submit</td><td>编译错</td><td>write（useLLM 修代码）</td><td>budget=3</td></tr>
+<tr><td>超时</td><td>submit（重试）</td><td>budget=3</td></tr>
+<tr><td>鉴权失败（cookie 过期）</td><td>submit（python 层自动登录刷新 cookie，读 /home/lgao/featuretool_creds.json，不用 agent）</td><td>budget=3</td></tr>
+<tr><td rowspan=5>check</td><td>platform_timeout（dag_running）</td><td>check（等 DAG 完成）</td><td>timeout_budget=8</td></tr>
+<tr><td>platform_failed（编译错）</td><td>write（useLLM 修代码）</td><td>budget=3</td></tr>
+<tr><td>check_output_missing</td><td>submit（重试）</td><td>budget=3</td></tr>
+<tr><td>too_small / check_failed</td><td>质量重试（读 diagnosis 改 .h）→ submit</td><td>quality_budget=3</td></tr>
+<tr><td>check_done</td><td>进最终态 ✓</td><td>—</td></tr>
+</table>
+
+<div class="note">三类 budget 独立：<b>budget=3</b>（编译错）· <b>timeout_budget=8</b>（等 DAG ~4h）· <b>quality_budget=3</b>（质量重写）。回环重试用上表查，不画在图上避免线条交叉。</div>
+
+<h2>L3 · check_factor 内部</h2>
+<div class="mermaid">
+graph TD
+    A["调用 check_factor<br/>xname, submitRef, checkOutput, run_id, factor_index"] --> B["跑 factor_check.py<br/>轮询 DAG, max-wait 30min<br/>得 exitCode / dag_state / dailyIc"]
+    B --> C{"分类 failureLayer"}
+    C -->|timedOut 或 dag=running| PT[platform_timeout]
+    C -->|dag=failed| PF[platform_failed]
+    C -->|exit≠0 无 dag| CF[check_failed]
+    C -->|dailyIc 缺| CM[check_output_missing]
+    C -->|dailyIc 过小| TS[check_output_too_small]
+    C -->|dailyIc 正常| CD[check_done]
+    PT --> E["组装 evidence<br/>结构性加 diagnosis"]
+    PF --> E
+    CF --> E
+    CM --> E
+    TS --> E
+    CD --> E
+    E --> RS["★内部 run_save<br/>failure_layer + evidence<br/>不经 agent 保真"]
+    RS --> RT(["返回 {failureLayer, summary}<br/>不含 evidence"])
+</div>
+<div class="note"><b>diagnosis</b>={nature, root_cause_candidates[], fix_hint}，仅 too_small/check_failed 带，供质量重写。</div>
+
+<h2>L4 · persist_factor 内部</h2>
+<div class="mermaid">
+graph TD
+    A["调用 persist_factor<br/>run_id, factor_index, verdict"] --> B["内部 runLoad<br/>组装 factor / factorFile / evidence / retryInfo / ideaId"]
+    B --> C{"verdict?"}
+    C -->|pass| P["factors: evaluated<br/>factor_evals: significant=1<br/>lessons: success_pattern"]
+    C -->|fail| F["factors: dead_end<br/>factor_evals: significant=0<br/>lessons: dead_end"]
+    P --> R(["返回 xname / status / metrics / lessonId"])
+    F --> R
+    P -.-> DB[(factors.db)]
+    F -.-> DB
+</div>
+<div class="note"><b>verdict</b>={xname, verdict:pass|fail, key_strengths[], key_weaknesses[], suggested_iteration}。retry 改码成功额外写 <code>iterations(from→to)</code>。</div>
+
+<h2>架构约束（修复点）</h2>
+<ol>
+<li><b>evidence 不经 agent</b>：check_factor 内部 run_save，返回只 {failureLayer, summary}</li>
+<li><b>persist_factor 3 参数</b>：内部 runLoad 组装，避免 agent 传复杂对象</li>
+<li><b>质量失败可救</b>：too_small/check_failed 带 diagnosis，quality_budget 重写因子</li>
+<li><b>dag_running 等 DAG</b>：→ platform_timeout，timeout_budget=8 重 check 等</li>
+<li><b>语义检索首选</b>：semantic_search（CPU torch）&gt; factor_search（FTS5）</li>
+</ol>
+
+<script>mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{curve:'basis', htmlLabels:true}});</script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+---
+name: brainstorm
+description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 research-loop 嵌套调用。基于现有因子库和经验生成 N 个差异化候选因子，写 ideas/factors 表和 state。
+---
+
+# Brainstorm — 量化因子候选生成
+
+基于现有因子库（factors/lessons）和经验，生成 `n_factors` 个差异化候选因子，并调 MCP 持久化 idea 和候选。所有数据检索走 `quant-mcp` 工具，不直接用 Bash 调 factor-cli.mjs。
+
+## 输入
+
+- `idea`（可选）：研究 idea 文本（30-80 字）。未提供则从 inspiration-pool 抽 coords 自己拼一句。
+- `n_factors`（可选）：候选数，默认 3。
+- `run_id`（被 research-loop 嵌套调用时传入）：用于写 state.factors。
+
+## 工作环境 — factors.db 结构
+
+库分两层：
+
+【实体层】
+- `factors` 表（每因子一行，xname 唯一）：xname, class_name, formula_text, params, status, latest_ic, latest_icir, latest_sharpe, latest_rank_ic, created_ts
+  - status 枚举：
+    - `draft` — 已写未评估
+    - `evaluated` — ICIR ≥ 1.5（强信号，算子可借鉴）
+    - `dead_end` — ICIR < 1.5（弱信号，方向避雷）
+    - `failed` — 评估彻底失败（通常平台问题）
+- `factor_evals` 表（评估快照）：factor_xname, ts, ic_mean, icir, sharpe, rank_ic, eval_mode, raw_path
+- `iterations` 表（迭代链 from→to）：from_xname, to_xname, change_note, outcome, icir_delta
+- `ideas` 表：id, text, status
+
+【经验层】
+- `lessons` 表（原子经验）：type: `dead_end` / `success_pattern`
+
+## 可用 MCP 工具（quant-mcp）
+
+| 工具 | 用途 |
+|---|---|
+| `factor_counts {}` | 库规模摸底（factors / lessons / evaluated 三数）|
+| `factor_list {k}` | 最近 k 个因子（含 status / latest_icir / formula_text）|
+| `factor_recent_lessons {k}` | 最近 k 条 lesson |
+| `factor_semantic_search {query_text, k}` | **语义检索（首选）**：给定 idea/formula 文本，向量查相似因子 |
+| `factor_search {query, k}` | 全文检索 lessons（trigram，关键词 ≥3 字）—— 语义检索的补充，找历史教训文本 |
+| `factor_detail {xname}` | 单因子全貌：基本信息 + 最近 10 条 evals + 迭代链 + tags |
+| `factor_similar {xname, k}` | 给定 xname 找相似（要求因子已入库，brainstorm 一般用不上）|
+
+## 硬约束 / 指导思想
+
+- 硬约束：`/home/lgao/work/quant/.claude/CONSTRAINTS.yaml`（必须满足）
+- 指导思想：`/home/lgao/work/quant/.claude/PRINCIPLES.md`（参考）
+- 文件不存在视为无约束
+
+## 研究流程
+
+### 第 1 步 · 摸底（每项调一次）
+
+- `factor_counts {}` — 看库规模
+- `factor_recent_lessons {k:10}` — 最近经验
+- `factor_list {k:20}` — 最近因子状态
+
+### 第 2 步 · 围绕 idea 检索
+
+**首选语义检索**（向量，匹配 formula 语义）：
+
+- `factor_semantic_search {query_text: <idea 全文或核心句>, k: 10}` — 拿最相似的 k 个因子
+- 命中 `evaluated` 因子 → `factor_detail` 看演进路径，学成功经验
+- 命中 `dead_end` 因子 → 在候选的 `db_research.found_dead_ends` 记下方向，候选差异化避开
+
+**补充关键词检索**（FTS5，匹配 lessons 文本）：
+
+- 用 1-2 个具体术语（如 `大单冲击` / `撤单偏度`）调 `factor_search`，捞语义检索漏掉的历史教训
+- 只在语义检索结果不够覆盖 idea 时用，不要取代语义检索
+
+### 第 3 步 · 基于证据出候选
+
+生成 `n_factors` 个差异化候选，每个候选在 `db_research` 字段显式回答：
+- `searched`：用了哪些检索词
+- `found_dead_ends`：命中的 dead_end lesson / dead_end 因子（如有，候选怎么避开）
+- `found_similar`：命中的相似因子（如有，候选怎么差异）
+- `borrowed_from`：借鉴了哪个 success_pattern / evaluated 因子的算子
+
+## 候选硬要求
+
+1. 公式/伪代码必须可回测（写得出 .h 实现）
+2. `n_factors` 个候选必须差异化（算子/窗口/变换任一维度不同；品种**不作差异化维度**——每个候选都全品种适用）
+3. `intuition` 具体到市场机制（如"套保资金在换月期的行为模式"），不泛泛"市场非有效"
+4. `diff_check`：去掉关键 [维度] 后会退化成什么标准因子？本质差异在哪？
+5. `coord_usage`：本因子如何用 idea 中的研究要素（数据/算子/时间/关系/变换/状态）
+
+## 持久化（写完候选后必须做）
+
+**只调一次** `persist_candidates`，把上面输出的候选 JSON 整体传入，工具内部完成存 idea + 完整候选 factors（自动补全 status 等 schema 字段，保留 intuition/db_research）：
+
+```
+persist_candidates {
+  run_id,
+  idea_text: <idea 文本>,
+  factors: <上面"输出格式"的 factors 数组，原样整体传入>
+}
+```
+
+不要逐候选 run_save（多次调用易在输出大 JSON 后停止 + 点路径覆盖丢 schema 字段）。`persist_candidates` 一次搞定，返回 `{idea_id, n_factors}`。
+
+## 输出格式
+
+严格 JSON，无其他文字：
+
+```json
+{
+  "factors": [
+    {
+      "name": "类名(PascalCase)",
+      "formula": "公式或伪代码",
+      "intuition": "为什么有效 - 直觉假设（市场机制层面）",
+      "diff_check": "去掉 [X 维度] 后会退化成什么标准因子？差异点是什么？",
+      "coord_usage": "本因子如何使用 idea 中的研究要素（数据/算子/时间/关系/变换/状态）",
+      "categories": ["硬约束 CONSTRAINTS.yaml 的全部 feeds —— 因子要求全品种适用，不挑不缺（当前为 [AG,CU,AU,AL,NI]）"],
+      "tags": ["按算子/数据/变换给 3-5 个英文标签，从 formula+intuition 提炼，参考库内老因子风格(order_book/imbalance/cancel_flow/spoofing/exponential_decay/hhi/weighted_depth 等)"],
+      "params": {},
+      "db_research": {
+        "searched": ["检索词1", "检索词2"],
+        "found_dead_ends": ["命中的 dead_end 教训或因子（如无写 [])"],
+        "found_similar": ["命中的相似因子 xname（如无写 [])"],
+        "borrowed_from": "借鉴的具体因子/经验（一句话）"
+      }
+    }
+  ]
+}
+```
+
+## 错误处理
+
+- 任何 MCP 工具连续失败 3 次 → `run_save {run_id, patch: {status: "paused"}}` 然后停止，向用户报告失败原因
+- 单个检索失败 → 跳过该检索词，继续其它

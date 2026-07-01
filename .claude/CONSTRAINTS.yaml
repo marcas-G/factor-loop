@@ -1,0 +1,29 @@
+# 因子硬约束 - brainstorm 输出后自动校验
+
+domain:
+  asset_class: futures
+  frequency: high_frequency
+  horizons: ["5s", "60s"]
+  feeds: ["AG", "CU", "AU", "AL", "NI"]
+
+platform:
+  name: featuretool
+  framework: FeedIndicator
+  supported_callbacks:
+    - receive_order
+    - onEndBook
+    - receive_trade
+  input_fields: [bid, ask, trade, order]
+
+quality_gate:
+  ic_threshold: 0.05
+  ir_threshold: 0.3
+
+forbidden:
+  - lookahead_bias
+  - survivorship_bias
+  - params_count_over_3
+
+naming:
+  class_pattern: "^[A-Z][a-zA-Z0-9]+$"
+  output_pattern: "^[a-z][a-z0-9_]*$"

@@ -1,0 +1,13 @@
+{
+  "name": "pipeline-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "mcp": "node mcp/server.mjs",
+    "test": "node --test mcp/tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  }
+}

@@ -1,0 +1,57 @@
+# factor-autoloop
+
+量化因子自动挖掘循环 —— 基于 Claude Code 的 `/research-loop` skill,无人值守批量产出因子。
+自动完成 **brainstorm → write/submit/check → evaluate** 全流程,所有搬砖走 `quant-mcp` MCP server。
+
+## 架构
+
+```
+auto-loops.sh                 tmux 单车道循环驱动器(拉起 /research-loop, state.json 检测完成)
+
+.claude/skills/               循环编排 skill 链
+  research-loop/              编排器
+  brainstorm/                 Step1 候选生成
+  write-factor/               写因子 .h(agent 内调)
+  submit/                     提交打包(agent 内调)
+  evaluate/                   Step3 评估写库
+.claude/agents/
+  run-factor-agent.md         单因子 write→submit→check→rewrite 状态机
+.claude/CONSTRAINTS.yaml      因子硬约束(brainstorm 校验)
+.claude/PRINCIPLES.md         研究指导思想
+
+pipeline-mcp/                 quant-mcp server(submit/check/run_save/persist 走它)
+pipeline-py/                  featuretool.py + factor_check.py(平台对接)
+factor_db/                    因子库 db.py + schema.sql
+```
+
+## 起循环
+
+### 1. 装依赖
+```bash
+cd pipeline-mcp && npm install        # quant-mcp server 依赖
+pip install pandas numpy              # factor_db / pipeline-py 依赖
+```
+
+### 2. 建空因子库
+```bash
+python factor_db/init_db.py           # 用 schema.sql 建空 factors.db
+```
+
+### 3. 配 MCP
+```bash
+cp .claude/settings.example.json .claude/settings.json
+# 编辑 settings.json,把 QUANT_MCP_RUNS_ROOT 改成你的 run state 目录
+```
+
+### 4. 跑循环
+```bash
+mkdir -p logs/loops
+nohup bash auto-loops.sh 1 > logs/loops/auto.out 2>&1 &
+tail -f logs/loops/auto.out
+```
+用法/停止/参数见 `auto-loops.sh` 头部注释。
+
+## 数据说明
+
+`factors.db`、`check-output/`、`logs/` 等运行数据与产物均不入库(见 `.gitignore`)。
+clone 后用 `factor_db/schema.sql` / `init_db.py` 重建空库即可。
