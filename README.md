@@ -29,7 +29,11 @@ factor_db/                    因子库 db.py + schema.sql
 ### 1. 装依赖
 ```bash
 cd pipeline-mcp && npm install        # quant-mcp server 依赖
-pip install pandas numpy              # factor_db / pipeline-py 依赖
+pip install pandas numpy sqlite-vec sentence-transformers  # 建议装到独立 venv
+
+# pipeline-mcp 调 python 时用此 venv(系统 python3 缺上述部分包,必需)
+export QUANT_VENV_PY=/path/to/your/venv/bin/python
+# export QUANT_VEC0_SO=/path/to/vec0.so   # 可选,不设则自动探测
 ```
 
 ### 2. 建空因子库

@@ -12,10 +12,11 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const CWD = "/home/lgao/work/quant";
+// 仓库根 = pipeline-mcp 的上一级(自动跟随 clone 位置)
+const CWD = path.resolve(import.meta.dirname, "..");
 const DB_PATH = path.join(CWD, "factors.db");
 // 所有 python 调用统一走独立 venv（系统 python3 缺 sqlite_vec）
-const VENV_PY = "/home/lgao/quant-venv/bin/python";
+const VENV_PY = process.env.QUANT_VENV_PY || "/home/lgao/quant-venv/bin/python";
 const PY = fs.existsSync(VENV_PY) ? VENV_PY : "python3";
 const VEC0_SO = findVec0So();
 
@@ -29,8 +30,6 @@ let _db = null;
 function findVec0So() {
   // 探测常见路径
   const candidates = [
-    "/home/lgao/quant-venv/lib/python3.13/site-packages/sqlite_vec/vec0.so",
-    "/home/lgao/.local/lib/python3.9/site-packages/sqlite_vec/vec0.so",
     "/usr/lib/python3.9/site-packages/sqlite_vec/vec0.so",
   ];
   for (const p of candidates) {

@@ -3,7 +3,7 @@ import * as factorDb from "./factor-db.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
-const CWD = "/home/lgao/work/quant";
+const CWD = path.resolve(import.meta.dirname, "..");
 const TMP_H = path.join(CWD, "factors", "_t4_smoke_test_factor.h");
 
 // 准备：写一个测试用的 .h 文件（带 frontmatter）
@@ -70,7 +70,7 @@ console.log("lessons 总数:", factorDb.countLessons());
 // 查询校验
 import { DatabaseSync } from "node:sqlite";
 const db = new DatabaseSync(path.join(CWD, "factors.db"), { allowExtension: true });
-db.loadExtension("/home/lgao/.local/lib/python3.9/site-packages/sqlite_vec/vec0.so");
+db.loadExtension(process.env.QUANT_VEC0_SO || "/home/lgao/.local/lib/python3.9/site-packages/sqlite_vec/vec0.so");
 const f = db.prepare("SELECT status, latest_icir, latest_ic FROM factors WHERE xname = ?").get(xname);
 console.log(`factors.${xname}: status=${f.status} IC=${f.latest_ic} ICIR=${f.latest_icir}`);
 const ev = db.prepare("SELECT ic_mean, icir, eval_mode FROM factor_evals WHERE factor_xname = ? ORDER BY id DESC LIMIT 1").get(xname);

@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { DRY_RUN, FACTOR_CHECK_PY, RUN_DIR } from "../lib/config.mjs";
+import { DRY_RUN, FACTOR_CHECK_PY, RUN_DIR, FACTORS_DB } from "../lib/config.mjs";
 import { runPy } from "../run-py.mjs";
 import { triageFailure } from "../airflow-log.mjs";
 import { extractMetricsFromCheckOutput } from "../lib/metrics.mjs";
@@ -24,7 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 // 故 featureKey 必须用 stem：factor_file 优先 → factors 表 file_path 兜底 → class 名最后(带 warning)。
 function featureStemFromDb(xname) {
   try {
-    const db = new DatabaseSync("/home/lgao/work/quant/factors.db");
+    const db = new DatabaseSync(FACTORS_DB);
     const row = db.prepare("SELECT file_path FROM factors WHERE xname = ?").get(xname);
     db.close();
     if (row && row.file_path) return path.basename(row.file_path, ".h");

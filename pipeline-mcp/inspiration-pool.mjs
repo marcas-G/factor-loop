@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 // L1 元启发池：跨领域思维模式，提供"怎么想"的方向
 export const META_HEURISTICS = [
@@ -132,7 +133,8 @@ export const DIMENSIONS = {
 };
 
 // 权重持久化：{ __meta__: {id: w}, dim_name: {value: w} }
-const WEIGHTS_FILE = "/home/lgao/work/quant/pipeline-mcp/.inspiration-weights.json";
+// 权重文件与本文件同目录(pipeline-mcp 根),自动跟随 clone 位置
+const WEIGHTS_FILE = path.join(import.meta.dirname, ".inspiration-weights.json");
 
 function loadWeights() {
   try {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 
 // 所有 python 调用统一走独立 venv（系统 python3 已缺 pandas / sqlite_vec / sentence_transformers）
-const VENV_PY = "/home/lgao/quant-venv/bin/python";
+const VENV_PY = process.env.QUANT_VENV_PY || "/home/lgao/quant-venv/bin/python";
 const PY = fs.existsSync(VENV_PY) ? VENV_PY : "python3";
 
 // shell:false + argv 数组：规避 shell 引号 bug（如 features="ClassA<>" 会被 shell 当重定向）

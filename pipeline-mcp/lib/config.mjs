@@ -3,7 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const CWD = "/home/lgao/work/quant";
+// 仓库根 = pipeline-mcp/lib 的上两级(自动跟随 clone 位置,不再硬编码)
+export const CWD = path.resolve(import.meta.dirname, "..", "..");
 export const CONSTRAINTS_FILE = path.join(CWD, ".claude", "CONSTRAINTS.yaml");
 export const PRINCIPLES_FILE = path.join(CWD, ".claude", "PRINCIPLES.md");
 export const FACTORS_DIR = path.join(CWD, "factors");
@@ -11,6 +12,7 @@ export const RUN_DIR = `/tmp/research-run-${Date.now()}`;
 export const STATE_PATH = path.join(RUN_DIR, "state.json");
 export const FEATURETOOL_PY = path.join(CWD, "pipeline-py", "featuretool.py");
 export const FACTOR_CHECK_PY = path.join(CWD, "pipeline-py", "factor_check.py");
+export const FACTORS_DB = path.join(CWD, "factors.db");
 
 export const DRY_RUN = process.argv.includes("--dry-run");
 export const QUIET = process.argv.includes("--quiet");

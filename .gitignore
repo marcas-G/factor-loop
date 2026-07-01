@@ -46,7 +46,7 @@ __pycache__/
 /backfill-loops.sh
 
 # ===== 不属于循环的工具脚本 / 文档 / 产出 =====
-/operators.py
+/operators*.py
 /xy_loader.py
 /batch_eval.py
 /evaluate_op.py
