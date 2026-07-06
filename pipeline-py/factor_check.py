@@ -1522,8 +1522,8 @@ def cmd_run(args):
         print(f"Phase 2: 等待因子计算完成")
         print(f"{'='*60}")
 
-        # 平台排队(queued/running)一直等：超时放弃没意义——重 submit 新 job 照样排队。
-        # 只在全部到终态(success/failed)才退出。极端(平台挂死 state 永不变)需 Ctrl-C 手动介入。
+        # 平台排队(queued/running)一直等,但有 --max-wait 兜底:超时退出让上层(MCP check_factor)
+        # 判 transient 重试,而非让进程挂死卡住整个 MCP server。极端 state 永不变时由 max_wait 兜底。
         interval = 60
         elapsed = 0
         while True:
@@ -1547,6 +1547,9 @@ def cmd_run(args):
 
             if not pending:
                 print(f"  全部完成! (等待 {elapsed}s)")
+                break
+            if elapsed >= args.max_wait:
+                print(f"  ⚠️ 达到 --max-wait={args.max_wait}s 仍有 {len(pending)} 未完成: {', '.join(pending[:5])}——超时退出,交上层重试(transient)")
                 break
             print(f"  [{elapsed}s] 等待中... 剩余 {len(pending)}: {', '.join(pending[:3])}{'...' if len(pending) > 3 else ''}")
 

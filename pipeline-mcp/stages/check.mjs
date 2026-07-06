@@ -22,11 +22,23 @@ import { DatabaseSync } from "node:sqlite";
 // 平台 feature 名 = .h 文件 stem（parse_index 实测：book_HHI.h → "book_HHI"）。
 // 文件名≠class 名时，class 名(如 BHHI)对不上平台 stem(book_HHI)→ factor_check wait 永久 pending。
 // 故 featureKey 必须用 stem：factor_file 优先 → factors 表 file_path 兜底 → class 名最后(带 warning)。
+// 只读连接(模块级缓存,避免每次 new/close)。WAL 模式下读不阻塞 factor-db 写连接;
+// query_only 防误写,busy_timeout 兜底等锁而非立刻 SQLITE_BUSY。
+let _readDb = null;
+function readDb() {
+  if (_readDb) return _readDb;
+  _readDb = new DatabaseSync(FACTORS_DB);
+  _readDb.exec("PRAGMA query_only = ON");
+  _readDb.exec("PRAGMA busy_timeout = 5000");
+  return _readDb;
+}
+
+// 平台 feature 名 = .h 文件 stem（parse_index 实测：book_HHI.h → "book_HHI"）。
+// 文件名≠class 名时，class 名(如 BHHI)对不上平台 stem(book_HHI)→ factor_check wait 永久 pending。
+// 故 featureKey 必须用 stem：factor_file 优先 → factors 表 file_path 兜底 → class 名最后(带 warning)。
 function featureStemFromDb(xname) {
   try {
-    const db = new DatabaseSync(FACTORS_DB);
-    const row = db.prepare("SELECT file_path FROM factors WHERE xname = ?").get(xname);
-    db.close();
+    const row = readDb().prepare("SELECT file_path FROM factors WHERE xname = ?").get(xname);
     if (row && row.file_path) return path.basename(row.file_path, ".h");
   } catch (e) { /* db 不可用返回 null */ }
   return null;
