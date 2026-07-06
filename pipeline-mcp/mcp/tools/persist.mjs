@@ -106,6 +106,9 @@ export async function persistCandidatesHandler({ run_id, idea_text, factors }) {
     coord_usage: f.coord_usage || null,
     params: f.params || {},
     db_research: f.db_research || null,
+    // 迭代接续: brainstorm 接续 open suggestion 时带上(供 persist claim + evaluate realize)
+    suggestion_id: f.suggestion_id ?? null,
+    iterates_from: f.iterates_from ?? null,
     // schema 必需字段（runInit 同款，避免后续 run-factor-agent 读 undefined）
     factor_file: null,
     status: "pending",
@@ -115,8 +118,20 @@ export async function persistCandidatesHandler({ run_id, idea_text, factors }) {
     verdict: null,
     persisted: null,
   }));
+  // 迭代接续: 候选带 suggestion_id 时 claim(open→in_progress)。claim 不阻塞——失败(被别人先 claim/已 realized)只记录。
+  const claimed = [];
+  for (const f of fullFactors) {
+    if (f.suggestion_id != null) {
+      try {
+        const r = factorDb.claimIteration(f.suggestion_id);
+        claimed.push({ suggestion_id: f.suggestion_id, iterates_from: f.iterates_from, ...r });
+      } catch (e) {
+        claimed.push({ suggestion_id: f.suggestion_id, error: e.message });
+      }
+    }
+  }
   await runSave(run_id, { idea: idea_text, idea_id: ideaId, factors: fullFactors });
-  return { idea_id: ideaId, n_factors: fullFactors.length };
+  return { idea_id: ideaId, n_factors: fullFactors.length, claimed };
 }
 
 export const ALL_PERSIST_SCHEMAS = [persistIdeaSchema, persistFactorSchema, persistCandidatesSchema];

@@ -67,6 +67,8 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
    ② 重派仍卡 → 才 `run_save {patch: {"factors.<i>.status": "failed", "factors.<i>.failure_layer": "agent_crashed"}}` 兜底，继续其它 factor。
    ③ .h 未生成（write 步就断）→ 兜底 agent_crashed，后续单独调 write-factor 生成 .h 再重派。
 
+5. **迭代回滚**：本批 3 个跑完 + 兜底确认后，扫一遍因子，对 `status==failed` 且 `suggestion_id` 非空的（接续候选 B 没跑成），调 `reopen_iteration {suggestion_id}` 把建议从 in_progress→open，允许下次再接续（不浪费这条精进/重试线索）。check_done 的不回滚（由 evaluate 的 realize 归档）。
+
 下一批 3 个，直到所有 factor 跑完。
 
 **→ 衔接硬规则**：所有 factor 跑完 + 兜底 `run_load` 确认后，**必须立即在同一回合**进入 Step 3：对第一个 `failure_layer == "check_done"` 的 factor 调 `Skill evaluate`（若没有 check_done 则直接进 Step 4）。禁止输出"3 个因子全部完成"之类的纯文字回合。

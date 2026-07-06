@@ -51,7 +51,10 @@ export function init({ dbPath = DB_PATH } = {}) {
   _db = new DatabaseSync(dbPath, { allowExtension: true });
   _db.loadExtension(VEC0_SO);
   _db.exec("PRAGMA foreign_keys = ON");
+  _db.exec("PRAGMA journal_mode = WAL");
+  _db.exec("PRAGMA busy_timeout = 5000");
   migrateLessonsSchema();
+  migrateIterationsSchema();
   return _db;
 }
 
@@ -99,6 +102,19 @@ function migrateLessonsSchema() {
     END;
   `);
   console.log("[factor-db] lessons 表已迁移到新 schema（type ∈ {dead_end, success_pattern}，scope 固定 factor，旧数据已清空）");
+}
+
+// iterations 表加 status/iterable 列（幂等）。
+// to_xname 是 NOT NULL，open/in_progress 用自指占位（to=from_xname），status 作唯一状态判据。
+// 演进树链查询只看 status='realized'，自指的 open/in_progress 行不参与（否则递归 CTE 死循环）。
+function migrateIterationsSchema() {
+  const cols = _db.prepare("PRAGMA table_info(iterations)").all().map((c) => c.name);
+  if (!cols.includes("status")) {
+    _db.exec("ALTER TABLE iterations ADD COLUMN status TEXT NOT NULL DEFAULT 'realized'");
+  }
+  if (!cols.includes("iterable")) {
+    _db.exec("ALTER TABLE iterations ADD COLUMN iterable INTEGER NOT NULL DEFAULT 1");
+  }
 }
 
 function db() {
@@ -299,6 +315,89 @@ export function addIteration(fromXname, toXname, ideaId = null, changeNote = nul
   ).run(fromXname, toXname, ideaId, changeNote, outcome, icirDelta);
 }
 
+// ===== 迭代管道: open(待接续) → in_progress(已接续成候选B) → realized(B跑完归档) =====
+// evaluate 开建议(pass 精进 / dead_end 显式重试);brainstorm 检索 open 并接续成 B;
+// B 的 evaluate 完成后 realize,iterations 表就此长出 from→to 演进链。
+// to_xname NOT NULL → open 时填自指占位 from_xname,realize 时更新为真实 to。
+
+// evaluate 调:开一个 open suggestion。同 (from, change) 已 open/in_progress → 幂等返回已有 id。
+export function openIteration(fromXname, { ideaId = null, changeNote = null, reason = null, iterable = true } = {}) {
+  const d = db();
+  const existing = d.prepare(
+    `SELECT id FROM iterations
+     WHERE from_xname = ? AND change_note IS ? AND status IN ('open', 'in_progress')
+     ORDER BY ts DESC LIMIT 1`
+  ).get(fromXname, changeNote);
+  if (existing) return existing.id;
+
+  const info = d.prepare(
+    `INSERT INTO iterations (from_xname, to_xname, idea_id, change_note, reason, status, iterable)
+     VALUES (?, ?, ?, ?, ?, 'open', ?)`
+  ).run(fromXname, fromXname, ideaId, changeNote, reason, iterable ? 1 : 0);  // to 自指占位
+  return Number(info.lastInsertRowid);
+}
+
+// persist_candidates 调:接续候选 B 时 claim(open→in_progress)。
+// 只改 status,不动 to_xname(保持自指占位)——B 这时还没入 factors 表,填 to=B 会违反外键。
+// "哪个 B 认领了 suggestion" 记在 state.factors[i].suggestion_id;realize 时(B 已入库)才填真实 to。
+export function claimIteration(iterId) {
+  const d = db();
+  const row = d.prepare("SELECT status FROM iterations WHERE id = ?").get(iterId);
+  if (!row) throw new Error(`iteration id 不存在: ${iterId}`);
+  if (row.status !== "open") {
+    return { ok: false, error: `iteration ${iterId} 状态=${row.status},非 open 不可 claim` };
+  }
+  d.prepare("UPDATE iterations SET status = 'in_progress' WHERE id = ?").run(iterId);
+  return { ok: true };
+}
+
+// B 的 evaluate 调(在 persist_factor 之后,B 已入 factors 表):归档(in_progress→realized)。
+// 此时才填 to_xname=B(外键满足)、icir_delta。演进链 from→to 就此落定。
+// outcome 由 icir_delta 自动推导(CHECK 约束 outcome ∈ improved/declined/neutral),调用方只传 icir_delta。
+export function realizeIteration(iterId, toXname, { icirDelta = null } = {}) {
+  const d = db();
+  const row = d.prepare("SELECT status FROM iterations WHERE id = ?").get(iterId);
+  if (!row) throw new Error(`iteration id 不存在: ${iterId}`);
+  const outcome = icirDelta == null ? "neutral"
+    : icirDelta > 0.02 ? "improved"
+    : icirDelta < -0.02 ? "declined"
+    : "neutral";
+  d.prepare(
+    "UPDATE iterations SET status = 'realized', to_xname = ?, outcome = ?, icir_delta = ? WHERE id = ?"
+  ).run(toXname, outcome, icirDelta, iterId);
+  return { ok: true, outcome };
+}
+
+// 失败回滚:research-loop 兜底调。接续候选 B 失败时 suggestion 回到 open 允许下次再接续。
+// claim 没动 to_xname(仍占位),reopen 也只改 status。
+export function reopenIteration(iterId) {
+  const d = db();
+  const row = d.prepare("SELECT status FROM iterations WHERE id = ?").get(iterId);
+  if (!row) throw new Error(`iteration id 不存在: ${iterId}`);
+  if (row.status !== "in_progress") {
+    return { ok: false, error: `iteration ${iterId} 状态=${row.status},非 in_progress 不可 reopen` };
+  }
+  d.prepare("UPDATE iterations SET status = 'open' WHERE id = ?").run(iterId);
+  return { ok: true };
+}
+
+// brainstorm 调:检索待接续建议,按 priority 排序。
+// priority = (evaluated?2.0:0.5) × max(icir,0.1) × exp(-age_days/14) —— pass 精进优先于 dead_end 重试,强因子优先,老建议降权。
+export function listOpenIterations({ topK = 5, sourceStatus = null } = {}) {
+  const d = db();
+  const sql = `SELECT i.id AS suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id, i.iterable, i.ts,
+            f.status AS from_status, f.latest_icir AS from_icir, f.formula_text AS from_formula,
+            (CASE WHEN f.status = 'evaluated' THEN 2.0 ELSE 0.5 END)
+              * MAX(COALESCE(f.latest_icir, 0), 0.1)
+              * EXP(-(julianday('now') - julianday(i.ts)) / 14.0) AS priority
+     FROM iterations i
+     JOIN factors f ON f.xname = i.from_xname
+     WHERE i.status = 'open' ${sourceStatus ? "AND f.status = ?" : ""}
+     ORDER BY priority DESC
+     LIMIT ?`;
+  return sourceStatus ? d.prepare(sql).all(sourceStatus, topK) : d.prepare(sql).all(topK);
+}
+
 // ============ lessons（仅 check_done 实验结果：dead_end 或 success_pattern）============
 
 export function addLesson(type, text, { xname, ideaId = null, evidence = null } = {}) {
@@ -489,17 +588,17 @@ export function getFactorDetail(xname) {
   ).all(xname).map(r => r.name);
   const ancestors = d.prepare(`
     WITH RECURSIVE chain AS (
-      SELECT from_xname AS x, 1 AS depth FROM iterations WHERE to_xname = ?
+      SELECT from_xname AS x, 1 AS depth FROM iterations WHERE to_xname = ? AND status = 'realized'
       UNION ALL
-      SELECT i.from_xname, c.depth + 1 FROM iterations i JOIN chain c ON i.to_xname = c.x
+      SELECT i.from_xname, c.depth + 1 FROM iterations i JOIN chain c ON i.to_xname = c.x WHERE i.status = 'realized'
     )
     SELECT x AS xname, depth FROM chain ORDER BY depth
   `).all(xname);
   const descendants = d.prepare(`
     WITH RECURSIVE chain AS (
-      SELECT to_xname AS x, 1 AS depth FROM iterations WHERE from_xname = ?
+      SELECT to_xname AS x, 1 AS depth FROM iterations WHERE from_xname = ? AND status = 'realized'
       UNION ALL
-      SELECT i.to_xname, c.depth + 1 FROM iterations i JOIN chain c ON i.from_xname = c.x
+      SELECT i.to_xname, c.depth + 1 FROM iterations i JOIN chain c ON i.from_xname = c.x WHERE i.status = 'realized'
     )
     SELECT x AS xname, depth FROM chain ORDER BY depth
   `).all(xname);

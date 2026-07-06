@@ -44,6 +44,7 @@ description: 量化因子结果评估。触发 `/evaluate <run_id> <factor_index
 5. `verdict=pass`：因子值得入库（算子可借鉴，下次能迭代）
 6. `verdict=fail`：方向已被否决（避免下次重写），但 `suggested_iteration` 留作未来参考
 7. **IC 行为冗余**：check_done 因子必须查与库内因子的 IC 行为冗余（见下），`|pearson|≥0.7` 视为冗余、倾向 fail
+8. **迭代登记**：verdict 出来后把 suggested_iteration 落成可接续的建议——pass 精进 / dead_end 值得换维度重试的 开 open suggestion；dead_end 无救方向不开（走 dead_end lesson 避雷）。接续来的因子要 realize 回填。详见"迭代管道"段
 
 ## IC 行为冗余检查（check_done 因子必做，容错）
 
@@ -79,6 +80,54 @@ description: 量化因子结果评估。触发 `/evaluate <run_id> <factor_index
    }
    ```
 
+## 迭代管道（精进 + 避雷）
+
+verdict 定后、**persist_factor 之后**执行（open/realize 都要求因子已入 factors 表，外键约束）。分两种情况：
+
+### A. 当前因子是"接续来的"（`state.factors[i].suggestion_id` 非空）→ realize 归档
+
+接续候选 B 跑完、persist_factor 成功（B 已入库）后，归档当初那条 suggestion：
+
+1. 取源因子 A 的 ICIR：`factor_detail {xname: state.factors[i].iterates_from}` → `.factor.latest_icir`
+2. 当前因子 B 的 ICIR：`factor_detail {xname: <B.name>}` → `.factor.latest_icir`（B 刚入库，复查最稳）
+3. `icir_delta = B.latest_icir - A.latest_icir`
+4. 调：
+   ```
+   realize_iteration {
+     suggestion_id: state.factors[i].suggestion_id,
+     to_xname: <当前因子 B 的 xname>,
+     icir_delta: <B.icir - A.icir>
+   }
+   ```
+   outcome（improved/declined/neutral）由 icir_delta 自动推导。演进链 A→B 就此落定。
+
+### B. 为当前因子的 suggested_iteration 开新建议（open）
+
+判 `iterable`（决定开不开 suggestion）：
+
+| verdict | suggested_iteration 性质 | iterable | 动作 |
+|---|---|---|---|
+| pass | "换 horizon/窗口可能更强"类精进 | true | `open_iteration` 开建议 |
+| fail/dead_end | "换品种/换维度重试"且 `\|latest_icir\|≥0.05` | true | `open_iteration` 开建议（显式重试，避免下次换皮盲撞）|
+| fail/dead_end | 方向本身无救（`\|latest_icir\|<0.05` 或机制判定无效） | **false** | **不开 suggestion**；persist_factor 已自动写 dead_end lesson，brainstorm 的 `factor_recent_lessons` 会检索到 → 避雷 |
+
+iterable=true 时调：
+```
+open_iteration {
+  from_xname: <当前因子>,
+  change_note: <suggested_iteration 核心,如 "换 60s horizon">,
+  reason: <基于 7 维数据的依据,一句话>,
+  iterable: true,
+  idea_id: state.idea_id
+}
+```
+同 (from, change) 已 open → 幂等返回已有 id，不重开。
+
+### 容错
+
+- realize/open 任何一步失败 → 记 retry_trace，**不阻塞 verdict 落库**（verdict 优先，迭代是增益）
+- persist_factor 返回 `ok:false`（因子没入库）→ 跳过整个迭代段（A/B 都做不了，外键不满足）
+
 ## 输出格式
 
 严格 JSON，无其他文字：
@@ -89,7 +138,8 @@ description: 量化因子结果评估。触发 `/evaluate <run_id> <factor_index
   "verdict": "pass 或 fail",
   "key_strengths": ["强项 1（含具体数字）", "强项 2"],
   "key_weaknesses": ["弱项 1（含具体数字）", "弱项 2"],
-  "suggested_iteration": "如果下次重做这个方向，应该尝试什么调整（换 Y horizon / 换品种 / 调窗口）"
+  "suggested_iteration": "如果下次重做这个方向，应该尝试什么调整（换 Y horizon / 换品种 / 调窗口）",
+  "iterable": "true/false — 本因子的 suggested_iteration 是否值得接续（pass=true；dead_end 有换维度重试价值=true；dead_end 方向无救=false，走 dead_end lesson 避雷）"
 }
 ```
 
