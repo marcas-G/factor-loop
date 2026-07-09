@@ -66,11 +66,13 @@ test("factor_similar 对不存在的 xname 抛错", async () => {
   );
 });
 
-test("所有 7 个 schema 名称正确", () => {
+test("所有 9 个 schema 名称正确", () => {
   const names = tools.ALL_FACTOR_DB_SCHEMAS.map(s => s.name);
   assert.deepEqual(names.sort(), [
     "factor_counts",
     "factor_detail",
+    "factor_ic_correlate",
+    "factor_ic_refresh",
     "factor_list",
     "factor_recent_lessons",
     "factor_search",

@@ -16,8 +16,6 @@ auto-loops.sh                 tmux 单车道循环驱动器(拉起 /research-loo
   evaluate/                   Step3 评估写库
 .claude/agents/
   run-factor-agent.md         单因子 write→submit→check→rewrite 状态机
-.claude/CONSTRAINTS.yaml      因子硬约束(brainstorm 校验)
-.claude/PRINCIPLES.md         研究指导思想
 
 pipeline-mcp/                 quant-mcp server(submit/check/run_save/persist 走它)
 pipeline-py/                  featuretool.py + factor_check.py(平台对接)

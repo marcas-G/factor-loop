@@ -17,7 +17,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 | 边界 | 必须立即做的第一个 tool call |
 |---|---|
-| Step 0 → Step 1 | `Skill brainstorm`（或读 inspiration-pool 抽 coords）|
+| Step 0 → Step 1 | `Skill brainstorm`（或按 IDEA_SOURCE 选 inspiration/hypothesis-pool 抽 coords）|
 | Step 1 → Step 2 | 在一个消息内并行发 3 个 `Task` (run-factor-agent) |
 | Step 2 → Step 3 | 对第一个 `check_done` factor 调 `Skill evaluate` |
 | Step 3 → Step 4 | `run_save {status: "done", finished_at: ...}` |
@@ -41,12 +41,12 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 ## Step 1 · brainstorm（嵌套调 brainstorm skill）
 
-1. 准备 idea（如未给）：
-   - 从 `/home/lgao/work/quant/pipeline-mcp/inspiration-pool.mjs` 抽 1 组 coords
-   - 调 LLM 把 coords 翻译成 30-80 字 idea
+1. 准备 idea（如未给）——按 `.claude/settings.json` 的 `IDEA_SOURCE` 二选一（默认 `inspiration`）：
+   - `inspiration`：从 `${CLAUDE_PROJECT_DIR}/pipeline-mcp/inspiration-pool.mjs` 抽 1 组 coords，调 LLM 翻译成 30-80 字 idea（发散思维模式，产 N 候选）
+   - `hypothesis`：从 `${CLAUDE_PROJECT_DIR}/pipeline-mcp/hypothesis-pool.mjs` 抽 1 组 coords，**先读 `.claude/hypothesis-framework.md`**，按三道门槛（G1 闭环闭合 / G2 因果链含微观E / G3 复杂度）构造 1 个合规假设作为 idea（收敛验证模式，产 1 个深挖假设）
    - 或用户直接给
-2. 调 Skill `brainstorm`，传 `{idea, n_factors: 3, run_id}`
-3. brainstorm skill 内部完成：读 CONSTRAINTS/PRINCIPLES → MCP 摸底（factor_counts/list/recent_lessons）→ MCP 检索（factor_search/detail/similar）→ 生成候选 → persist_idea + run_save(factors)
+2. 调 Skill `brainstorm`，传 `{idea, n_factors: 3, run_id, source}`
+3. brainstorm skill 内部完成：MCP 摸底（factor_counts/list/recent_lessons）→ MCP 检索（factor_search/detail/similar）→ 生成候选(全品种 feeds 约束见 brainstorm SKILL) → persist_idea + run_save(factors)
 4. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
 
 **连续失败处理**：brainstorm skill 内部 MCP 连续失败 3 次会自己 `run_save {status: "paused"}` 并停止；主会话检测到 `state.status == "paused"` 时中止后续 Step。
@@ -85,13 +85,22 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：最后一个 evaluate 返回后，**必须立即在同一回合**进入 Step 4：调 `run_save {status: "done", finished_at: <ISO>}`。禁止输出"所有因子评估完成"之类的纯文字回合。
 
-## Step 4 · 汇总报告
+## Step 4 · 汇总报告（含假设结论）
 
-1. 调 MCP `run_save {run_id, patch: {status: "done", finished_at: "<ISO timestamp>"}}`
-2. 向用户报告：
+1. **汇总假设结论**:读 `state.factors` 的 verdicts,回答本轮假设(`state.idea`)是否被验证:
+   - 过半 check_done 因子 pass → 假设**成立**(因子回应了假设)
+   - 多数 fail → 假设**否决**(因子否定了假设)
+   - 分歧 → **部分回应**(条件性成立,记哪类因子 pass / 哪类 fail)
+   - 无 check_done(全 failed)→ 假设**未验证**(因子没跑成,假设悬空)
+
+   记 state:`run_save {run_id, patch: {"hypothesis_verdict": "<成立/否决/部分/未验证>", "hypothesis_conclusion": "<一句话:假设被验证/否决/条件成立/悬空>"}}`
+
+2. 调 MCP `run_save {run_id, patch: {status: "done", finished_at: "<ISO timestamp>"}}`
+3. 向用户报告:
    - run_id
-   - N 个因子，各 failure_layer 分布
-   - check_done 因子的 verdict 分布（pass/fail 各几）
+   - **假设结论**(`hypothesis_verdict` + `hypothesis_conclusion`:本轮假设成立/否决/部分/未验证 + 一句话)
+   - N 个因子,各 failure_layer 分布
+   - check_done 因子的 verdict 分布(pass/fail 各几)
    - persisted 状态
 
 ## 错误处理

@@ -84,6 +84,16 @@ def _prepare_loaded_data(
         raise ValueError(f"Time column '{config.time_column}' not found. "
                          f"Available: {list(df.columns)}")
 
+    # 时间列容错:多文件 concat(merge_daily_xy)可能引入 NaT/空值,
+    # 先 coerce + drop 无效行(整行 drop 保持 x/y/time 对齐),再 sort/astype。
+    # 沿用本仓范式(factor_check.py 用 pd.to_numeric(errors="coerce") + dropna)。
+    _time_coerced = pd.to_numeric(df[config.time_column], errors="coerce")
+    _time_valid = _time_coerced.notna()
+    if not _time_valid.all():
+        df = df[_time_valid.values].reset_index(drop=True)
+        _time_coerced = _time_coerced[_time_valid]
+    df[config.time_column] = _time_coerced.values
+
     df = df.sort_values(config.time_column).reset_index(drop=True)
 
     x_cols, y_cols, time_col, weight_col = classify_columns(

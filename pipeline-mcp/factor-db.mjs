@@ -479,6 +479,11 @@ export function countEvaluated() {
   ).get().n;
 }
 
+// xname 是否已登记（换名唯一性检查用，轻量不抛错）。
+export function factorExists(xname) {
+  return !!db().prepare("SELECT 1 FROM factors WHERE xname = ?").get(xname);
+}
+
 export function recentLessons(k = 10) {
   return db().prepare(
     `SELECT id, type, scope, text, idea_id, factor_xname, created_ts

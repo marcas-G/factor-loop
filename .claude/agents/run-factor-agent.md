@@ -34,8 +34,8 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 本 agent 是 `write → submit → check → 落盘 → return` 状态机。**每步完成后立即下一步 tool call，禁止步骤间输出纯总结后结束回合。**
 
 **write 步内嵌（不调 Skill）**：本 agent **不调用任何 Skill**（tools 里无 Skill）。write 因子时：
-1. `Read /home/lgao/work/quant/.claude/skills/write-factor/SKILL.md`（获取框架 API / 模板 / 安全 / 命名规范，这是 write-factor 的完整规范）
-2. 按规范用 `Write` 生成 .h 到 `/home/lgao/work/quant/factors/<name>.h`
+1. `Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md`（获取框架 API / 模板 / 安全 / 命名规范，这是 write-factor 的完整规范）
+2. 按规范用 `Write` 生成 .h 到 `${CLAUDE_PROJECT_DIR}/factors/<name>.h`
    - **必须在 `#pragma once` 前写 frontmatter**（`// ---` YAML 块，含 xname/class_name/formula/tags/params/created_ts）：`formula` 取输入 spec.formula，`tags` 取输入 spec.tags。这是 `addFactorFromHFile` 入库时提取 formula_text/tags 的源头；漏写会导致入库三件套缺失。格式详见 write-factor/SKILL.md 的 frontmatter 规范。
 3. 立即进入 submit 步（run_save submitting + submit_factor）
 
@@ -70,9 +70,9 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 
 while True:
   if step == "write":
-    1. Read /home/lgao/work/quant/.claude/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
+    1. Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
        （质量/编译重试时：先 run_load 读 evidence.cause_text+diagnosis，再 Read SKILL.md 的 STL/运行期陷阱段对照修）
-    2. 按规范用 Write（首次生成）或 Edit（纠错改现有 .h）写到 /home/lgao/work/quant/factors/<name>.h
+    2. 按规范用 Write（首次生成）或 Edit（纠错改现有 .h）写到 ${CLAUDE_PROJECT_DIR}/factors/<name>.h
     3. 调 mcp__quant-mcp__run_save {
          run_id,
          patch: {
@@ -154,6 +154,8 @@ run_save {
 }
 ```
 
+**必须用点分 field(`factors.<index>.status` 等),不能整体 `factors.<index>`(会把 factor 对象整个替换,丢 name/factor_file/hypothesis/evidence)。run_save 会拒绝整体覆盖。**
+
 **注意：evidence 不要你写**。check_factor 工具内部已经把完整 evidence（含 factor_check 的 stdout 诊断、diagnosis）原样落盘到 `factors.<index>.evidence`，不经你的手。你只写 status / failure_layer / retry_trace / last_rewrite 这四个路由/重试字段。这样避免你的总结倾向导致 evidence 字段丢失或被改（历史 bug：stdout_tail 被清空、字段被凭空重命名）。
 
 ## 返回值
@@ -169,31 +171,9 @@ run_save {
 
 主会话从 state 读取 evidence / retry_trace / last_rewrite 等完整字段——**不依赖 return message 传 state**。return message 不带这些字段，避免 Claude 的总结倾向导致字段丢失。
 
-## STL 高频陷阱清单（rewrite 时对照）
+## STL/运行期陷阱
 
-每次 Read write-factor/SKILL.md 修代码时，对照以下清单（STL/运行期陷阱）：
-
-1. `std::deque` 不能调 `reserve()`；换 vector 或删 reserve
-2. `std::vector` 不能调 `push_front() / pop_front()`
-3. `std::accumulate` → `#include <numeric>`
-4. `std::cout / cerr` → `#include <iostream>`
-5. `std::unordered_map` → `#include <unordered_map>`
-6. `std::transform / sort / clamp / min / max` → `#include <algorithm>`
-7. `std::function` → `#include <functional>`
-8. `std::isfinite` / `std::tanh` / `std::log` → `#include <cmath>`
-9. `feed().bid(i)` / `feed().ask(i)` 返回 int64_t，与 double 运算前先 cast
-10. `feed().bidSize(i)` / `feed().askSize(i)` 返回 int
-11. `Feed::Order.level()` 返回 int，-1 表 trade/cross，0 是 best level
-12. 模板类的 using alias / typedef 必须放 public 区段
-13. 不要在 `calculateX()` 里调 `onEndBook()` 或反过来
-14. `onEndBook()` 做复杂计算，`calculateX()` 只做 `setXValue(0, XType(val))`
-
-**运行期崩溃陷阱（factor_runtime_crash / SIGABRT 134 / SIGSEGV 139 core dump 时对照——编译过但跑数据时崩）:**
-
-15. **所有 per-feed 容器（`vector`/`deque`/`array`）必须在 `initialize` 或 `onStarted` 里 resize 到 `_numFeeds`**，否则 `onEndBookSuper(feedId)` 里 `_container[feedId]` 越界 → SIGABRT。**这是运行期崩溃头号原因**（曾让 `_ppr_win` 未 resize 的因子被判"平台挂"误诊多轮）。
-16. feed 档位不足时 `bidSize/askSize(i)` 越界 → 用 `availableLevels = min(MaxLevels, min(bidNumLevels, askNumLevels))` 约束循环上界，`L==0` 直接返回。
-17. 除法/log 加 eps 保底（`std::max(v, 1e-20)`）+ 最终 `std::isfinite` 守卫，防 NaN/Inf 传播成 UB。
-18. 多 feed 因子：跨品种聚合只在主 feed（`feedId == _feedIndex`）触发输出，其余 feed 只更新各自状态；冷启动未就绪（容器空/样本不足）输出 0，不访问空容器。
+陷阱清单已归位 **write-factor/SKILL.md §6.5**(single source of truth)。纠错 rewrite 时,Read write-factor/SKILL.md 对照其 STL/运行期陷阱段(编译期 STL 误用 / 框架 API 类型 / 运行期崩溃 per-feed resize 越界),本 agent 不重复维护。
 
 ## 工具使用约束
 

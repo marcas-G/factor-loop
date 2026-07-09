@@ -75,7 +75,7 @@ export async function checkFactorProgrammatic(factor, submitResult, checkOutput)
 
   const result = await runPy(
     FACTOR_CHECK_PY,
-    ["run", "--skip-submit", "--names", featureKey, "--dir", checkOutput, "--mode", "full"],
+    ["run", "--skip-submit", "--names", featureKey, "--dir", checkOutput, "--mode", "full", "--force"],
     { timeoutSec: 86400 }
   );
 

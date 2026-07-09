@@ -283,7 +283,15 @@ def load_daily_dataframes(data_dir, date_list, start_col, max_cols, data_names):
         fp = os.path.join(data_dir, f"daily-{date_str}.xy")
         try:
             df = pd.read_csv(fp, header=None)
-            rt_ns = pd.to_numeric(df.iloc[:, 0], errors="coerce").astype("int64").values
+            # 时间列容错:多文件 concat 可能引入 NaT/空值/非数值行,
+            # 先 coerce + drop 无效行(整行 drop 保持 rt/x 对齐),再 astype int64。
+            # 沿用同范式(loader.py L90-95 / factor_check.py load_daily_dataframes)。
+            _rt_coerced = pd.to_numeric(df.iloc[:, 0], errors="coerce")
+            _rt_valid = _rt_coerced.notna()
+            if not _rt_valid.all():
+                df = df[_rt_valid.values].reset_index(drop=True)
+                _rt_coerced = _rt_coerced[_rt_valid]
+            rt_ns = _rt_coerced.values.astype("int64")
             if df.shape[1] < max_cols:
                 pad = pd.DataFrame(np.nan, index=df.index, columns=range(df.shape[1], max_cols))
                 df = pd.concat([df, pad], axis=1)
@@ -550,6 +558,7 @@ def compute_bucket_analysis(daily_dfs, group_a_cols, group_b_cols, n_groups=5):
         for b in group_b_cols:
             daily_ls = []
             daily_group_rets = []
+            daily_turnover = []
 
             for date_str, df in sorted(daily_dfs.items()):
                 v = df[[a, b]].dropna()
@@ -562,6 +571,9 @@ def compute_bucket_analysis(daily_dfs, group_a_cols, group_b_cols, n_groups=5):
                 ls = grp_ret.iloc[-1] - grp_ret.iloc[0] if n_groups > 1 else 0
                 daily_ls.append(ls)
                 daily_group_rets.append(grp_ret.to_dict())
+                # 换手:日内 X sign 反转次数(信号方向变化 = 调仓)
+                x_sign = np.sign(v[a].values)
+                daily_turnover.append(int(np.sum(np.diff(x_sign) != 0)))
 
             if len(daily_ls) < 3:
                 continue
@@ -586,6 +598,20 @@ def compute_bucket_analysis(daily_dfs, group_a_cols, group_b_cols, n_groups=5):
 
             # 年化 Sharpe（学习对方，用 L-S 日收益的标准差）
             annualized_sharpe = daily_spread_mean / daily_spread_std * np.sqrt(252) if daily_spread_std > 0 else 0
+
+            # 可交易性:换手 + 成本后 + 否决③ + 容量(固定严格约束,不依赖 volume)
+            turnover_arr = np.array(daily_turnover)
+            avg_turnover = float(turnover_arr.mean()) if len(turnover_arr) else 0.0
+            BPS_STRICT = 8     # 每次换手成本(严格:滑点2tick~3bps + 手续费~2bps + 缓冲3bps)
+            BPS_VETO3 = 16     # 否决③:成本翻倍
+            ls_net_8 = ls_arr - turnover_arr * BPS_STRICT / 1e4
+            ls_net_16 = ls_arr - turnover_arr * BPS_VETO3 / 1e4
+            sharpe_net_8 = ls_net_8.mean() / ls_net_8.std() * np.sqrt(252) if ls_net_8.std() > 0 else 0
+            sharpe_net_16 = ls_net_16.mean() / ls_net_16.std() * np.sqrt(252) if ls_net_16.std() > 0 else 0
+            veto3_cost_double = bool(sharpe_net_16 < 0)   # 否决③:成本翻倍夏普转负 → fail
+            CAPACITY_TURNOVER = 100    # 日换手 > 100 → 容量受限(只适合小资金)
+            capacity_risk = bool(avg_turnover > CAPACITY_TURNOVER)
+            # 注:tick 因子 sign 反转频繁(几千/日),成本后大概率转负——这正是严格堵高频"毛强净亏"
 
             avg_grp = {}
             for g in range(n_groups):
@@ -625,6 +651,12 @@ def compute_bucket_analysis(daily_dfs, group_a_cols, group_b_cols, n_groups=5):
                 "spread_drawdown": round(spread_drawdown, 6),
                 "monotonic": direction,
                 "n_days": len(daily_ls),
+                # 可交易性(第三维 + 否决③)
+                "avg_turnover_per_day": round(avg_turnover, 2),
+                "sharpe_net_8bps": round(sharpe_net_8, 4),
+                "sharpe_net_16bps": round(sharpe_net_16, 4),
+                "veto3_cost_double": veto3_cost_double,
+                "capacity_risk": capacity_risk,
             })
             detail[pair_key] = {
                 "avg_group": {str(k): round(v, 8) for k, v in sorted(avg_grp.items())},
@@ -1619,7 +1651,7 @@ def cmd_run(args):
         print(f"{'='*60}")
 
         if mode in ("feval", "full"):
-            run_feval_batch(output_dir, feval_path)
+            run_feval_batch(output_dir, feval_path, force=args.force)
 
         if mode in ("pearson", "deep", "full"):
             run_analysis_batch(output_dir, mode, DEFAULT_START_COL, DEFAULT_HIGHLIGHT_LAST_N,
@@ -1657,7 +1689,7 @@ def cmd_analyze(args):
             print(f"  自动检测日期范围: {start_date} ~ {end_date}")
 
     if mode in ("feval", "full"):
-        run_feval_batch(output_dir, feval_path)
+        run_feval_batch(output_dir, feval_path, force=args.force)
 
     if mode in ("pearson", "deep", "full"):
         run_analysis_batch(output_dir, mode, DEFAULT_START_COL, DEFAULT_HIGHLIGHT_LAST_N,
