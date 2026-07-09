@@ -103,20 +103,54 @@ export const DIMENSIONS = {
     "跨周期对齐（不同时间尺度信号叠加）",
   ],
   transform: [
+    // —— 基础时序 ——
     "原始值（level）",
     "一阶差分",
+    "二阶差分（加速度）",
     "对数收益",
-    "z-score",
-    "排名（rank）",
-    "分位数",
+    "滞后项（lag）",
+    "EMA / WMA（指数/加权移动平均）",
     "滚动均值",
     "滚动标准差",
     "滚动偏度/峰度",
+    "滚动极值（滚动 min/max）",
+    "自相关 ACF / PACF、AR 系数",
+    // —— 标准化 / 分布变换 ——
+    "z-score",
+    "排名（rank）",
+    "分位数",
+    "去极值 winsorize / MAD",
+    "Box-Cox / Yeo-Johnson 正态化",
+    "分位数变换（映射到正态）",
+    "sigmoid / tanh 压缩",
+    // —— 回归 / 统计建模 ——
+    "OLS / 稳健回归 beta、残差",
+    "滚动回归（时变 beta）",
+    "GARCH / EGARCH 波动率建模",
+    "PCA / 统计因子模型",
+    "分位数回归",
     "协整残差",
+    // —— 信号处理 ——
     "哈尔小波",
+    "HP 滤波（趋势-周期分解）",
+    "卡尔曼滤波（隐状态估计）",
+    "傅里叶 / STFT（频域分解）",
+    "希尔伯特变换（瞬时相位/幅度）",
+    // —— 信息论 ——
     "信息熵",
     "互信息",
-    "滞后项",
+    "KL 散度（分布漂移）",
+    "转移熵（信息流方向）",
+    // —— 非线性 / 阈值 ——
+    "阈值分段（piecewise）",
+    "指示函数 / 哑变量（事件触发）",
+    "符号变换、绝对值",
+    "多项式展开",
+    "交互项（A×B）",
+    // —— 距离 / 相似 ——
+    "DTW（动态时间规整）",
+    "马氏距离",
+    "余弦相似度",
   ],
   state: [
     "高波动 vs 低波动（波动率分位）",
@@ -179,10 +213,10 @@ const COMPATIBILITY_RULES = [
     if (/换月/.test(st) && !/跨合约/.test(ds)) return false;
     return true;
   },
-  // 4. 多变量变换 vs 关系层：互信息/协整/小波/信息熵需要至少两个变量
+  // 4. 多变量变换 vs 关系层：需要至少两个变量/序列的变换,单品种拒绝
   (c) => {
     const { transform: tf, relation: rel } = c;
-    const needMultiVar = /互信息|协整|小波|信息熵/.test(tf);
+    const needMultiVar = /互信息|协整|小波|信息熵|PCA|因子模型|Fama-MacBeth|DTW|马氏距离|余弦相似|转移熵|交互项/.test(tf);
     if (needMultiVar && rel === "单品种") return false;
     return true;
   },
@@ -193,10 +227,10 @@ const COMPATIBILITY_RULES = [
     if (isMicro && /跨日|跨周/.test(ts)) return false;
     return true;
   },
-  // 6. 低频变换 vs 时间尺度：协整/小波需要足够长的窗口
+  // 6. 低频变换 vs 时间尺度：需要长窗口样本的变换,短尺度拒绝(卡尔曼可在线递推,不约束)
   (c) => {
     const { transform: tf, time_scale: ts } = c;
-    const isLowFreq = /协整|小波/.test(tf);
+    const isLowFreq = /协整|小波|GARCH|EGARCH|HP 滤波|傅里叶|STFT|希尔伯特|PCA|因子模型|分位数回归/.test(tf);
     if (isLowFreq && /tick|秒级|1 分钟|5 分钟/.test(ts)) return false;
     return true;
   },

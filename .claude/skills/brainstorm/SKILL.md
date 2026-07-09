@@ -9,7 +9,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 
 ## 输入
 
-- `idea`（可选）：研究 idea 文本（30-80 字）。未提供则从 inspiration-pool 抽 coords 自己拼一句。
+- `idea`（可选）：研究 idea 文本（30-80 字）。未提供则按 `source` 从对应 pool 抽 coords 翻译/构造一句。
+- `source`（可选）：idea 来源，`inspiration`（默认，发散思维）或 `hypothesis`（收敛验证——读 `.claude/hypothesis-framework.md` 按三道门槛构造合规假设）。
 - `n_factors`（可选）：候选数，默认 3。
 - `run_id`（被 research-loop 嵌套调用时传入）：用于写 state.factors。
 
@@ -44,11 +45,9 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 | `factor_similar {xname, k}` | 给定 xname 找相似（要求因子已入库，brainstorm 一般用不上）|
 | `list_open_iterations {top_k, source_status?}` | **检索待接续的迭代建议**（open suggestions，按 priority 降序）。库内 pass 精进 / dead_end 重试的未兑现建议。有相关的就接续成候选，演进链往下长 |
 
-## 硬约束 / 指导思想
+## 全品种约束
 
-- 硬约束：`/home/lgao/work/quant/.claude/CONSTRAINTS.yaml`（必须满足）
-- 指导思想：`/home/lgao/work/quant/.claude/PRINCIPLES.md`（参考）
-- 文件不存在视为无约束
+候选因子 `categories` 必须含全部 feeds **[AG, CU, AU, AL, NI]**(白银/铜/黄金/铝/镍),全品种适用,不挑不缺。
 
 ## 研究流程
 
@@ -121,7 +120,7 @@ persist_candidates {
       "intuition": "为什么有效 - 直觉假设（市场机制层面）",
       "diff_check": "去掉 [X 维度] 后会退化成什么标准因子？差异点是什么？",
       "coord_usage": "本因子如何使用 idea 中的研究要素（数据/算子/时间/关系/变换/状态）",
-      "categories": ["硬约束 CONSTRAINTS.yaml 的全部 feeds —— 因子要求全品种适用，不挑不缺（当前为 [AG,CU,AU,AL,NI]）"],
+      "categories": ["AG","CU","AU","AL","NI"],  // 全品种适用,不挑不缺
       "tags": ["按算子/数据/变换给 3-5 个英文标签，从 formula+intuition 提炼，参考库内老因子风格(order_book/imbalance/cancel_flow/spoofing/exponential_decay/hhi/weighted_depth 等)"],
       "params": {},
       "iterates_from": "接续 open iteration 时填（来自 list_open_iterations 的 from_xname）；不接续则省略",

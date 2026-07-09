@@ -86,11 +86,40 @@ async function doRunSave(runId, patch) {
   const state = await runLoad(runId);
   for (const [key, value] of Object.entries(patch)) {
     if (key.includes(".")) {
+      // 防御:factors.<数字>(2段)整体覆盖 factor 对象,会丢 name/factor_file/hypothesis/evidence 等字段,拒绝
+      const parts = key.split(".");
+      if (parts.length === 2 && parts[0] === "factors" && /^\d+$/.test(parts[1])) {
+        return { ok: false, error: `禁止整体覆盖 factor 对象: "${key}"。用点分 field(如 "factors.${parts[1]}.status"),否则丢 name/factor_file/evidence 等字段` };
+      }
       setByPath(state, key, value);
     } else {
+      // 防御:顶级 factors(整个数组)整体覆盖,拒绝
+      if (key === "factors") {
+        return { ok: false, error: `禁止整体覆盖 factors 数组: "${key}"。用点分路径(如 "factors.0.status")` };
+      }
       state[key] = value;
     }
   }
+  await writeAtomic(statePath(runId), state);
+  return { ok: true };
+}
+
+// runApply: 串行 load → fn(state) → write。供"初始化式整体写"使用（如 persist_candidates
+// 需整体写 factors 数组 + idea/idea_id）。fn 直接改 state 对象，不受 runSave 的 factors
+// 整体覆盖防御限制。仍走 _saveChains 串行，避免与并发 runSave 冲突。
+export async function runApply(runId, fn) {
+  const prev = _saveChains.get(runId) || Promise.resolve();
+  const next = prev.then(() => doRunApply(runId, fn));
+  _saveChains.set(runId, next);
+  next.finally(() => {
+    if (_saveChains.get(runId) === next) _saveChains.delete(runId);
+  });
+  return next;
+}
+
+async function doRunApply(runId, fn) {
+  const state = await runLoad(runId);
+  fn(state);
   await writeAtomic(statePath(runId), state);
   return { ok: true };
 }

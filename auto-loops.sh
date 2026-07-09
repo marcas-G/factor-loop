@@ -3,8 +3,8 @@
 # 完成检测:读 quant run 的 state.json status==done(程序级铁信号,不猜屏幕文字)
 #
 # 用法:
-#   nohup bash auto-loops.sh 1 > /home/lgao/work/quant/logs/loops/auto.out 2>&1 &
-#   tail -f /home/lgao/work/quant/logs/loops/auto.out     # 驱动日志
+#   nohup bash auto-loops.sh 1 > logs/loops/auto.out 2>&1 &
+#   tail -f logs/loops/auto.out     # 驱动日志(相对项目根)
 #   tmux attach -t rloop1                                  # 看当前 session(Ctrl-b d 退出)
 #
 # 停止:
@@ -15,8 +15,10 @@
 
 set -uo pipefail
 N="${1:-1}"
-WORKDIR="/home/lgao/work/quant"
-RUNDIR="/home/lgao/.quant-runs"           # research run state 目录(每个 run_id 一个子目录)
+ROUNDS="${ROUNDS:-0}"   # 每车道跑几轮(0=无限,默认);cron 定时用(ROUNDS=10 跑 10 轮自停)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 脚本所在目录 = 项目根
+WORKDIR="$SCRIPT_DIR"
+RUNDIR="${RUNDIR:-$HOME/.quant-runs}"     # research run state 目录(每个 run_id 一个子目录;默认 $HOME,可环境变量覆盖)
 MAXWAIT="${MAXWAIT:-1440}"                 # 单轮最多 1440×30s = 12h;check 等 DAG 一直轮询(平台排队不该放弃),这里给足兜底别误杀
 LOGROOT="$WORKDIR/logs/loops"
 
@@ -33,7 +35,7 @@ get_status() {
 # 单车道循环:每轮一个全新 session,跑完销毁,开下一个
 run_lane() {
   local lane="$1" sess="rloop$1" round=0 hit t before latest st
-  while true; do
+  while [ "$ROUNDS" -eq 0 ] || [ "$round" -lt "$ROUNDS" ]; do
     round=$((round+1))
     echo "[$(date +%H:%M:%S)] 车道$lane === 第 $round 轮:开新 session ==="
     tmux kill-session -t "$sess" 2>/dev/null
@@ -57,6 +59,7 @@ run_lane() {
     echo "[$(date +%H:%M:%S)] 车道$lane 第 $round 轮结束($([ $hit = 1 ] && echo "完成 status=$st" || echo "超时兜底"))→ session 销毁,开下一个"
     sleep 6
   done
+  echo "[$(date +%H:%M:%S)] 车道$lane 跑完 ${ROUNDS} 轮,退出"
 }
 
 for ((i=1; i<=N; i++)); do

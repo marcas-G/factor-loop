@@ -23,7 +23,7 @@ import path from "node:path";
 const FACTOR_NAMES = ["ic_mean", "ic_ir", "icir", "spearman_r", "sign_match_rate", "score"];
 
 // 简单 CSV 行解析：支持引号字段（含逗号）和转义双引号 ("")
-function parseCsvLine(line) {
+export function parseCsvLine(line) {
   const cells = [];
   let cur = "";
   let inQuotes = false;
@@ -44,7 +44,7 @@ function parseCsvLine(line) {
   return cells;
 }
 
-function readCsv(filePath) {
+export function readCsv(filePath) {
   if (!fs.existsSync(filePath)) return null;
   const text = fs.readFileSync(filePath, "utf8").trim();
   if (!text) return null;
@@ -234,6 +234,27 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
     }
   }
 
+  // ---- 2b. bucket_analysis_summary.csv：可交易性(换手/成本后/容量,factor_check 算)----
+  const bucketCsv = findFirst(checkOutput, [`bucket_analysis_summary.csv`, `${xname}/dailyX/bucket_analysis_summary.csv`]);
+  const bucketRows = bucketCsv ? readCsv(bucketCsv)?.rows : null;
+  if (bucketRows && bucketRows.length) {
+    const best = bucketRows
+      .map(r => ({ s: num(r.sharpe_net_8bps), row: r }))
+      .filter(x => x.s != null)
+      .sort((a, b) => Math.abs(b.s) - Math.abs(a.s));
+    if (best.length) {
+      const b = best[0].row;
+      result.seven_dim_best.tradability = {
+        avg_turnover_per_day: num(b.avg_turnover_per_day),
+        sharpe_net_8bps: num(b.sharpe_net_8bps),
+        sharpe_net_16bps: num(b.sharpe_net_16bps),
+        veto3_cost_double: bool(b.veto3_cost_double),
+        capacity_risk: bool(b.capacity_risk),
+        pair: pairLabel(b),
+      };
+    }
+  }
+
   // ---- 3. deep_summary.csv：因子级 8 行摘要 ----
   const deepSummaryCsv = findFirst(checkOutput, [
     `all_factors_deep_summary.csv`,
@@ -279,4 +300,19 @@ export function extractMetricsFromDailyIc(dailyIcPreview) {
   const sharpe = find(/Sharpe[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)/i);
   const rankIc = find(/Rank\s*IC[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)/i);
   return { ic_mean: icMean, icir, sharpe, rank_ic: rankIc };
+}
+
+// check_output_missing 时检测因子值是否全零：读 feval/screening.csv 的 zero_ratio 列 max。
+// 全零(zero_ratio>=0.999) + daily_ic 缺失 = DAG 缓存陷阱特征（代码对但缓存旧全零结果）。
+// 文件缺失/无数据 → false（无法判全零，不触发换名）。
+export function isAllZeroFromScreening(checkOutput, featureKey) {
+  const screeningPath = path.join(checkOutput, featureKey, "dailyX", `${featureKey}_feval`, "screening.csv");
+  const csv = readCsv(screeningPath);
+  if (!csv || !csv.rows || !csv.rows.length) return false;
+  let maxZero = 0;
+  for (const r of csv.rows) {
+    const z = num(r.zero_ratio);
+    if (z != null && z > maxZero) maxZero = z;
+  }
+  return maxZero >= 0.999;
 }

@@ -2,7 +2,7 @@
 
 import * as factorDb from "../../factor-db.mjs";
 import { persistVerdict } from "../../stages/persist.mjs";
-import { runLoad, runSave } from "../lib/run-store.mjs";
+import { runLoad, runApply } from "../lib/run-store.mjs";
 
 export const persistIdeaSchema = {
   name: "persist_idea",
@@ -130,7 +130,13 @@ export async function persistCandidatesHandler({ run_id, idea_text, factors }) {
       }
     }
   }
-  await runSave(run_id, { idea: idea_text, idea_id: ideaId, factors: fullFactors });
+  // 用 runApply 整体写 idea/idea_id/factors：runSave 的防御会拒绝顶级 factors 数组覆盖
+  // （brainstorm 是"初始化式"写入，factors 从无到有，需绕过该防御）。仍走串行链避免并发冲突。
+  await runApply(run_id, (state) => {
+    state.idea = idea_text;
+    state.idea_id = ideaId;
+    state.factors = fullFactors;
+  });
   return { idea_id: ideaId, n_factors: fullFactors.length, claimed };
 }
 

@@ -31,10 +31,17 @@ test("decideFailureLayer: runtime locus + 非崩溃 exit≠0 → factor_runtime_
   assert.equal(d.layer, "factor_runtime_error");
 });
 
-test("decideFailureLayer: setup/infra locus → platform_transient（不重写因子）", () => {
-  const d = decideFailureLayer(triage({ locus: "setup", rootTask: "GenerateXs.zip_xy_files", exitCode: null }));
+test("decideFailureLayer: setup/infra locus + 信号 → platform_transient（不重写因子）", () => {
+  // 实现语义：有确凿信号(exitCode/signals)才 platform_transient；无信号不甩锅平台
+  const d = decideFailureLayer(triage({ locus: "setup", rootTask: "GenerateXs.zip_xy_files", exitCode: 1, signals: { compile: [], crash: [], traceback: [], exit_codes: ["1=zip 失败"] } }));
   assert.equal(d.layer, "platform_transient");
   assert.equal(d.diagnosis, null);
+});
+
+test("decideFailureLayer: setup/infra locus + 无信号 → check_failed（不甩锅平台）", () => {
+  // signals 全空 + exitCode null（log 缺失/分诊失败）→ check_failed，避免无据甩锅平台
+  const d = decideFailureLayer(triage({ locus: "setup", rootTask: "GenerateXs.configs", exitCode: null }));
+  assert.equal(d.layer, "check_failed");
 });
 
 // —— 端到端：真实 Airflow 日志 → triageFailure → decideFailureLayer ——

@@ -1,5 +1,6 @@
 {
-  "_comment": "复制为 settings.json 后,把 QUANT_MCP_RUNS_ROOT 改成你的 run state 目录。${CLAUDE_PROJECT_DIR} 由 Claude Code 自动展开为仓库根,无需改。",
+  "_comment": "复制为 settings.json 后,把 QUANT_MCP_RUNS_ROOT 改成你的 run state 目录。${CLAUDE_PROJECT_DIR} 由 Claude Code 自动展开为仓库根,无需改。IDEA_SOURCE 选 idea 来源:inspiration(启发池,默认)/hypothesis(假设框架,读 .claude/hypothesis-framework.md)。",
+  "IDEA_SOURCE": "inspiration",
   "mcpServers": {
     "quant-mcp": {
       "command": "node",

@@ -77,6 +77,8 @@ calculateX()                → 【框架自动调用】在 onEndBook() 之后�
 | 累计成交量 | `feed().totalVolume()` | `int64_t` |
 | 累计成交额 | `feed().turnover()` | `double` |
 
+> ⚠️ **成交价信号陷阱**：`feed().trade()`（最近成交价）在**离线回测数据里恒为 0**（Book 快照未填该字段）。任何**成交价驱动的因子信号**（Δlast_trade_price 方向/连续性/位移）**必须**在 `receive(const Feed::Trade& data)` 里用 `data.lastTradePrice()`，不要在 `onEndBook()` 用 `feed().trade()`——否则因子值 100% 全零（zero_ratio=1.0 → check_output_missing）。累计量 `totalVolume()`/`turnover()` 在 `receive(Trade)` 里用 `feed()` 取则正常。
+
 **时间：**
 
 | 想要什么 | API | 返回类型 |
@@ -107,7 +109,7 @@ calculateX()                → 【框架自动调用】在 onEndBook() 之后�
 
 | 想要什么 | API | 返回类型 | 备注 |
 |----------|-----|----------|------|
-| 成交价格 | `data.lastTradePrice()` | `int64_t` | mantissa（待确认） |
+| 成交价格 | `data.lastTradePrice()` | `int64_t` | mantissa（**成交价信号唯一可靠来源**，见 §2.2 警示） |
 | tick成交均价 | `data.averagePrice()` | `double` | |
 | 成交量 | `data.quantity()` | `int32_t` | |
 | 成交方向 | `data.side()` | `SideT` | BUY=主动买，SELL=主动卖 |
@@ -441,6 +443,38 @@ void onEndBookSuper(FeedNumberT feedId) {
 6. **不要过度工程化** — 除法前简单的 `> EPS` 检查通常就足够了
 
 **不要**在因子里包含完整的 safeMath 工具集（sanitizeValue, safeDivide, safeLog, safePow），除非因子确实需要全部。安全级别应与计算复杂度匹配。
+
+---
+
+## 6.5 STL/运行期陷阱（编译/运行期正确性）
+
+§6 管计算安全(判零/isfinite),本节管**编译期 STL 误用**和**运行期崩溃**——历史高频踩坑点,write/rewrite 时对照。
+
+**编译期(STL 误用 → 编译错)**:
+1. `std::deque` 不能调 `reserve()`;换 vector 或删 reserve
+2. `std::vector` 不能调 `push_front() / pop_front()`
+3. `std::accumulate` → `#include <numeric>`
+4. `std::cout / cerr` → `#include <iostream>`
+5. `std::unordered_map` → `#include <unordered_map>`
+6. `std::transform / sort / clamp / min / max` → `#include <algorithm>`
+7. `std::function` → `#include <functional>`
+8. `std::isfinite` / `std::tanh` / `std::log` → `#include <cmath>`
+9. 模板类的 using alias / typedef 必须放 public 区段
+
+**框架 API 类型**:
+10. `feed().bid(i)` / `feed().ask(i)` 返回 int64_t,与 double 运算前先 cast
+11. `feed().bidSize(i)` / `feed().askSize(i)` 返回 int
+12. `Feed::Order.level()` 返回 int,-1 表 trade/cross,0 是 best level
+13. 不要在 `calculateX()` 里调 `onEndBook()` 或反过来
+14. `onEndBook()` 做复杂计算,`calculateX()` 只做 `setXValue(0, XType(val))`
+15. **`InitArgs` 字段访问必须 `_feedIndex`(带下划线前缀)**,不是 `feedIndex`——`args.feedIndex` 编译失败(`has no member named 'feedIndex'; did you mean '_feedIndex'`)。`_feedWrappers` 同理。types.h 声明无下划线但平台编译环境实际带下划线。
+16. **成交价信号**(`last_trade_price` 方向/连续性/位移)必须 `receive(const Feed::Trade& data)` 用 `data.lastTradePrice()`;`onEndBook()` 里 `feed().trade()` 在离线数据恒 0 → 因子全零 `check_output_missing`(见 §2.2 警示)。
+
+**运行期崩溃(编译过但跑数据崩 → SIGABRT 134 / SIGSEGV 139 core dump)**:
+17. **所有 per-feed 容器(`vector`/`deque`/`array`)必须在 `initialize` 或 `onStarted` 里 resize 到 `_numFeeds`**,否则 `onEndBookSuper(feedId)` 里 `_container[feedId]` 越界 → SIGABRT。**运行期崩溃头号原因**。
+18. feed 档位不足时 `bidSize/askSize(i)` 越界 → 用 `availableLevels = min(MaxLevels, min(bidNumLevels, askNumLevels))` 约束循环上界,`L==0` 直接返回。
+19. 除法/log 加 eps 保底(`std::max(v, 1e-20)`)+ 最终 `std::isfinite` 守卫,防 NaN/Inf 传播成 UB。
+20. 多 feed 因子:跨品种聚合只在主 feed(`feedId == _feedIndex`)触发输出,其余 feed 只更新各自状态;冷启动未就绪(容器空/样本不足)输出 0,不访问空容器。
 
 ---
 
