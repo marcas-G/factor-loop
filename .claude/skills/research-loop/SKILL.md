@@ -85,20 +85,25 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：最后一个 evaluate 返回后，**必须立即在同一回合**进入 Step 4：调 `run_save {status: "done", finished_at: <ISO>}`。禁止输出"所有因子评估完成"之类的纯文字回合。
 
-## Step 4 · 汇总报告（含假设结论）
+## Step 4 · 汇总报告（含结论）
 
-1. **汇总假设结论**:读 `state.factors` 的 verdicts,回答本轮假设(`state.idea`)是否被验证:
-   - 过半 check_done 因子 pass → 假设**成立**(因子回应了假设)
-   - 多数 fail → 假设**否决**(因子否定了假设)
-   - 分歧 → **部分回应**(条件性成立,记哪类因子 pass / 哪类 fail)
-   - 无 check_done(全 failed)→ 假设**未验证**(因子没跑成,假设悬空)
+1. **汇总结论**——按 IDEA_SOURCE 区分(读 state.factors 的 verdicts):
+   - **hypothesis 模式**:回答**假设是否被验证**(idea 是合规假设,三道门槛构造):
+     - 过半 check_done pass → 假设**成立**(因子回应了假设)
+     - 多数 fail → 假设**否决**(因子否定了假设)
+     - 分歧 → **部分回应**(条件性成立,记哪类 pass / 哪类 fail)
+   - **inspiration 模式**:回答**探索发现**(idea 是发散拼句,非严格假设):
+     - 这轮 idea 的因子 pass/fail 分布(探索结果)
+     - key 教训(成功经验 / dead_end 方向)
+     - 下次探索方向(基于教训,该深挖/避开什么)
+   - 无 check_done(两种模式)→ **未验证**(因子没跑成,悬空)
 
-   记 state:`run_save {run_id, patch: {"hypothesis_verdict": "<成立/否决/部分/未验证>", "hypothesis_conclusion": "<一句话:假设被验证/否决/条件成立/悬空>"}}`
+   记 state:`run_save {run_id, patch: {"idea_verdict": "<hypothesis: 成立/否决/部分 | inspiration: 有效/无效/部分>", "idea_conclusion": "<一句话结论>"}}`
 
 2. 调 MCP `run_save {run_id, patch: {status: "done", finished_at: "<ISO timestamp>"}}`
 3. 向用户报告:
    - run_id
-   - **假设结论**(`hypothesis_verdict` + `hypothesis_conclusion`:本轮假设成立/否决/部分/未验证 + 一句话)
+   - **结论**(`idea_verdict` + `idea_conclusion`:hypothesis 模式=假设成立/否决;inspiration 模式=探索有效/无效 + 教训/方向)
    - N 个因子,各 failure_layer 分布
    - check_done 因子的 verdict 分布(pass/fail 各几)
    - persisted 状态

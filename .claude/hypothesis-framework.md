@@ -122,7 +122,7 @@
 
 ## 4. 假设登记模板(三道门槛总纲)
 
-接 `data-lens/lens_hypothesis` 的 `hypotheses.jsonl`。**必须先于 IC 写**。
+假设登记到 `state.factors[].hypothesis`(brainstorm 拼 `intuition` + `diff_check` + `coord_usage`),经 `persist_idea` / `persist_candidates` 写 `ideas` 表 + state;**必须先于 IC 写**(先验性)。
 
 ```
 利润来源:  L1/L2/L3/L5(L4 在 500ms 失效;可组合)     ← 第一道门槛
@@ -231,11 +231,3 @@ L0 字段 → L1a 原语事件(字段差分) → L1b 构造观测量(统计才�
 - n 越高,自由度越大,n≥2 必须有可复述的闭环+机制逻辑(因果链 ②③)。
 - DSP/构造量类因子天然 n 偏高,门槛更严。
 - 这道防线 + §2 闭环 + §4 三道门槛,层层过滤。
-
----
-
-## 7. 衔接与后续
-
-- **本框架 ↔ data-lens**:`lens_hypothesis` 登记(利润来源 L + 闭环 5 问 + 因果链);`lens_compare` 查重时,同(L, 闭环核心)→ 同假设换皮。
-- **本框架的诚实定位**:它是**因果思维脚手架 + 质量过滤器**,不是灵感引擎。洞察来自人对微观结构和赚钱逻辑的理解,框架逼你把洞察说透、把伪装成洞察的特征工程挡住。
-- **后续**:因子入库(`onboard-factors`)强制走 §4 三道门槛,利润来源/闭环/单间隔事件任一缺失即拒收。
