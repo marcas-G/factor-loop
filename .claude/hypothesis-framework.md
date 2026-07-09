@@ -122,7 +122,7 @@
 
 ## 4. 假设登记模板(三道门槛总纲)
 
-接 `data-lens/lens_hypothesis` 的 `hypotheses.jsonl`。**必须先于 IC 写**。
+假设登记到 `state.factors[].hypothesis`(brainstorm 拼 `intuition` + `diff_check` + `coord_usage`),经 `persist_idea` / `persist_candidates` 写 `ideas` 表 + state;**必须先于 IC 写**(先验性)。
 
 ```
 利润来源:  L1/L2/L3/L5(L4 在 500ms 失效;可组合)     ← 第一道门槛
