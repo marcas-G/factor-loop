@@ -42,6 +42,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 | `factor_search {query, k}` | 全文检索 lessons（trigram，关键词 ≥3 字）—— 语义检索的补充，找历史教训文本 |
 | `factor_detail {xname}` | 单因子全貌：基本信息 + 最近 10 条 evals + 迭代链 + tags |
 | `factor_similar {xname, k}` | 给定 xname 找相似（要求因子已入库，brainstorm 一般用不上）|
+| `list_open_iterations {top_k, source_status?}` | **检索待接续的迭代建议**（open suggestions，按 priority 降序）。库内 pass 精进 / dead_end 重试的未兑现建议。有相关的就接续成候选，演进链往下长 |
 
 ## 硬约束 / 指导思想
 
@@ -70,6 +71,12 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - 用 1-2 个具体术语（如 `大单冲击` / `撤单偏度`）调 `factor_search`，捞语义检索漏掉的历史教训
 - 只在语义检索结果不够覆盖 idea 时用，不要取代语义检索
 
+**检索待接续的迭代建议**（接续演进链）：
+
+- `list_open_iterations {top_k: 5}` — 拿 priority 最高的待接续建议（pass 精进优先、强因子优先）
+- 若某建议的 from 因子与 idea 相关、或 priority 很高：**优先把它接续成本轮一个候选**（标 `iterates_from` + `suggestion_id`，在 `coord_usage` 说明接续与差异）。这让库内"已验证方向"演进下去，而不是每轮从零随机
+- 这是"软注入"：不强制名额，但**接续高价值建议 > 凭空新造**
+
 ### 第 3 步 · 基于证据出候选
 
 生成 `n_factors` 个差异化候选，每个候选在 `db_research` 字段显式回答：
@@ -85,6 +92,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 3. `intuition` 具体到市场机制（如"套保资金在换月期的行为模式"），不泛泛"市场非有效"
 4. `diff_check`：去掉关键 [维度] 后会退化成什么标准因子？本质差异在哪？
 5. `coord_usage`：本因子如何用 idea 中的研究要素（数据/算子/时间/关系/变换/状态）
+6. **接续优先**：若第 2 步检索到与 idea 相关的 open iteration 建议，至少 1 个候选应是接续候选（带 `iterates_from` + `suggestion_id`），并在 `coord_usage`/`diff_check` 里说明接续关系与差异点。没有相关 open 建议时，全部新造
 
 ## 持久化（写完候选后必须做）
 
@@ -116,6 +124,8 @@ persist_candidates {
       "categories": ["硬约束 CONSTRAINTS.yaml 的全部 feeds —— 因子要求全品种适用，不挑不缺（当前为 [AG,CU,AU,AL,NI]）"],
       "tags": ["按算子/数据/变换给 3-5 个英文标签，从 formula+intuition 提炼，参考库内老因子风格(order_book/imbalance/cancel_flow/spoofing/exponential_decay/hhi/weighted_depth 等)"],
       "params": {},
+      "iterates_from": "接续 open iteration 时填（来自 list_open_iterations 的 from_xname）；不接续则省略",
+      "suggestion_id": "接续时填（来自 list_open_iterations 的 suggestion_id）；不接续则省略",
       "db_research": {
         "searched": ["检索词1", "检索词2"],
         "found_dead_ends": ["命中的 dead_end 教训或因子（如无写 [])"],
