@@ -1,6 +1,6 @@
 // 组 5: 写库工具（2 个）。复用 stages/persist.mjs 的 persistVerdict 函数。
 
-import * as factorDb from "../../factor-db.mjs";
+import * as factorDb from "../../lib/factor-db.mjs";
 import { persistVerdict } from "../../stages/persist.mjs";
 import { runLoad, runApply } from "../lib/run-store.mjs";
 

@@ -107,6 +107,9 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
     deep_best: {},
     top_pairs: [],
     failure_reasons: {},
+    // 新增指标（来自 factor_check 深度分析 [6/7][7/7]）
+    stationarity: {},
+    transform_family: {},
   };
 
   // ---- 1. decision_summary.csv：聚合因子级 decision 分布 + best score ----
@@ -273,6 +276,9 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
       else if (analysis === "Signal Stability") result.deep_best.signal_instability_pct = value;
       else if (analysis === "Monthly IC" && metric === "best_icir") result.deep_best.monthly_icir = value;
       else if (analysis === "Monthly IC" && metric === "best_ic_mean") result.deep_best.monthly_ic_mean = value;
+      // 新增指标（[6/7][7/7]）
+      else if (analysis === "Stationarity") result.stationarity[metric] = value;
+      else if (analysis === "Transform Family") result.transform_family[metric] = value;
     }
   }
 

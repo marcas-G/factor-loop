@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
-import { triageFailure } from "../../airflow-log.mjs";
+import { triageFailure } from "../../infra/airflow-log.mjs";
 import { decideFailureLayer } from "../../stages/check.mjs";
 
 // —— 纯函数：合成 triage 对象覆盖各决策分支（不依赖网络） ——

@@ -18,7 +18,7 @@
 // 需要先把 factor 写进 factors 表（status=failed 或 draft），再写 lesson，但 evaluation=fail。
 // 当前实现：verdict=fail 时也写 factors（status=dead_end）+ evals（status=dead_end，更新 latest_ic/icir）。
 
-import * as factorDb from "../factor-db.mjs";
+import * as factorDb from "../lib/factor-db.mjs";
 
 // 从 seven_dim_summary 提取 metrics，适配三种历史结构：
 //   1. 嵌套（期望）：{seven_dim_best: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
@@ -94,6 +94,12 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       });
       console.log(`  [db] success_pattern lesson 入库 id=${lessonId}`);
 
+      // 假设级支持度聚合（贝叶斯平滑，因子二元 verdict → 假设连续分数）
+      if (ideaId != null) {
+        const agg = factorDb.updateIdeaSupportScore(ideaId);
+        console.log(`  [db] 假设 ${ideaId} 支持度: pass=${agg.pass}/${agg.total} score=${agg.score?.toFixed(3) ?? "null"}`);
+      }
+
       // retry 改了代码且最终成功 → 记迭代关系
       if (retryInfo?.fixed && retryInfo?.changed_code) {
         const fromXname = factor.name;
@@ -146,6 +152,13 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         },
       });
       console.log(`  [db] dead_end lesson 入库 id=${lessonId} (xname=${written}, status=dead_end)`);
+
+      // 假设级支持度聚合（贝叶斯平滑，因子二元 verdict → 假设连续分数）
+      if (ideaId != null) {
+        const agg = factorDb.updateIdeaSupportScore(ideaId);
+        console.log(`  [db] 假设 ${ideaId} 支持度: pass=${agg.pass}/${agg.total} score=${agg.score?.toFixed(3) ?? "null"}`);
+      }
+
       return { xname: written, status: "dead_end", metrics, lessonId };
     }
   } catch (e) {

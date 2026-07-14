@@ -328,3 +328,434 @@ def search_similar(
         params.append(min_icir)
     sql += " AND f.deprecated_at IS NULL ORDER BY v.distance"
     return conn.execute(sql, params).fetchall()
+
+
+# ============ 知识图（axioms / graph_edges / observe_outputs）============
+# 分层知识图：AXIOM(axioms表) → DERIVED/HYPOTHESIS(ideas表) → EVIDENCE/REFUTATION(lessons/factors/observe_outputs)。
+# graph_edges 跨表软引用 (from_table, from_id)。from_id: factors 存 xname，其余存 integer id 字符串。
+
+VALID_EDGE_TYPES = {
+    "CONTRADICTS", "DERIVES_FROM", "INSTANTIATES",
+    "SPECIALIZES", "ORTHOGONAL_TO", "SUPPORTS", "REFUTES", "BOUNDS",
+}
+# 节点表 → 主键列名（from_id/to_id 存该列的值）
+NODE_PK = {
+    "axioms": "id",
+    "ideas": "id",
+    "factors": "xname",        # TEXT 主键
+    "lessons": "id",
+    "observe_outputs": "id",
+}
+
+
+def ensure_graph_schema(conn: sqlite3.Connection) -> None:
+    """对现有库幂等补齐知识图表结构 + ideas.node_layer 列。
+    新库由 schema.sql 直接建；此函数给已存在的库做在线迁移。"""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS axioms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL, statement TEXT NOT NULL, formal_form TEXT,
+            expected_signature TEXT, source TEXT, falsifiable TEXT,
+            created_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_table TEXT NOT NULL, from_id TEXT NOT NULL,
+            to_table TEXT NOT NULL, to_id TEXT NOT NULL,
+            edge_type TEXT NOT NULL CHECK (edge_type IN
+                ('CONTRADICTS','DERIVES_FROM','INSTANTIATES','SPECIALIZES',
+                 'ORTHOGONAL_TO','SUPPORTS','REFUTES','BOUNDS')),
+            weight REAL, properties TEXT,
+            created_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(from_table, from_id, to_table, to_id, edge_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_edges_from ON graph_edges(from_table, from_id);
+        CREATE INDEX IF NOT EXISTS idx_edges_to   ON graph_edges(to_table, to_id);
+        CREATE INDEX IF NOT EXISTS idx_edges_type ON graph_edges(edge_type);
+        CREATE TABLE IF NOT EXISTS observe_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, script TEXT NOT NULL,
+            axiom_code TEXT NOT NULL, violation TEXT NOT NULL, summary TEXT,
+            evidence TEXT, symbol TEXT,
+            detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_observe_axiom ON observe_outputs(axiom_code);
+        """
+    )
+    # ideas.node_layer 列幂等加（ALTER 不能 IF NOT EXISTS，靠 pragma 检查）
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ideas)")}
+    if "node_layer" not in cols:
+        conn.execute(
+            "ALTER TABLE ideas ADD COLUMN node_layer TEXT DEFAULT 'HYPOTHESIS'"
+        )
+    migrate_graph_edge_bounds(conn)
+
+
+def add_axiom(
+    conn: sqlite3.Connection,
+    code: str,
+    category: str,
+    statement: str,
+    formal_form: str | None = None,
+    expected_signature: dict | str | None = None,
+    source: str | None = None,
+    falsifiable: str | None = None,
+) -> int:
+    """写一条公理。code 唯一，重复则返回已有 id（幂等）。"""
+    existing = conn.execute("SELECT id FROM axioms WHERE code = ?", (code,)).fetchone()
+    if existing:
+        return int(existing[0])
+    es = (
+        expected_signature
+        if isinstance(expected_signature, str)
+        else (json.dumps(expected_signature, ensure_ascii=False) if expected_signature else None)
+    )
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO axioms
+            (code, category, statement, formal_form, expected_signature, source, falsifiable)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (code, category, statement, formal_form, es, source, falsifiable),
+    )
+    return int(cur.lastrowid) if cur.lastrowid else int(
+        conn.execute("SELECT id FROM axioms WHERE code = ?", (code,)).fetchone()[0]
+    )
+
+
+def add_graph_edge(
+    conn: sqlite3.Connection,
+    from_table: str,
+    from_id,
+    to_table: str,
+    to_id,
+    edge_type: str,
+    weight: float | None = None,
+    properties: dict | None = None,
+) -> int | None:
+    """写一条图边。幂等（UNIQUE 约束，重复返回已有 id）。from_id/to_id 接受 str/int。"""
+    if edge_type not in VALID_EDGE_TYPES:
+        raise ValueError(f"edge_type must be {VALID_EDGE_TYPES}, got {edge_type!r}")
+    props = json.dumps(properties, ensure_ascii=False) if properties else None
+    existing = conn.execute(
+        """
+        SELECT id FROM graph_edges
+        WHERE from_table=? AND from_id=? AND to_table=? AND to_id=? AND edge_type=?
+        """,
+        (from_table, str(from_id), to_table, str(to_id), edge_type),
+    ).fetchone()
+    if existing:
+        return int(existing[0])
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO graph_edges
+            (from_table, from_id, to_table, to_id, edge_type, weight, properties)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (from_table, str(from_id), to_table, str(to_id), edge_type, weight, props),
+    )
+    return int(cur.lastrowid) if cur.lastrowid else None
+
+
+def add_observe_output(
+    conn: sqlite3.Connection,
+    script: str,
+    axiom_code: str,
+    violation: str,
+    summary: str | None = None,
+    evidence: dict | None = None,
+    symbol: str | None = None,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO observe_outputs (script, axiom_code, violation, summary, evidence, symbol)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            script, axiom_code, violation, summary,
+            json.dumps(evidence, ensure_ascii=False) if evidence else None,
+            symbol,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def _node_row(conn: sqlite3.Connection, table: str, node_id) -> sqlite3.Row | None:
+    """取节点完整行（按表主键）。"""
+    pk = NODE_PK.get(table)
+    if not pk:
+        return None
+    return conn.execute(
+        f"SELECT * FROM {table} WHERE {pk} = ?", (str(node_id),)
+    ).fetchone()
+
+
+def query_contradictions(
+    conn: sqlite3.Connection, resolved: bool = False, axiom_code: str | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """查 CONTRADICTS 边。resolved=False 返回未解矛盾（resolve_contradiction 输入）。
+    resolved 判据：properties JSON 含 resolved_by。"""
+    has_resolved = "(json_extract(properties,'$.resolved_by') IS NOT NULL OR json_extract(properties,'$.resolution') IS NOT NULL)"
+    where = f"ge.edge_type='CONTRADICTS' AND {'NOT' if not resolved else ''} ({has_resolved})"
+    params: list[Any] = []
+    if axiom_code:
+        where += " AND a.code = ?"
+        params.append(axiom_code)
+    rows = conn.execute(
+        f"""
+        SELECT ge.id AS edge_id, ge.weight, ge.properties,
+               oo.id AS ev_id, oo.script, oo.summary, oo.evidence AS ev_json, oo.violation,
+               a.id AS axiom_id, a.code AS axiom_code, a.statement, a.formal_form, a.expected_signature
+        FROM graph_edges ge
+        LEFT JOIN observe_outputs oo ON oo.id = ge.from_id AND ge.from_table='observe_outputs'
+        JOIN axioms a ON a.id = ge.to_id AND ge.to_table='axioms'
+        WHERE {where}
+        ORDER BY COALESCE(ge.weight, 0) DESC LIMIT ?
+        """,
+        params + [limit],
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "edge_id": r["edge_id"], "weight": r["weight"], "properties": r["properties"],
+            "evidence": {"id": r["ev_id"], "script": r["script"], "summary": r["summary"],
+                         "violation": r["violation"], "evidence": r["ev_json"]} if r["ev_id"] else None,
+            "axiom": {"id": r["axiom_id"], "code": r["axiom_code"], "statement": r["statement"],
+                      "formal_form": r["formal_form"], "expected_signature": r["expected_signature"]},
+        })
+    return out
+
+
+def get_subgraph(
+    conn: sqlite3.Connection, table: str, node_id, depth: int = 2,
+    edge_types: list[str] | None = None, limit: int = 200,
+) -> dict:
+    """取以某节点为中心、depth 跳内的子图（BFS）。返回 {center, nodes, edges}。"""
+    et_filter = ""
+    params: list[Any] = []
+    if edge_types:
+        placeholders = ",".join("?" * len(edge_types))
+        et_filter = f" AND edge_type IN ({placeholders})"
+        params = list(edge_types)
+
+    center = _node_row(conn, table, node_id)
+    nodes: dict[tuple[str, str], dict] = {}
+    edges: list[dict] = []
+    if center:
+        nodes[(table, str(node_id))] = {"table": table, "id": str(node_id),
+                                         "depth": 0, "fields": dict(center)}
+    frontier = [(table, str(node_id))]
+    for d in range(1, depth + 1):
+        if not frontier:
+            break
+        placeholders = ",".join(
+            f"(from_table=? AND from_id=?)" for _ in frontier
+        ) + " OR " + " OR ".join(
+            f"(to_table=? AND to_id=?)" for _ in frontier
+        )
+        flat: list[Any] = []
+        for ft, fid in frontier:
+            flat += [ft, fid]
+        for ft, fid in frontier:
+            flat += [ft, fid]
+        rows = conn.execute(
+            f"""
+            SELECT from_table, from_id, to_table, to_id, edge_type, weight, properties
+            FROM graph_edges WHERE ({placeholders}){et_filter} LIMIT ?
+            """,
+            flat + params + [limit],
+        ).fetchall()
+        next_frontier: list[tuple[str, str]] = []
+        for r in rows:
+            edges.append(dict(r))
+            for side in [("from_table", "from_id"), ("to_table", "to_id")]:
+                t, i = r[side[0]], str(r[side[1]])
+                key = (t, i)
+                if key not in nodes:
+                    row = _node_row(conn, t, i)
+                    if row:
+                        nodes[key] = {"table": t, "id": i, "depth": d, "fields": dict(row)}
+                        next_frontier.append(key)
+        frontier = next_frontier
+    return {"center": {"table": table, "id": str(node_id)},
+            "nodes": list(nodes.values()), "edges": edges}
+
+
+def neighborhood(
+    conn: sqlite3.Connection, table: str, node_id,
+    edge_types: list[str] | None = None, direction: str = "both", limit: int = 10,
+) -> list[dict]:
+    """取某节点 1 跳邻居。direction: out/in/both。"""
+    et_filter = ""
+    params: list[Any] = []
+    clauses = []
+    if direction in ("out", "both"):
+        clauses.append("(from_table=? AND from_id=?)")
+        params += [table, str(node_id)]
+    if direction in ("in", "both"):
+        clauses.append("(to_table=? AND to_id=?)")
+        params += [table, str(node_id)]
+    where = " OR ".join(clauses)
+    if edge_types:
+        placeholders = ",".join("?" * len(edge_types))
+        et_filter = f" AND edge_type IN ({placeholders})"
+        params += list(edge_types)
+    rows = conn.execute(
+        f"""
+        SELECT from_table, from_id, to_table, to_id, edge_type, weight, properties
+        FROM graph_edges WHERE ({where}){et_filter} LIMIT ?
+        """,
+        params + [limit],
+    ).fetchall()
+    out = []
+    for r in rows:
+        is_from = r["from_table"] == table and str(r["from_id"]) == str(node_id)
+        nb_t, nb_i = (r["to_table"], str(r["to_id"])) if is_from else (r["from_table"], str(r["from_id"]))
+        nb = _node_row(conn, nb_t, nb_i)
+        out.append({
+            "neighbor_table": nb_t, "neighbor_id": nb_i,
+            "edge_type": r["edge_type"], "weight": r["weight"],
+            "direction": "out" if is_from else "in",
+            "fields": dict(nb) if nb else None,
+        })
+    return out
+
+
+def find_refutation_clusters(
+    conn: sqlite3.Connection, target_table: str | None = None, target_id=None,
+    min_size: int = 3, limit: int = 5,
+) -> list[dict]:
+    """找 REFUTES/SUPPORTS 边指向同一目标的聚簇（generalize_from_refutation 输入）。"""
+    where = "edge_type IN ('REFUTES','SUPPORTS') AND to_table IN ('axioms','ideas')"
+    params: list[Any] = []
+    if target_table:
+        where += " AND to_table = ?"
+        params.append(target_table)
+    if target_id is not None:
+        where += " AND to_id = ?"
+        params.append(str(target_id))
+    rows = conn.execute(
+        f"""
+        SELECT to_table, to_id, edge_type, COUNT(*) AS sz
+        FROM graph_edges WHERE {where}
+        GROUP BY to_table, to_id, edge_type HAVING sz >= ?
+        ORDER BY sz DESC LIMIT ?
+        """,
+        params + [min_size, limit],
+    ).fetchall()
+    out = []
+    for r in rows:
+        members = conn.execute(
+            """SELECT from_table, from_id FROM graph_edges
+               WHERE to_table=? AND to_id=? AND edge_type=?""",
+            (r["to_table"], r["to_id"], r["edge_type"]),
+        ).fetchall()
+        target = _node_row(conn, r["to_table"], r["to_id"])
+        out.append({
+            "target_table": r["to_table"], "target_id": r["to_id"],
+            "edge_type": r["edge_type"], "size": r["sz"],
+            "target": dict(target) if target else None,
+            "members": [dict(m) for m in members],
+        })
+    return out
+
+
+def graph_stats(conn: sqlite3.Connection) -> dict:
+    """图统计：各层节点数、各边类型数、未解矛盾数。自转循环停止条件用。"""
+    def count(sql, args=()):
+        return conn.execute(sql, args).fetchone()[0]
+    return {
+        "axioms": count("SELECT COUNT(*) FROM axioms"),
+        "derived": count(
+            "SELECT COUNT(*) FROM ideas WHERE node_layer='DERIVED'"
+        ),
+        "hypothesis": count(
+            "SELECT COUNT(*) FROM ideas WHERE node_layer='HYPOTHESIS' OR node_layer IS NULL"
+        ),
+        "evidence_lessons": count(
+            "SELECT COUNT(*) FROM lessons WHERE type='success_pattern' AND deprecated_at IS NULL"
+        ),
+        "refutation_lessons": count(
+            "SELECT COUNT(*) FROM lessons WHERE type='dead_end' AND deprecated_at IS NULL"
+        ),
+        "observe_outputs": count("SELECT COUNT(*) FROM observe_outputs"),
+        "edges_by_type": {
+            r[0]: r[1] for r in conn.execute(
+                "SELECT edge_type, COUNT(*) FROM graph_edges GROUP BY edge_type"
+            )
+        },
+        "total_edges": count("SELECT COUNT(*) FROM graph_edges"),
+        "unresolved_contradictions": count(
+            """SELECT COUNT(*) FROM graph_edges WHERE edge_type='CONTRADICTS'
+               AND json_extract(properties,'$.resolved_by') IS NULL
+               AND json_extract(properties,'$.resolution') IS NULL"""
+        ),
+    }
+
+
+def mark_contradiction_resolved(
+    conn: sqlite3.Connection, edge_id: int, idea_id: int,
+) -> None:
+    """标记 CONTRADICTS 边已由某 idea 解决（properties 加 resolved_by）。"""
+    row = conn.execute(
+        "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
+    ).fetchone()
+    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    props["resolved_by"] = idea_id
+    conn.execute(
+        "UPDATE graph_edges SET properties = ? WHERE id = ?",
+        (json.dumps(props, ensure_ascii=False), edge_id),
+    )
+
+
+def mark_contradiction_bounded(
+    conn: sqlite3.Connection, edge_id: int, regime: str, reason: str,
+) -> None:
+    """标记 CONTRADICTS 边为「axiom 边界限定」(否定性结论:axiom 在此 regime 不完备,
+    产不出必然正命题)。properties 加 resolution='bounded' + regime + reason。
+    与 mark_contradiction_resolved 对称:resolved=肯定解决(产 idea),bounded=否定解决(axiom 证伪)。
+    bounded 后该矛盾不再算 unresolved(不再被反复选中 resolve)。"""
+    row = conn.execute(
+        "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
+    ).fetchone()
+    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    props["resolution"] = "bounded"
+    props["regime"] = regime
+    props["reason"] = reason
+    conn.execute(
+        "UPDATE graph_edges SET properties = ? WHERE id = ?",
+        (json.dumps(props, ensure_ascii=False), edge_id),
+    )
+
+
+def migrate_graph_edge_bounds(conn: sqlite3.Connection) -> None:
+    """graph_edges.edge_type CHECK 加 'BOUNDS'(SQLite 不能改 CHECK,需重建表)。幂等。
+    新库由 schema.sql 直接建(已含 BOUNDS);旧库由此函数重建迁移。"""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='graph_edges'"
+    ).fetchone()
+    if not row or not row["sql"] or "BOUNDS" in row["sql"]:
+        return  # 表不存在 或 已含 BOUNDS
+    conn.executescript(
+        """
+        CREATE TABLE graph_edges_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_table TEXT NOT NULL, from_id TEXT NOT NULL,
+            to_table TEXT NOT NULL, to_id TEXT NOT NULL,
+            edge_type TEXT NOT NULL CHECK (edge_type IN
+                ('CONTRADICTS','DERIVES_FROM','INSTANTIATES','SPECIALIZES',
+                 'ORTHOGONAL_TO','SUPPORTS','REFUTES','BOUNDS')),
+            weight REAL, properties TEXT,
+            created_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(from_table, from_id, to_table, to_id, edge_type)
+        );
+        INSERT INTO graph_edges_new (id,from_table,from_id,to_table,to_id,edge_type,weight,properties,created_ts)
+        SELECT id,from_table,from_id,to_table,to_id,edge_type,weight,properties,created_ts FROM graph_edges;
+        DROP TABLE graph_edges;
+        ALTER TABLE graph_edges_new RENAME TO graph_edges;
+        CREATE INDEX IF NOT EXISTS idx_edges_from ON graph_edges(from_table, from_id);
+        CREATE INDEX IF NOT EXISTS idx_edges_to   ON graph_edges(to_table, to_id);
+        CREATE INDEX IF NOT EXISTS idx_edges_type ON graph_edges(edge_type);
+        """
+    )

@@ -14,8 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DRY_RUN, FACTOR_CHECK_PY, RUN_DIR, FACTORS_DB } from "../lib/config.mjs";
-import { runPy } from "../run-py.mjs";
-import { triageFailure } from "../airflow-log.mjs";
+import { runPy } from "../infra/run-py.mjs";
+import { triageFailure } from "../infra/airflow-log.mjs";
 import { extractMetricsFromCheckOutput } from "../lib/metrics.mjs";
 import { DatabaseSync } from "node:sqlite";
 

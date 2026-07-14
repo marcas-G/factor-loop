@@ -1,5 +1,5 @@
 // 端到端验证 factor-db 的写入路径（不调 LLM，模拟 research-loop 的关键 DB 调用）
-import * as factorDb from "./factor-db.mjs";
+import * as factorDb from "./lib/factor-db.mjs";
 import fs from "node:fs";
 import path from "node:path";
 

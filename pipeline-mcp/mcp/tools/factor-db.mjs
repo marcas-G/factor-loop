@@ -1,7 +1,7 @@
 // 组 1: factor-db 查询工具（6 个）。直接复用 factor-db.mjs 的函数。
 // 服务启动时调 factorDb.init()。
 
-import * as factorDb from "../../factor-db.mjs";
+import * as factorDb from "../../lib/factor-db.mjs";
 
 export const factorSearchSchema = {
   name: "factor_search",
@@ -213,6 +213,100 @@ export async function listOpenIterationsHandler({ top_k = 5, source_status }) {
   return factorDb.listOpenIterations({ topK: top_k, sourceStatus: source_status });
 }
 
+export const coverageMapSchema = {
+  name: "coverage_map",
+  description:
+    "覆盖地图:按 symbol×y_horizon×status×necessity_grade 聚合已搜空间,每格标 gap_tags(thin/hot/stale/normal)。"
+    + "看哪片欠探索(thin)/高效热点(hot)/该复验(stale)。覆盖空白源、brainstorm 选方向参考。"
+    + "口径:只统计跑过 ic_refresh 的因子。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      slice: { type: "object", description: "可选过滤 {symbol?, y_horizon?, status?, necessity_grade?}" },
+      group_by: {
+        type: "array",
+        items: { type: "string", enum: ["symbol", "y_horizon", "status", "necessity_grade"] },
+        description: "聚合轴子集,默认全 4 轴",
+      },
+      min_count: { type: "number", default: 0, description: "只看 searched_count≥此值的格子" },
+    },
+  },
+};
+export async function coverageMapHandler({ slice, group_by, min_count }) {
+  return factorDb.coverageMap({ slice, groupBy: group_by, minCount: min_count });
+}
+
+export const coverageGapsSchema = {
+  name: "coverage_gaps",
+  description:
+    "覆盖空白/热点队列:unexplored(品种×频率×假设硬度 从无 evaluated)→ thin → hot → stale 各取 top_k。"
+    + "覆盖空白/热点队列(补 failed/open/dead_end 都是'已试边界'的盲区,这个是'从没试过的空白')。",
+  inputSchema: {
+    type: "object",
+    properties: { top_k: { type: "number", default: 5 } },
+  },
+};
+export async function coverageGapsHandler({ top_k }) {
+  return factorDb.coverageGaps({ topK: top_k });
+}
+
+export const residualIcStrengthSchema = {
+  name: "residual_ic_strength",
+  description:
+    "残差 IC 强度:新因子日级 IC 序列在库内基底 IC 张成空间的残差比例(预测能力不被已有因子线性解释的程度)。"
+    + "高=真新颖,低=冗余。补 factor_ic_correlate(pairwise 查'和某个最像')——这个给'相对全库基底的新颖性标量'。"
+    + "evaluate 第三维正交增强。依赖 factor_ic_daily(refresh 入库);库空/无基底 → strength=1.0。",
+  inputSchema: {
+    type: "object",
+    required: ["target"],
+    properties: {
+      target: { type: "string", description: "目标因子 xname" },
+      symbol: { type: "string", description: "可选,限定场景" },
+      freq: { type: "string", description: "可选,限定场景" },
+      y_horizon: { type: "number", description: "可选,限定场景" },
+      ridge: { type: "number", default: 0.001, description: "岭回归正则(防基底共线);IC 幅度小默认 1e-3" },
+      max_base: { type: "number", default: 30, description: "基底因子数上限(按 |pearson| 选最能解释 target 的代表)" },
+    },
+  },
+};
+export async function residualIcStrengthHandler({ target, symbol, freq, y_horizon, ridge, max_base }) {
+  return factorDb.residualIcStrength(target, {
+    symbol, freq, yHorizon: y_horizon, ridge, maxBase: max_base,
+  });
+}
+
+export const patternFeedSchema = {
+  name: "pattern_feed",
+  description:
+    "衔接①(归纳→演绎):拉 archived 高优先 + 未解释的模式卡,供 hypothesis-generator 解释机制。"
+    + "归纳引擎的自动喂队列。hypothesis-generator 先调它,有模式卡则解释(产 idea 后 link_pattern_idea 回写),无则走 lens 自主发现反常。",
+  inputSchema: {
+    type: "object",
+    properties: { top_n: { type: "number", default: 3 } },
+  },
+};
+export async function patternFeedHandler({ top_n }) {
+  return factorDb.feedPatternQueue(top_n);
+}
+
+export const linkPatternIdeaSchema = {
+  name: "link_pattern_idea",
+  description:
+    "衔接①回写:hypothesis-generator 解释模式卡产 idea 后,回写 pattern_cards.idea_id + status='explained'。"
+    + "pattern_card 必须 archived。闭合归纳→演绎衔接。",
+  inputSchema: {
+    type: "object",
+    required: ["pattern_card_id", "idea_id"],
+    properties: {
+      pattern_card_id: { type: "number", description: "pattern_cards.id" },
+      idea_id: { type: "number", description: "解释产出的 ideas.id" },
+    },
+  },
+};
+export async function linkPatternIdeaHandler({ pattern_card_id, idea_id }) {
+  return factorDb.linkPatternIdea(pattern_card_id, idea_id);
+}
+
 export const ALL_FACTOR_DB_SCHEMAS = [
   factorSearchSchema,
   factorRecentLessonsSchema,
@@ -227,6 +321,11 @@ export const ALL_FACTOR_DB_SCHEMAS = [
   realizeIterationSchema,
   reopenIterationSchema,
   listOpenIterationsSchema,
+  coverageMapSchema,
+  coverageGapsSchema,
+  residualIcStrengthSchema,
+  patternFeedSchema,
+  linkPatternIdeaSchema,
 ];
 
 export const ALL_FACTOR_DB_HANDLERS = {
@@ -243,4 +342,9 @@ export const ALL_FACTOR_DB_HANDLERS = {
   realize_iteration: realizeIterationHandler,
   reopen_iteration: reopenIterationHandler,
   list_open_iterations: listOpenIterationsHandler,
+  coverage_map: coverageMapHandler,
+  coverage_gaps: coverageGapsHandler,
+  residual_ic_strength: residualIcStrengthHandler,
+  pattern_feed: patternFeedHandler,
+  link_pattern_idea: linkPatternIdeaHandler,
 };

@@ -8,7 +8,7 @@ import { checkFactorProgrammatic } from "../../stages/check.mjs";
 import { renameFactorH } from "../../stages/rename-factor.mjs";
 import { isAllZeroFromScreening } from "../../lib/metrics.mjs";
 import { runSave, runLoad } from "../lib/run-store.mjs";
-import * as factorDb from "../../factor-db.mjs";
+import * as factorDb from "../../lib/factor-db.mjs";
 
 export const submitFactorSchema = {
   name: "submit_factor",

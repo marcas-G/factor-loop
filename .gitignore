@@ -16,6 +16,7 @@ __pycache__/
 /featuretool-tmp/
 /check-output/
 /logs/
+/pipeline-py/observe/out/
 *.tar
 *.tar.gz
 

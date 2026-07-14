@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import * as factorDb from "../../factor-db.mjs";
+import * as factorDb from "../../lib/factor-db.mjs";
 import * as tools from "../tools/factor-db.mjs";
 
 const SCHEMA_SQL_PATH = path.resolve(import.meta.dirname, "../../../factor_db/schema.sql");
@@ -66,9 +66,11 @@ test("factor_similar 对不存在的 xname 抛错", async () => {
   );
 });
 
-test("所有 9 个 schema 名称正确", () => {
+test("所有 18 个 schema 名称正确", () => {
   const names = tools.ALL_FACTOR_DB_SCHEMAS.map(s => s.name);
   assert.deepEqual(names.sort(), [
+    "coverage_gaps",
+    "coverage_map",
     "factor_counts",
     "factor_detail",
     "factor_ic_correlate",
@@ -78,5 +80,27 @@ test("所有 9 个 schema 名称正确", () => {
     "factor_search",
     "factor_semantic_search",
     "factor_similar",
+    "link_pattern_idea",
+    "list_open_iterations",
+    "open_iteration",
+    "pattern_feed",
+    "realize_iteration",
+    "reopen_iteration",
+    "residual_ic_strength",
   ]);
+});
+
+test("coverage_map 空库返回数组(结构正确)", async () => {
+  setupTempDb();
+  const result = await tools.coverageMapHandler({});
+  assert.equal(Array.isArray(result), true);
+});
+
+test("coverage_gaps 空库返回四桶结构", async () => {
+  setupTempDb();
+  const result = await tools.coverageGapsHandler({});
+  assert.equal(Array.isArray(result.unexplored), true);
+  assert.equal(Array.isArray(result.thin), true);
+  assert.equal(Array.isArray(result.hot), true);
+  assert.equal(Array.isArray(result.stale), true);
 });

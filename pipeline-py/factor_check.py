@@ -548,6 +548,298 @@ def compute_daily_ic(daily_dfs, group_a_cols, group_b_cols, daily_rt=None):
     return pd.DataFrame(summary_rows).sort_values("t_stat", key=abs, ascending=False).reset_index(drop=True), detail
 
 
+# ==================== 新增评估指标 ====================
+
+def _adf_test(y):
+    """
+    纯 numpy 实现的 ADF 检验（Dickey-Fuller，含截距，无趋势）
+    返回 (t_stat, p_value)。H0=有单位根（非平稳），p<0.05 → 平稳。
+
+    回归: Δy_t = α + γ·y_{t-1} + ε_t
+    γ 的 t 统计量服从 DF 分布，用 MacKinnon (2010) 近似临界值算 p 值。
+    不依赖 statsmodels（quant-venv 无 pip，零依赖实现）。
+    """
+    import numpy as np
+    y = np.asarray(y, dtype=float).ravel()
+    y = y[np.isfinite(y)]
+    n = len(y)
+    if n < 25:
+        return np.nan, np.nan
+
+    y_lag = y[:-1]
+    dy = np.diff(y)
+
+    # OLS: dy = alpha + gamma * y_lag
+    X = np.column_stack([np.ones_like(y_lag), y_lag])
+    try:
+        beta, *_ = np.linalg.lstsq(X, dy, rcond=None)
+    except Exception:
+        return np.nan, np.nan
+    gamma = beta[1]
+
+    resid = dy - X @ beta
+    dof = n - 3
+    if dof <= 0:
+        return np.nan, np.nan
+    sigma2 = float(resid @ resid) / dof
+    try:
+        cov = sigma2 * np.linalg.inv(X.T @ X)
+        se_gamma = float(np.sqrt(max(cov[1, 1], 1e-30)))
+    except Exception:
+        return np.nan, np.nan
+    if se_gamma <= 0:
+        return np.nan, np.nan
+
+    t_stat = gamma / se_gamma
+
+    # MacKinnon (2010) 响应面近似 p 值（case 2：含截距无趋势，n=1）
+    T = float(n - 1)
+    cv = {}
+    for p_target, (ci, c1, c2, c3) in {
+        0.01: (-3.43035, -6.5393, -12.681, -99.851),
+        0.05: (-2.86154, -2.8903, -4.234, -14.045),
+        0.10: (-2.56677, -1.5384, -2.809, -5.676),
+    }.items():
+        cv[p_target] = ci + c1 / T + c2 / (T ** 2) + c3 / (T ** 3)
+
+    t = t_stat
+    if t <= cv[0.01]:
+        p_value = max(0.001, 0.01 - 0.009 * (cv[0.01] - t) / max(abs(cv[0.01] - cv[0.05]), 1e-6))
+    elif t <= cv[0.05]:
+        p_value = 0.01 + (0.05 - 0.01) * (cv[0.01] - t) / max((cv[0.01] - cv[0.05]), 1e-6)
+    elif t <= cv[0.10]:
+        p_value = 0.05 + (0.10 - 0.05) * (cv[0.05] - t) / max((cv[0.05] - cv[0.10]), 1e-6)
+    else:
+        p_value = min(1.0, 0.10 + min(0.40, (t - cv[0.10]) * 0.5))
+
+    return float(t_stat), float(p_value)
+
+
+def compute_stationarity_test(daily_dfs, factor_col):
+    """
+    因子平稳性检验 + 差分 IC 对比（纯 numpy 实现，无 statsmodels 依赖）
+
+    - ADF 用【日级因子均值序列】（每日一个点），检验因子日间是否平稳漂移
+    - 差分：对比原始因子 vs 一阶差分因子的最佳日 IC/ICIR
+    """
+    import pandas as pd
+    import numpy as np
+    from scipy import stats
+
+    # 收集每日因子均值（日级序列，做 ADF）
+    daily_means = []
+    daily_factor_series_per_day = {}  # {date: factor_values} 用于差分 IC
+    for date_str, df in sorted(daily_dfs.items()):
+        if factor_col in df.columns:
+            vals = df[factor_col].dropna()
+            if len(vals) > 0:
+                daily_means.append(float(vals.mean()))
+                daily_factor_series_per_day[date_str] = vals
+
+    if len(daily_means) < 25:
+        return {'error': '日级样本不足25', 'adf_tstat': None, 'adf_pvalue': None,
+                'is_stationary': None, 'need_differential': None,
+                'orig_ic': None, 'diff_ic': None, 'diff_improvement': None}
+
+    # ADF 检验（日级均值序列）
+    t_stat, adf_pvalue = _adf_test(daily_means)
+    # 用 pooled 而非逐天 ICIR：避免 N因子×M horizon×T天 的大规模 spearman，100倍加速
+    y_cols = [c for c in next(iter(daily_dfs.values())).columns if c.startswith('Y.')]
+    orig_ic_best, diff_ic_best = 0.0, 0.0
+
+    def _pooled_best_ic(get_x):
+        best = 0.0
+        for b in y_cols:
+            xs, ys = [], []
+            for date_str, df in daily_dfs.items():
+                if factor_col not in df.columns or b not in df.columns:
+                    continue
+                v = df[[factor_col, b]].dropna()
+                if len(v) < 10:
+                    continue
+                xs.append(get_x(v, factor_col))
+                ys.append(v[b].values)
+            if not xs:
+                continue
+            xa = np.concatenate(xs)
+            ya = np.concatenate(ys)
+            if np.std(xa) < 1e-15:
+                continue
+            # 下采样：pooled 拼接后可能数百万行，spearman 太慢；rank 相关下采样估计稳定
+            if len(xa) > 20000:
+                step = len(xa) // 20000
+                xa, ya = xa[::step], ya[::step]
+            r, _ = stats.spearmanr(xa, ya)
+            if not np.isnan(r) and abs(r) > abs(best):
+                best = r
+        return best
+
+    orig_ic_best = _pooled_best_ic(lambda v, c: v[c].values)
+    # 一阶差分（日内 tick 差分）
+    def _diff_x(v, c):
+        x = v[c].values
+        d = np.empty_like(x)
+        d[0] = 0.0
+        d[1:] = np.diff(x)
+        return d
+    diff_ic_best = _pooled_best_ic(_diff_x)
+
+    if np.isnan(adf_pvalue):
+        return {'error': 'ADF计算失败', 'adf_tstat': None, 'adf_pvalue': None,
+                'is_stationary': None, 'need_differential': None,
+                'orig_ic': float(orig_ic_best), 'diff_ic': float(diff_ic_best),
+                'diff_improvement': float(diff_ic_best - orig_ic_best)}
+
+    is_stationary = adf_pvalue < 0.05
+
+    return {
+        'adf_tstat': float(t_stat),
+        'adf_pvalue': float(adf_pvalue),
+        'is_stationary': bool(is_stationary),
+        'need_differential': bool(not is_stationary),
+        'orig_ic': float(orig_ic_best),
+        'diff_ic': float(diff_ic_best),
+        'diff_improvement': float(diff_ic_best - orig_ic_best)
+    }
+
+
+def compute_transform_family(daily_dfs, factor_col, ar_lag=5, ridge_alpha=1.0):
+    """
+    因子变换族预测力对比：对原始因子 X 做四种变换，各算 pooled IC（vs Y），对比预测力来源。
+
+    变换定义：
+    - delta:          ΔX_t = X_t − X_{t-1}                    瞬时变化量（动量）
+    - impulse:        sign(ΔX_t) ∈ {−1,0,1}                   方向脉冲（只看冲击方向，不看幅度）
+    - asym_impulse_pos: max(ΔX_t, 0)                          正向冲击（上涨脉冲）
+    - asym_impulse_neg: −min(ΔX_t, 0) = max(−ΔX_t, 0)         负向冲击（下跌脉冲，取正）
+    - ridge_residual: X_t 对 {X_{t-1}…X_{t-ar_lag}} 岭回归残差 去自相关，保留新息（innovation）
+
+    每个变换算 pooled Spearman IC（拼接所有天，下采样2万行），取所有 Y horizon 最佳 |IC|。
+    业务含义：对比 IC 告诉预测力来自水平(orig)/变化(delta)/方向(impulse)/非对称冲击(asym)/新息(ridge)。
+    """
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+
+    sample_df = next(iter(daily_dfs.values()))
+    y_cols = [c for c in sample_df.columns if c.startswith('Y.')]
+    if not y_cols:
+        return pd.DataFrame()
+
+    # ---- 变换算子（对 dropna 后的连续序列，日内差分；跨天首点 Δ=0） ----
+    def _delta(v, c):
+        x = v[c].values.astype(float)
+        d = np.zeros_like(x)
+        if len(x) > 1:
+            d[1:] = np.diff(x)
+        return d
+
+    def _impulse(v, c):
+        return np.sign(_delta(v, c))
+
+    def _asym_pos(v, c):
+        return np.maximum(_delta(v, c), 0.0)
+
+    def _asym_neg(v, c):
+        return np.maximum(-_delta(v, c), 0.0)
+
+    def _ridge_resid(v, c):
+        # 每天独立岭回归：X_t ~ X_{t-1}+...+X_{t-ar_lag}，残差=新息
+        x = v[c].values.astype(float)
+        n = len(x)
+        if n <= ar_lag + 2:
+            return np.zeros(n)
+        Y = x[ar_lag:]
+        # 设计矩阵列 k（k=0..ar_lag-1）对应 X_{t-k-1}
+        cols = [x[ar_lag - k - 1: n - k - 1] for k in range(ar_lag)]
+        X = np.column_stack(cols)
+        try:
+            XtX = X.T @ X
+            beta = np.linalg.solve(XtX + ridge_alpha * np.eye(ar_lag), X.T @ Y)
+            resid = Y - X @ beta
+        except Exception:
+            return np.zeros(n)
+        full = np.zeros(n)
+        full[ar_lag:] = resid
+        return full
+
+    transforms = {
+        'orig': lambda v, c: v[c].values.astype(float),
+        'delta': _delta,
+        'impulse': _impulse,
+        'asym_impulse_pos': _asym_pos,
+        'asym_impulse_neg': _asym_neg,
+        'ridge_residual': _ridge_resid,
+    }
+
+    # ---- horizon 解析（B_col 形如 ...SHFE-AG@<秒>，取末尾 @N）----
+    import re
+    def _horizon_of(col):
+        m = re.search(r'@(\d+)\s*$', col)
+        return int(m.group(1)) if m else None
+
+    # ---- pooled IC（拼接所有天，下采样2万行）：返回每个 horizon 的 IC + 全局最强 ----
+    def _pooled_ic_by_horizon(get_x):
+        by_h = {}
+        best = 0.0
+        for b in y_cols:
+            h = _horizon_of(b)
+            if h is None:
+                continue
+            xs, ys = [], []
+            for date_str, df in daily_dfs.items():
+                if factor_col not in df.columns or b not in df.columns:
+                    continue
+                v = df[[factor_col, b]].dropna()
+                if len(v) < 10:
+                    continue
+                xs.append(get_x(v, factor_col))
+                ys.append(v[b].values.astype(float))
+            if not xs:
+                continue
+            xa = np.concatenate(xs)
+            ya = np.concatenate(ys)
+            if np.std(xa) < 1e-15:
+                continue
+            if len(xa) > 20000:
+                step = len(xa) // 20000
+                xa, ya = xa[::step], ya[::step]
+            r, _ = stats.spearmanr(xa, ya)
+            if np.isnan(r):
+                r = 0.0
+            by_h[h] = float(r)
+            if abs(r) > abs(best):
+                best = float(r)
+        return by_h, float(best)
+
+    # 每变换：最强 horizon 单值(向后兼容 evaluate) + 全 horizon 矩阵(扁平化 orig_ic@1 ...)
+    result = {}
+    for name, get_x in transforms.items():
+        by_h, best = _pooled_ic_by_horizon(get_x)
+        result[f'{name}_ic'] = best
+        result[f'{name}_ic_by_horizon'] = by_h
+        for h, ic in sorted(by_h.items()):
+            result[f'{name}_ic@{h}'] = ic
+
+    # 最强变换 + 相对原始的提升（只看 5 个标准变换单值，排除 _by_horizon dict 与 @horizon 矩阵，否则 abs(dict) 报错）
+    orig_ic = result.get('orig_ic', 0.0)
+    _std_tf = ['delta', 'impulse', 'asym_impulse_pos', 'asym_impulse_neg', 'ridge_residual']
+    transform_ics = {n: result[f'{n}_ic'] for n in _std_tf if f'{n}_ic' in result}
+    if transform_ics and any(abs(v) > 1e-9 for v in transform_ics.values()):
+        best_name = max(transform_ics, key=lambda k: abs(transform_ics[k]))
+        result['best_transform'] = best_name.replace('_ic', '')
+        result['best_transform_ic'] = transform_ics[best_name]
+        result['best_vs_orig'] = float(transform_ics[best_name] - orig_ic) if abs(orig_ic) > 1e-9 else None
+    else:
+        result['best_transform'] = None
+        result['best_transform_ic'] = None
+        result['best_vs_orig'] = None
+
+    return pd.DataFrame([result])
+
+
+# ==================== 原有函数继续 ====================
+
 def compute_bucket_analysis(daily_dfs, group_a_cols, group_b_cols, n_groups=5):
     """每天按因子值排名分 N 组，计算各组条件收益及 top-bottom spread 稳定性。
     包含年化 Sharpe、累计收益（乘法复利）、最大回撤。"""
@@ -1295,6 +1587,68 @@ def run_analysis_batch(base_dir, mode, start_col, highlight_last_n,
                     {"factor": fname, "analysis": "Monthly IC", "metric": "best_ic_mean", "value": best_mi["ic_mean"], "pair": f"{best_mi['A_col']} vs {best_mi['B_col']}"},
                 ])
 
+            # ==================== 新增评估指标 ====================
+            # 1. 平稳性检验（差分必要性）
+            print(f"  {'[6/7]':<20} {'平稳性检验':>20}...", end=" ", flush=True)
+            stationarity_results = {}
+            stationarity_count = 0
+            for a_col in ga:
+                stationarity = compute_stationarity_test(daily_dfs, a_col)
+                if 'error' not in stationarity:
+                    stationarity_results[a_col] = stationarity
+                    stationarity_count += 1
+            if stationarity_count > 0:
+                stationarity_path = os.path.join(out_dir, "stationarity_summary.csv")
+                pd.DataFrame.from_dict(stationarity_results, orient='index').to_csv(stationarity_path)
+                # 取 diff_improvement 最大的因子作为代表
+                best_stat = max(stationarity_results.values(), key=lambda s: s.get('diff_improvement', -1e9))
+                print(f"{stationarity_count} 个因子 (ADF p={best_stat.get('adf_pvalue'):.3f}, diff改善={best_stat.get('diff_improvement'):+.3f})")
+                all_summary_rows.extend([
+                    {"factor": fname, "analysis": "Stationarity", "metric": "need_differential_rate", "value": sum(1 for s in stationarity_results.values() if s.get('need_differential', False)) / len(stationarity_results)},
+                    {"factor": fname, "analysis": "Stationarity", "metric": "best_adf_pvalue", "value": best_stat.get('adf_pvalue')},
+                    {"factor": fname, "analysis": "Stationarity", "metric": "orig_ic", "value": best_stat.get('orig_ic')},
+                    {"factor": fname, "analysis": "Stationarity", "metric": "diff_ic", "value": best_stat.get('diff_ic')},
+                    {"factor": fname, "analysis": "Stationarity", "metric": "diff_improvement", "value": best_stat.get('diff_improvement')},
+                ])
+            else:
+                print("0 个 (样本不足或数据缺失)")
+
+            # 3. 变换族预测力对比（delta/impulse/asym_impulse/ridge_residual vs 原始）
+            print(f"  {'[7/7]':<20} {'变换族预测力':>20}...", end=" ", flush=True)
+            transform_rows = []
+            for a_col in ga:
+                tf = compute_transform_family(daily_dfs, a_col)
+                if len(tf) > 0:
+                    row = tf.iloc[0].to_dict()
+                    row['factor'] = a_col
+                    transform_rows.append(row)
+            if transform_rows:
+                tf_path = os.path.join(out_dir, "transform_family_summary.csv")
+                pd.DataFrame(transform_rows).to_csv(tf_path, index=False)
+                # 取 best_transform_ic 绝对值最大的因子代表
+                best_tf = max(transform_rows, key=lambda r: abs(r.get('best_transform_ic') or 0))
+                bt = best_tf.get('best_transform')
+                bt_ic = best_tf.get('best_transform_ic')
+                orig_ic = best_tf.get('orig_ic')
+                print(f"{len(transform_rows)} 个因子 (最强变换={bt}, IC={bt_ic:.4f} vs 原始={orig_ic:.4f})")
+                all_summary_rows.extend([
+                    {"factor": fname, "analysis": "Transform Family", "metric": "orig_ic", "value": best_tf.get('orig_ic')},
+                    {"factor": fname, "analysis": "Transform Family", "metric": "delta_ic", "value": best_tf.get('delta_ic')},
+                    {"factor": fname, "analysis": "Transform Family", "metric": "impulse_ic", "value": best_tf.get('impulse_ic')},
+                    {"factor": fname, "analysis": "Transform Family", "metric": "asym_impulse_pos_ic", "value": best_tf.get('asym_impulse_pos_ic')},
+                    {"factor": fname, "analysis": "Transform Family", "metric": "asym_impulse_neg_ic", "value": best_tf.get('asym_impulse_neg_ic')},
+                    {"factor": fname, "analysis": "Transform Family", "metric": "ridge_residual_ic", "value": best_tf.get('ridge_residual_ic')},
+                ])
+                # 变换×horizon 完整矩阵（每变换在每个 horizon 的 pooled IC，扁平化 orig_ic@1 ...）
+                tf_metric_names = ['orig_ic', 'delta_ic', 'impulse_ic', 'asym_impulse_pos_ic', 'asym_impulse_neg_ic', 'ridge_residual_ic']
+                for m in tf_metric_names:
+                    for k, v in best_tf.items():
+                        if k.startswith(m + '@'):
+                            all_summary_rows.append({"factor": fname, "analysis": "Transform Family", "metric": k, "value": v})
+            else:
+                print("0 个 (数据缺失或计算失败)")
+
+            # ==================== 原有评估指标继续 ====================
             for label, fp in files.items():
                 print(f"  {label}: {fp}")
 

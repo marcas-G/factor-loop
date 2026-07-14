@@ -39,15 +39,17 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：Step 0 完成（拿到 run_id 或读完 state）后，**必须立即在同一回合**进入 Step 1 的第一个 tool call（抽 coords / 调 Skill brainstorm）。禁止输出"已初始化，开始 brainstorm"之类的纯文字回合。
 
-## Step 1 · brainstorm（嵌套调 brainstorm skill）
+## Step 1 · 假设生成 + 因子候选（graph-engine → brainstorm）
 
-1. 准备 idea（如未给）——按 `.claude/settings.json` 的 `IDEA_SOURCE` 二选一（默认 `inspiration`）：
-   - `inspiration`：从 `${CLAUDE_PROJECT_DIR}/pipeline-mcp/inspiration-pool.mjs` 抽 1 组 coords，调 LLM 翻译成 30-80 字 idea（发散思维模式，产 N 候选）
-   - `hypothesis`：从 `${CLAUDE_PROJECT_DIR}/pipeline-mcp/hypothesis-pool.mjs` 抽 1 组 coords，**先读 `.claude/hypothesis-framework.md`**，按三道门槛（G1 闭环闭合 / G2 因果链含微观E / G3 复杂度）构造 1 个合规假设作为 idea（收敛验证模式，产 1 个深挖假设）
-   - 或用户直接给
-2. 调 Skill `brainstorm`，传 `{idea, n_factors: 3, run_id, source}`
-3. brainstorm skill 内部完成：MCP 摸底（factor_counts/list/recent_lessons）→ MCP 检索（factor_search/detail/similar）→ 生成候选(全品种 feeds 约束见 brainstorm SKILL) → persist_idea + run_save(factors)
-4. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
+1. **假设生成**（图驱动，替代坐标抽样）：调 Skill `graph-engine`，传 `{run_id}`。
+   - graph-engine 内部自主：`graph_stats` 选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `add_graph_node` / `add_graph_edges` 落盘
+   - 产出：1 个必然假设（necessary/identification）+ argument_chain + necessity_grade + idea_id + operation_used
+   - 回主会话：`state.idea` / `state.idea_id`（带 argument_chain + grade）已落盘
+   - **fallback**：图无触发点时 graph-engine 自动调 `hypothesis-generator`（旧 lens 多轮路径），新旧产生器并存可对比
+2. **因子候选**（基于假设产 N 实现验证，非坐标拼装）：调 Skill `brainstorm`，传 `{idea: state.idea, n_factors: 3, run_id}`。
+   - brainstorm 基于 hypothesis-generator 产的假设，产 N 个因子实现（同一假设的不同验证角度/实现方式——围绕 argument_chain 的核心机制构造）
+   - brainstorm skill 内部：MCP 摸底 + 检索 → 生成候选（全品种 feeds）→ `persist_candidates` + run_save(factors)
+3. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
 
 **连续失败处理**：brainstorm skill 内部 MCP 连续失败 3 次会自己 `run_save {status: "paused"}` 并停止；主会话检测到 `state.status == "paused"` 时中止后续 Step。
 
@@ -85,18 +87,13 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：最后一个 evaluate 返回后，**必须立即在同一回合**进入 Step 4：调 `run_save {status: "done", finished_at: <ISO>}`。禁止输出"所有因子评估完成"之类的纯文字回合。
 
-## Step 4 · 汇总报告（含结论）
+## Step 4 · 汇总报告（support_score 连续，不绝对判断）
 
-1. **汇总结论**——按 IDEA_SOURCE 区分(读 state.factors 的 verdicts):
-   - **hypothesis 模式**:回答**假设是否被验证**(idea 是合规假设,三道门槛构造):
-     - 过半 check_done pass → 假设**成立**(因子回应了假设)
-     - 多数 fail → 假设**否决**(因子否定了假设)
-     - 分歧 → **部分回应**(条件性成立,记哪类 pass / 哪类 fail)
-   - **inspiration 模式**:回答**探索发现**(idea 是发散拼句,非严格假设):
-     - 这轮 idea 的因子 pass/fail 分布(探索结果)
-     - key 教训(成功经验 / dead_end 方向)
-     - 下次探索方向(基于教训,该深挖/避开什么)
-   - 无 check_done(两种模式)→ **未验证**(因子没跑成,悬空)
+1. **汇总结论**——读假设支持度（连续分数，**不判成立/否决**——假设级保留不确定性）：
+   - 调 `mcp__quant-mcp__get_hypothesis {idea_id: state.idea_id}` 读 `support_score`（贝叶斯平滑，0-1 连续）+ `evaluated_factor_count` + `necessity_grade`
+   - support_score 是连续支持度（necessary 假设 pass 权重高 / identification 次之），不转绝对判断
+   - 记 state: `run_save {run_id, patch: {"idea_support_score": <support_score>, "idea_evaluated_count": <count>, "idea_conclusion": "<一句话: 支持度=N, grade=X, N 因子 pass/fail 分布>"}}`
+   - 报告：support_score + evaluated_factor_count + necessity_grade + pass/fail 分布 + key 教训（成功经验 / dead_end 方向）
 
    记 state:`run_save {run_id, patch: {"idea_verdict": "<hypothesis: 成立/否决/部分 | inspiration: 有效/无效/部分>", "idea_conclusion": "<一句话结论>"}}`
 
