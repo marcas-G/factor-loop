@@ -1,6 +1,6 @@
 ---
 name: reviewer-agent
-description: 必然假设的对抗式审稿子代理。session 隔离——只接收论证链 artifact，不接收作者推理过程。被 hypothesis-generator 通过 Task 工具派出。
+description: 必然假设的对抗式审稿子代理。session 隔离——只接收论证链 artifact，不接收作者推理过程。被 hypothesize 通过 Task 工具派出(模式一假设审稿;模式二忠实度由 assess 派)。
 tools: Read, mcp__quant-mcp__hypothesis_get
 ---
 

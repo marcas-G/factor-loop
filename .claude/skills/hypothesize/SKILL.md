@@ -1,6 +1,6 @@
 ---
 name: hypothesize
-description: 知识图驱动假设产生引擎。在分层知识图(AXIOM→DERIVED→HYPOTHESIS)上做结构化扩展(resolve_contradiction/generalize_from_refutation/fill_chain_gap/orthogonal_branch)产生必然假设,替代 hypothesis-generator 的统计扫描。触发:/hypothesize、或"图推理产假设"、或被 research-loop Step1 调用。
+description: 知识图驱动假设产生引擎。在分层知识图(AXIOM→DERIVED→HYPOTHESIS)上做结构化扩展(resolve_contradiction/generalize_from_refutation/fill_chain_gap/orthogonal_branch)产生必然假设。触发:/hypothesize、或"图推理产假设"、或被 research-loop Step1 调用。
 ---
 
 # Hypothesize — 知识图驱动假设产生
@@ -35,7 +35,7 @@ G1→G2→G3→G4→G5,每个 G 完成后**必须立即在同一回合**发起�
 
 **→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent。
 
-**fallback**:推荐 explore 但 `fresh_angles` 空(所有角度都 saturated)→ 调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
+**无 fallback**:推荐 explore 但 `fresh_angles` 空(全角度 saturated,无新角度可挖)→ 图推理产不出新假设 → G5 返回 `{no_hypothesis: true}`(如实报告,不硬凑)。
 
 ## G2 · 派 graph-reasoner-agent 执行扩展操作
 
@@ -88,22 +88,27 @@ Task({
 - `degrade_suggested`(type 天然不可达):按 degrade_suggestion 降 necessity_grade,回 G3 重审 1 次。
 - `unreachable`(无超加性硬核 / Σ 错):该触发点放弃,回 G1 选下一触发点。
 
-**触发点耗尽仍无 pass** → fallback:`Skill hypothesis-generator`。
+**触发点耗尽仍无 pass** → G5 返回 `{no_hypothesis: true, reason: "触发点耗尽"}`(无 fallback,如实返回)。
 
 ## G5 · 返回
 
-返回给调用方:
+**正常**(产了假设):
 ```
 {idea_id, text, necessity_grade, argument_chain, operation_used: "<op>"}
 ```
+→ research-loop Step1 进入 Step2(brainstorm 产 N 因子实现验证)。
 
-被 research-loop Step1 调用时,这个返回进入 Step2(brainstorm 产 N 个因子实现验证该假设)。
+**卡住**(无 fallback,如实返回):
+```
+{no_hypothesis: true, reason: "全角度 saturated / 触发点耗尽,图推理产不出新假设"}
+```
+→ research-loop Step1 收到后 paused(图推理耗尽,不硬凑假设)。
 
 ## 关键不变量
 
 - **单一真相源**:节点只写 ideas/axioms 表,边只写 graph_edges。不新建映射表。
 - **reviewer 独立**:graph-reasoner 产,reviewer 独立对抗审,主会话据 verdict 落盘。三者职责分离。
-- **可回退**:hypothesis-generator 永远在作 fallback,新旧产生器并存可对比。
+- **无 fallback**:图推理耗尽(全饱和/触发点尽)如实返回 `no_hypothesis`,不硬凑假设;research-loop 据 paused。
 
 ## 不要做
 

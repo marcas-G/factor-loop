@@ -1,6 +1,6 @@
 # 因子假设方法论（hypothesis-framework）
 
-> 本文件 = **真相**。它是 reviewer / graph-reasoner / hypothesize / assess / hypothesis-generator 五个执行体的共同方法论基底;各 skill/agent 是它的执行投影。
+> 本文件 = **真相**。它是 reviewer / graph-reasoner / hypothesize / assess 四个执行体的共同方法论基底;各 skill/agent 是它的执行投影。
 > 凡本文件与单个 skill/agent 的局部描述冲突,以本文件为准(局部描述应回写对齐)。
 >
 > 一句话:因子假设是对「现象依赖某机制」的**可证伪必然性断言**;产生与验证认知相反,故用对抗式审稿隔离;数据驱动默认 conditional,底线是**赚钱闭环 + 可证伪 trace**。
@@ -176,7 +176,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 ---
 
-## 3. 假设产生:两条路径
+## 3. 假设产生:hypothesize 图驱动
 
 ### 3.1 主路径 · hypothesize 图驱动 5 操作
 
@@ -192,25 +192,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 每个操作由 graph-reasoner-agent 单步推理(S1-S4 + 三道门槛),产出 `new_nodes` + `new_edges` JSON;reviewer 独立对抗审;主会话据 verdict 落盘。三者职责分离(产生/验证/落盘)。
 
-### 3.2 fallback · hypothesis-generator lens 反常归纳
-
-hypothesize 触发点耗尽或所有角度 saturated 时,走 lens 多轮自主发现反常:
-
-1. 多轮调 data-lens(predictive/condition/memory/orderflow/...)自适应追线索,累积反常
-2. 识别反常(违反机制预期 / 跨维度矛盾 / 异常形态)
-3. 构造约束耦合矛盾(A vs B)→ S1-S4
-
-**无知类型标注**(决定可攻 vs 诚实承认):
-
-| 无知类型 | 可减少? | 动作 |
-|---|---|---|
-| **公理性**(经验 vs 理论不相容) | ✅ | 攻——进 S1-S4,假设解释新机制 |
-| **解释性**(反常没形式化) | ✅ | 清晰化为公理性再攻 |
-| **群体无知**(未覆盖方向) | ✅ | 扩研究(测未覆盖) |
-| **逻辑性**(Σ 天花板,S2/S4 反复 fail) | ❌ | paradigm 异常,交人换 Σ(§3.4) |
-| **现象学**(混沌/相变,本质不可预测) | ❌ | 诚实承认,不硬解 |
-
-优先攻公理性无知(假设能减少它);逻辑性/现象学不可减少,诚实承认(避免"封闭的无知")。
+**无 fallback**:触发点耗尽或全角度 saturated 时,图推理产不出新假设,如实返回 `no_hypothesis`(research-loop 据 paused)——不再走 lens 反常归纳兜底。
 
 ### 3.3 BOUNDS 否定性边(axiom 证伪)
 
@@ -325,5 +307,4 @@ L0 字段 → L1a 原语事件(字段差分) → L1b 构造观测量(统计才�
 - `agents/reasoners/reviewer-agent.md` — 模式一(S2/S4 攻击)、模式二(忠实度)
 - `agents/reasoners/graph-reasoner-agent.md` — 5 操作的 S1-S4 推理框架 + 三道门槛
 - `skills/hypothesize/SKILL.md` — 5 操作编排 + reviewer 派遣
-- `skills/hypothesis-generator/SKILL.md` — lens 反常归纳 + S1-S4
 - `skills/assess/SKILL.md` — 双轨验证 + 三维度

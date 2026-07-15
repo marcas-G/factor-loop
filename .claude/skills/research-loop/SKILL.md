@@ -42,12 +42,12 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 ## Step 1 · 假设生成 + 因子候选（hypothesize → brainstorm）
 
 1. **假设生成**（图驱动，替代坐标抽样）：调 Skill `hypothesize`，传 `{run_id}`。
-   - hypothesize 内部自主：`graph_stats` 选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `graph_add_node` / `graph_add_edges` 落盘
+   - hypothesize 内部自主：`graph_select_operation` 动态打分选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `graph_add_node` / `graph_add_edges` 落盘
    - 产出：1 个必然假设（necessary/identification）+ argument_chain + necessity_grade + idea_id + operation_used
    - 回主会话：`state.idea` / `state.idea_id`（带 argument_chain + grade）已落盘
-   - **fallback**：图无触发点时 hypothesize 自动调 `hypothesis-generator`（旧 lens 多轮路径），新旧产生器并存可对比
+   - **卡住处理（无 fallback）**：hypothesize 返回 `{no_hypothesis: true}`（全角度 saturated / 触发点耗尽）→ `run_save {status: "paused", paused_reason: "图推理耗尽，无新假设"}` + 向用户报告 + **停止**（衔接硬规则 paused 例外）
 2. **因子候选**（基于假设产 N 实现验证，非坐标拼装）：调 Skill `brainstorm`，传 `{idea: state.idea, n_factors: 3, run_id}`。
-   - brainstorm 基于 hypothesis-generator 产的假设，产 N 个因子实现（同一假设的不同验证角度/实现方式——围绕 argument_chain 的核心机制构造）
+   - brainstorm 基于 hypothesize 产的假设，产 N 个因子实现（同一假设的不同验证角度/实现方式——围绕 argument_chain 的核心机制构造）
    - brainstorm skill 内部：MCP 摸底 + 检索 → 生成候选（全品种 feeds）→ `persist_candidates` + run_save(factors)
 3. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
 

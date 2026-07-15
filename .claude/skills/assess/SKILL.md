@@ -17,7 +17,7 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 - `state.idea` — 本次研究 idea
 - `state.factors[i].name` — 因子类名
 - `state.factors[i].hypothesis` — 因子设计假设(brainstorm 阶段由 intuition + diff_check + coord_usage 拼接而成)
-- `state.factors[i].evidence.seven_dim_summary` — 评估数据 JSON(字段名历史命名,是三维度各指标的数据载体)
+- `state.factors[i].evidence.seven_dim_summary` — 评估数据 JSON(字段名历史命名,风是三维度各指标的数据载体)
 - `state.factors[i].factor_file` — .h 文件绝对路径
 - `state.factors[i].last_rewrite` — retry 信息(可能为 null)
 - `state.idea_id` — 关联的 idea id
@@ -41,7 +41,7 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 
 因子是否真验证了它声称的假设?IC 高 ≠ 验证假设——可能来自别的机制(冒充)。
 
-**前提**:假设有结构化 argument_chain(hypothesis-generator 产,在 ideas.argument_chain,用 `hypothesis_get` 读)。散文 hypothesis(旧 brainstorm 无论证链)→ 跳过本维(无法对照),仅经验维度评估。
+**前提**:假设有结构化 argument_chain(hypothesize 产,在 ideas.argument_chain,用 `hypothesis_get` 读)。散文 hypothesis(旧 brainstorm 无论证链)→ 跳过本维(无法对照),仅经验维度评估。
 
 **审稿**:派 reviewer-agent 忠实度模式(模式二):
 ```
