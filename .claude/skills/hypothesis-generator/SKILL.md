@@ -44,7 +44,7 @@ description: 必然假设生成机。从约束耦合矛盾（反常 A vs B）逼
 
 反常形态：命题矛盾 / 理论 vs 数据 / 认识论缺口 / 上下界夹逼 / 多目标牵制（从 data-lens 观测识别）。
 
-**data-lens 是观测手段**（给 LLM 看数据的能力），不是或然降级渠道。发现的反常仍走 necessary/identification 严筛，不降级 conditional/draft。
+**data-lens 是观测手段**（给 LLM 看数据的能力）。发现的反常走 S1-S4 推理；数据驱动归纳默认产 conditional（底线=赚钱闭环 + 可证伪 trace），necessary 是 stretch goal。详见 hypothesis-framework §0.3。
 - `parent_idea_id`（可选）：迭代/精化某已有假设时填。
 
 ### 多轮自适应深挖（AI 自主探索找蛛丝马迹）
@@ -150,12 +150,13 @@ C 是被 A、B 牵制**逼出来**的必然解。约束耦合矛盾就是 A 与 
 
 > 为什么回到四来源：五 type 是操作清单，但选 type 时若不知"必然性从哪来"，就会乱贴标签（声称 extremum 却不证严格凹）。四来源是 type 的**判据根基**——type 必须对应一个真实的必然性来源，否则是类型错配。
 
-### grade 分级（严，不降级）
+### grade 分级（2026-07 共识：conditional 为数据驱动默认）
 
-- **necessary**：S2 真超加性 + S4 真唯一性证明（四来源之一，数学封闭）。严。
+- **necessary**：S2 真超加性 + S4 真唯一性证明（四来源之一，数学封闭）。**stretch goal**——靠理论内部张力(演绎)达成,非数据归纳。
 - **identification**：S2 硬核 + S4 退化为可识别标量。诚实降级（Roll 式，论文级）。
+- **conditional**：数据驱动反常归纳**默认产出**。质量底线 = ①赚钱闭环闭合 + 可证伪 trace，不强求超加性必然。IC + 样本外当最终裁判。
 
-**不接受 conditional/draft**——不降严谨。data-lens 观测发现的反常，仍走 necessary/identification 严筛。
+**与 reviewer / graph-reasoner 对齐**：纯数据驱动发现（矛盾/反例归纳）几乎都或然，强求 necessary 卡死产量。conditional 带 falsifiable_trace 仍可证伪（IC 裁判），图的血缘/反例约束防重复。详见 hypothesis-framework §0.3。
 
 ### 审稿（派 reviewer-agent，session 隔离）
 
@@ -201,9 +202,9 @@ reviewer 的 fail 不是"重试"，是按**失效根因定向分诊**。按 `ach
 | `draft` | 待补 |
 
 **关键辩证**：
-- **必然 ≠ 经典**。一个案例发顶刊、被高引、是诺奖工作，**不等于**它是必然假设。ACD（Engle-Russell）是 Econometrica 论文，但它是**类比**（GARCH→duration 结构同构），类比是或然推理，不产生必然性——挡门外。判据独立于案例声誉。
-- **框架的严格性由"拒绝什么"定义**。什么接纳的机器没有标准。necessary 标准不动，是为了让框架区别于"枚举所有有效研究"的集合思维。
-- **或然假设挡门外不是损失**。框架是"必然假设生成机"，不是"通用研究机"。或然研究走另一套验证（跨域迁移稳健性），不该混入必然框架稀释标准。
+- **必然 ≠ 经典**。一个案例发顶刊、被高引、是诺奖工作，**不等于**它是必然假设。ACD（Engle-Russell）是 Econometrica 论文，但它是**类比**（GARCH→duration 结构同构），类比是或然推理——属于 conditional 而非 necessary。判据独立于案例声誉。
+- **grade 是必然性强度,不是研究价值**。conditional 不是"被拒次品",是数据驱动发现的**默认位置**（或然但有闭环 + 可证伪 trace）。necessary 是 stretch,靠理论内部张力达成。
+- **质量底线不放宽**。conditional 入图的前提仍是 ①赚钱闭环闭合 + 可证伪 trace（falsifiable_trace 必填）；底线以下（无闭环 / 无 trace）才 bounded 或空手。详见 hypothesis-framework §0.3。
 
 ---
 
