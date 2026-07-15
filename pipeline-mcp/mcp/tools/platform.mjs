@@ -8,10 +8,10 @@ import { checkFactorProgrammatic } from "../../stages/check.mjs";
 import { renameFactorH } from "../../stages/rename-factor.mjs";
 import { isAllZeroFromScreening } from "../../lib/metrics.mjs";
 import { runSave, runLoad } from "../lib/run-store.mjs";
-import * as factorDb from "../../factor-db.mjs";
+import * as factorDb from "../../lib/factor-db.mjs";
 
 export const submitFactorSchema = {
-  name: "submit_factor",
+  name: "platform_submit_factor",
   description: "把因子推送到量化平台（调 featuretool.py submit）。返回 {ok, features, error}。",
   inputSchema: {
     type: "object",
@@ -33,14 +33,14 @@ export async function submitFactorHandler({ xname, factorFile, categories = [], 
 }
 
 export const checkFactorSchema = {
-  name: "check_factor",
+  name: "platform_check_factor",
   description:
     "检查因子评估结果（调 factor_check.py run + 抓 evidence + 诊断）。工具内部直接把完整 evidence + failure_layer 落到 state（不经 agent 手，避免 LLM 二次加工丢字段）。返回给调用方的只有路由信息 {failureLayer, summary}，不含 evidence。check_output_missing + 因子值全零时自动换名重试一次（DAG 缓存陷阱自愈）。",
   inputSchema: {
     type: "object",
     properties: {
       xname: { type: "string" },
-      submitRef: { type: "object", description: "submit_factor 的返回值 {ok, features}" },
+      submitRef: { type: "object", description: "platform_submit_factor 的返回值 {ok, features}" },
       checkOutput: { type: "string", description: "check 输出目录绝对路径" },
       run_id: { type: "string", description: "研究 run id（用于内部 run_save evidence）" },
       factor_index: { type: "integer", description: "state.factors 下标（用于内部 run_save）" },
@@ -198,6 +198,6 @@ function _writeMockZeroScreening(checkOutput, featureKey) {
 
 export const ALL_PLATFORM_SCHEMAS = [submitFactorSchema, checkFactorSchema];
 export const ALL_PLATFORM_HANDLERS = {
-  submit_factor: submitFactorHandler,
-  check_factor: checkFactorHandler,
+  platform_submit_factor: submitFactorHandler,
+  platform_check_factor: checkFactorHandler,
 };

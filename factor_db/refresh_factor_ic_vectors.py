@@ -46,7 +46,8 @@ if str(ROOT) not in sys.path:
 
 from factor_db import db
 
-CACHE_DIR = Path("/tmp/factor-vec-cache")
+CACHE_DIR = Path("/home/lgao/tmp/factor-vec-cache")  # 持久缓存(89% 命中);/tmp 重启会丢
+CACHE_MAX = 20  # 缓存上限(LRU):超限删最旧 dailyX,控制磁盘(~6G);factor_ic_daily 不受影响
 WINDOW_SIZE = 250
 MIN_SAMPLES = 30               # 至少 30 日 IC 才存向量
 MIN_TICKS_PER_DAY = 30         # 单日至少 30 个有效 tick 才算 IC
@@ -72,12 +73,28 @@ def parse_y_column(col: str) -> tuple[str, int]:
     return m.group(1), int(m.group(2))
 
 
+def prune_cache(cache_dir: Path, max_n: int = CACHE_MAX) -> None:
+    """LRU:缓存因子目录超 max_n,删最旧(by mtime)。控制磁盘——删的只是 dailyX 原始数据,
+    factor_ic_daily(IC 结果)在数据库,不受影响;重算被删的因子要重新下载。"""
+    if not cache_dir.exists():
+        return
+    dirs = [d for d in cache_dir.iterdir() if d.is_dir()]
+    if len(dirs) <= max_n:
+        return
+    dirs.sort(key=lambda d: d.stat().st_mtime)  # 旧→新
+    for d in dirs[: len(dirs) - max_n]:
+        shutil.rmtree(d, ignore_errors=True)
+        print(f"  [cache LRU] 删旧缓存: {d.name}")
+
+
 def download_factor(xname: str, cache_dir: Path) -> Path | None:
     target_dir = cache_dir / xname
     dailyx_dir = target_dir / "dailyX"
 
     if dailyx_dir.exists() and any(dailyx_dir.iterdir()):
         return dailyx_dir
+
+    prune_cache(cache_dir)  # 下载前 LRU:超 20 删最旧
 
     if target_dir.exists():
         shutil.rmtree(target_dir)
@@ -209,9 +226,14 @@ def clear_existing(conn, factor_xname: str | None) -> None:
             "DELETE FROM factor_ic_vec_meta WHERE factor_xname = ?",
             (factor_xname,),
         )
+        conn.execute(
+            "DELETE FROM factor_ic_daily WHERE factor_xname = ?",
+            (factor_xname,),
+        )
     else:
         conn.execute("DELETE FROM factor_ic_vec")
         conn.execute("DELETE FROM factor_ic_vec_meta")
+        conn.execute("DELETE FROM factor_ic_daily")
 
 
 def write_vectors(conn, factor_xname: str, items: list[dict]) -> int:
@@ -243,6 +265,30 @@ def write_vectors(conn, factor_xname: str, items: list[dict]) -> int:
             ),
         )
         written += 1
+    return written
+
+
+def write_daily_ic(conn, factor_xname: str, items: list[dict]) -> int:
+    """把原始日级 IC 序列(归一化前)写入 factor_ic_daily,供 residual_ic_strength 正交用。
+
+    与 write_vectors 同因子级调用(clear_existing 已按因子清表)。样本不足被 standardize_ic
+    跳过的项(vec is None)不写——这些也进不了 ANN 检索,口径一致。
+    """
+    written = 0
+    for it in items:
+        if it.get("vec") is None or it.get("ic_series") is None:
+            continue
+        rows = [
+            (factor_xname, it["symbol"], it["freq"], it["y_horizon"], str(d), float(ic))
+            for d, ic in it["ic_series"].items()
+        ]
+        conn.executemany(
+            """INSERT OR REPLACE INTO factor_ic_daily
+               (factor_xname, symbol, freq, y_horizon, date, ic)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        written += len(rows)
     return written
 
 
@@ -293,6 +339,7 @@ def process_factor(conn, xname: str, cache_dir: Path, force: bool) -> list[dict]
             "freq": freq,
             "y_horizon": y_horizon,
             "vec": vec,
+            "ic_series": ic_series,   # 原始日级 IC,供 write_daily_ic 入库(残差 Miner 用)
             **meta,
         })
     return items
@@ -338,7 +385,9 @@ def main() -> None:
         for xname, items in all_items_by_factor.items():
             clear_existing(conn, xname)
             n = write_vectors(conn, xname, items)
+            nd = write_daily_ic(conn, xname, items)
             total += n
+            print(f"  [daily] {xname}: {nd} 条日级 IC 入 factor_ic_daily")
             print(f"\n[{xname}] 写入 {n} 条 IC 向量：")
             for it in items:
                 if it.get("vec") is None:

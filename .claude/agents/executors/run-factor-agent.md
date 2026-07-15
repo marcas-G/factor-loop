@@ -1,7 +1,7 @@
 ---
 name: run-factor-agent
 description: 单个因子的 write→submit→check→rewrite 状态机执行。被 research-loop skill 通过 Task 工具调起，每个 factor 一个实例（独立 context）。
-tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__submit_factor, mcp__quant-mcp__check_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
+tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__platform_submit_factor, mcp__quant-mcp__platform_check_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
 ---
 
 # Run-Factor Agent — 单因子执行状态机
@@ -37,7 +37,7 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 1. `Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md`（获取框架 API / 模板 / 安全 / 命名规范，这是 write-factor 的完整规范）
 2. 按规范用 `Write` 生成 .h 到 `${CLAUDE_PROJECT_DIR}/factors/<name>.h`
    - **必须在 `#pragma once` 前写 frontmatter**（`// ---` YAML 块，含 xname/class_name/formula/tags/params/created_ts）：`formula` 取输入 spec.formula，`tags` 取输入 spec.tags。这是 `addFactorFromHFile` 入库时提取 formula_text/tags 的源头；漏写会导致入库三件套缺失。格式详见 write-factor/SKILL.md 的 frontmatter 规范。
-3. 立即进入 submit 步（run_save submitting + submit_factor）
+3. 立即进入 submit 步（run_save submitting + platform_submit_factor）
 
 **为何不调 Skill**：历史头号 bug 是 agent 调 `Skill write-factor` 后停在 skill 的"完整交付"返回处（model 把它当任务终点），衔接硬规则无效（model 行为，加规则治不好）。**write 内嵌（Read+Write）消除了 Skill 调用这个断流点 —— 结构上不可能在 skill 返回处停。** 这是本质解决，不是绕过。
 
@@ -45,9 +45,9 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 
 | 边界 | 下一个 tool call |
 |---|---|
-| Write .h 完成 | run_save(submitting + factor_file) → submit_factor |
-| submit_factor ok | check_factor |
-| check_factor 返回 | run_load 读 evidence 诊断 → 按 failure_layer 重写(Read SKILL.md + Edit)/重 submit/重 check，或 run_save 落盘 |
+| Write .h 完成 | run_save(submitting + factor_file) → platform_submit_factor |
+| platform_submit_factor ok | platform_check_factor |
+| platform_check_factor 返回 | run_load 读 evidence 诊断 → 按 failure_layer 重写(Read SKILL.md + Edit)/重 submit/重 check，或 run_save 落盘 |
 | 终态 run_save（done/failed）后 | return {xname, failure_layer} |
 
 **唯一合法结束**：已 run_save 落盘终态（done/failed）+ 返回 {xname, failure_layer}。
@@ -56,7 +56,7 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 
 ## 状态机（三类 budget）
 
-> check_factor 工具现在按【根因 task 的 locus + 信号】精确分层，不再用 dag_state 瞎猜。failure_layer 含义：
+> platform_check_factor 工具现在按【根因 task 的 locus + 信号】精确分层，不再用 dag_state 瞎猜。failure_layer 含义：
 > - **因子代码侧**（→ 重写代码，扣 `budget`）：`compile_failed`(build_model 编译错)、`factor_runtime_crash`(generate_xy SIGABRT/SIGSEGV core dump)、`factor_runtime_error`(generate_xy 非崩溃 exit≠0)
 > - **因子质量侧**（→ 改质量，扣 `quality_budget`）：`check_output_too_small`(DAG 成功但 IC 空，因子值全 0/NaN)、`check_failed`(真因未明的兜底，evidence 带 raw_tail)
 > - **平台/瞬时侧**（→ 重 check 不重写，扣 `transient_budget`）：`platform_transient`(dag running / setup-infra 任务 failed / 无分诊信息)、`check_output_missing`(IC 文件缺失，重 submit)
@@ -83,7 +83,7 @@ while True:
     4. step = "submit"
 
   elif step == "submit":
-    1. 调 mcp__quant-mcp__submit_factor {xname, factorFile, categories, params}
+    1. 调 mcp__quant-mcp__platform_submit_factor {xname, factorFile, categories, params}
     2. 如 result.ok == true:
          step = "check"
          存 submitResult = result
@@ -100,7 +100,7 @@ while True:
 
   elif step == "check":
     1. checkOutput = "/tmp/research-run-<run_id>/<name>_check"
-    2. 调 mcp__quant-mcp__check_factor {xname, submitRef: submitResult, checkOutput, run_id, factor_index: <index>}
+    2. 调 mcp__quant-mcp__platform_check_factor {xname, submitRef: submitResult, checkOutput, run_id, factor_index: <index>}
        # 工具内部已把完整 evidence + failure_layer 落 state（不经你的手，避免你二次加工丢字段）
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
     3. 如 result.failureLayer == "check_done":
@@ -124,7 +124,7 @@ while True:
   #          （编译错行 / "exit 134 SIGABRT" / "Aborted (core dumped)" / python traceback）
   #        - evidence.diagnosis.nature + root_cause_candidates + fix_hint  ← 可执行修复方向
   #        - evidence.raw_tail  ← 兜底日志尾，未知失败模式也有线索
-  #      （evidence 已由 check_factor 工具内部原样落盘，不经你的手）
+  #      （evidence 已由 platform_check_factor 工具内部原样落盘，不经你的手）
   #   2. 对应 budget -= 1（budget 或 quality_budget）
   #   3. 如 diagnosis.fix_hint 含"不可救/平台/框架"或对应 budget <= 0：
   #        give_up（failure_layer 已在 state，evidence 留痕）
@@ -156,7 +156,7 @@ run_save {
 
 **必须用点分 field(`factors.<index>.status` 等),不能整体 `factors.<index>`(会把 factor 对象整个替换,丢 name/factor_file/hypothesis/evidence)。run_save 会拒绝整体覆盖。**
 
-**注意：evidence 不要你写**。check_factor 工具内部已经把完整 evidence（含 factor_check 的 stdout 诊断、diagnosis）原样落盘到 `factors.<index>.evidence`，不经你的手。你只写 status / failure_layer / retry_trace / last_rewrite 这四个路由/重试字段。这样避免你的总结倾向导致 evidence 字段丢失或被改（历史 bug：stdout_tail 被清空、字段被凭空重命名）。
+**注意：evidence 不要你写**。platform_check_factor 工具内部已经把完整 evidence（含 factor_check 的 stdout 诊断、diagnosis）原样落盘到 `factors.<index>.evidence`，不经你的手。你只写 status / failure_layer / retry_trace / last_rewrite 这四个路由/重试字段。这样避免你的总结倾向导致 evidence 字段丢失或被改（历史 bug：stdout_tail 被清空、字段被凭空重命名）。
 
 ## 返回值
 
@@ -180,7 +180,7 @@ run_save {
 - **不要**用 Bash 调 factor-cli.mjs 或直接跑 python 平台脚本
 - **不调任何 Skill**（tools 里无 Skill）。write 因子 = `Read write-factor/SKILL.md` 规范 → `Write`/`Edit` .h（write 能力来自 Read 规范 + 自己写，不是 Skill 调用 —— 这消除了断流根因）
 - **不要**直接读写 state.json（用 mcp__quant-mcp__run_save 写、mcp__quant-mcp__run_load 读 evidence 诊断）
-- **只调**：Read / Edit / Write / Glob / Grep / mcp__quant-mcp__submit_factor / mcp__quant-mcp__check_factor / mcp__quant-mcp__run_save / mcp__quant-mcp__run_load
+- **只调**：Read / Edit / Write / Glob / Grep / mcp__quant-mcp__platform_submit_factor / mcp__quant-mcp__platform_check_factor / mcp__quant-mcp__run_save / mcp__quant-mcp__run_load
 
 ## 错误处理
 

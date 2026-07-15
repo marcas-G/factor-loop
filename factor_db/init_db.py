@@ -18,6 +18,9 @@ from pathlib import Path
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "factors.db"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import migrations  # noqa: E402  同目录;init 后调 migrate 记录版本链
+
 
 def load_sqlite_vec(conn: sqlite3.Connection) -> None:
     """加载 sqlite-vec 扩展。失败时给出明确错误。"""
@@ -37,15 +40,19 @@ def init_db(db_path: Path = DEFAULT_DB) -> None:
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
 
     conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row  # db.py 函数按名取列,需 Row factory(对齐 get_conn 契约)
     try:
         load_sqlite_vec(conn)
         conn.executescript(schema_sql)
+        # 新库已由 schema.sql 直建到最新结构;migrate 幂等记录版本链(结构补齐为 noop)。
+        migrations.migrate(conn)
         conn.commit()
     finally:
         conn.close()
 
     print(f"[OK] 初始化完成: {db_path}")
     print(f"     schema: {SCHEMA_PATH}")
+    print(f"     schema_version: {migrations.CURRENT_VERSION}")
 
 
 def main() -> None:

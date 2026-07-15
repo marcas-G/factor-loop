@@ -6,7 +6,7 @@ import os from "node:os";
 
 import * as tools from "../tools/platform.mjs";
 
-test("submit_factor 在 mock 模式返回 ok=true", async () => {
+test("platform_submit_factor 在 mock 模式返回 ok=true", async () => {
   process.env.QUANT_MCP_MOCK_PLATFORM = "1";
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "quant-mcp-test-"));
   const factorFile = path.join(tmpDir, "Test.h");
@@ -22,7 +22,7 @@ test("submit_factor 在 mock 模式返回 ok=true", async () => {
   delete process.env.QUANT_MCP_MOCK_PLATFORM;
 });
 
-test("check_factor mock：返回 {failureLayer,summary}，evidence 落 state", async () => {
+test("platform_check_factor mock：返回 {failureLayer,summary}，evidence 落 state", async () => {
   process.env.QUANT_MCP_MOCK_PLATFORM = "1";
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quant-runs-"));
   process.env.QUANT_MCP_RUNS_ROOT = tmpRoot;
@@ -48,7 +48,7 @@ test("check_factor mock：返回 {failureLayer,summary}，evidence 落 state", a
 
 test("platform schema 名称正确", () => {
   const names = tools.ALL_PLATFORM_SCHEMAS.map(s => s.name);
-  assert.deepEqual(names.sort(), ["check_factor", "submit_factor"]);
+  assert.deepEqual(names.sort(), ["platform_check_factor", "platform_submit_factor"]);
 });
 
 test("retryWithRename: 换名 + 重 submit + 重 check 成功 → 返回新结果", async () => {
@@ -76,7 +76,7 @@ test("retryWithRename: 新 check 仍 missing → null（真代码问题不自愈
   assert.equal(retried, null);
 });
 
-test("check_factor mock：DAG 缓存陷阱自愈（首次 missing+全零 → 换名 → check_done）", async () => {
+test("platform_check_factor mock：DAG 缓存陷阱自愈（首次 missing+全零 → 换名 → check_done）", async () => {
   process.env.QUANT_MCP_MOCK_PLATFORM = "1";
   process.env.QUANT_MCP_MOCK_ZERO_FIRST = "1";
   const { setRunsRoot, runInit, runLoad } = await import("../lib/run-store.mjs");

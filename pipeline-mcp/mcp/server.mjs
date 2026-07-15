@@ -10,10 +10,13 @@ import { healthSchema, healthHandler } from "./tools/health.mjs";
 import * as factorDbModule from "./tools/factor-db.mjs";
 import * as stateModule from "./tools/state.mjs";
 import * as persistModule from "./tools/persist.mjs";
+import * as hypothesisModule from "./tools/hypothesis-chain.mjs";
+import * as discoverModule from "./tools/discover.mjs";
 import * as platformModule from "./tools/platform.mjs";
+import * as graphModule from "./tools/graph-traversal.mjs";
 
 // 初始化 factor-db（首次启动时；_db 单例，重复调用无副作用）
-import { init as factorDbInit } from "../factor-db.mjs";
+import { init as factorDbInit } from "../lib/factor-db.mjs";
 factorDbInit();
 
 const ALL_TOOLS = [
@@ -30,9 +33,21 @@ const ALL_TOOLS = [
     schema,
     handler: persistModule.ALL_PERSIST_HANDLERS[schema.name],
   })),
+  ...hypothesisModule.ALL_HYPOTHESIS_SCHEMAS.map((schema) => ({
+    schema,
+    handler: hypothesisModule.ALL_HYPOTHESIS_HANDLERS[schema.name],
+  })),
+  ...discoverModule.ALL_DISCOVER_SCHEMAS.map((schema) => ({
+    schema,
+    handler: discoverModule.ALL_DISCOVER_HANDLERS[schema.name],
+  })),
   ...platformModule.ALL_PLATFORM_SCHEMAS.map((schema) => ({
     schema,
     handler: platformModule.ALL_PLATFORM_HANDLERS[schema.name],
+  })),
+  ...graphModule.ALL_GRAPH_TRAVERSAL_SCHEMAS.map((schema) => ({
+    schema,
+    handler: graphModule.ALL_GRAPH_TRAVERSAL_HANDLERS[schema.name],
   })),
 ];
 

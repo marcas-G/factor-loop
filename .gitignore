@@ -16,6 +16,7 @@ __pycache__/
 /featuretool-tmp/
 /check-output/
 /logs/
+/pipeline-py/observe/out/
 *.tar
 *.tar.gz
 
@@ -52,7 +53,8 @@ __pycache__/
 /evaluate_op.py
 /FACTOR_DB_DESIGN.md
 /中小盘_周频rent蓝图.md
-/docs/
+/docs/*
+!/docs/architecture.md
 /research/
 /factors/
 /factors_to_import/

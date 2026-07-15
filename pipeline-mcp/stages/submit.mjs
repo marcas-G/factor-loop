@@ -2,7 +2,7 @@
 // 纯代码 runPy 一次性调用。失败处理（重试/改代码）由 run-factor.mjs 状态机决定。
 
 import { DRY_RUN, FEATURETOOL_PY } from "../lib/config.mjs";
-import { runPy, parseJsonOutput } from "../run-py.mjs";
+import { runPy, parseJsonOutput } from "../infra/run-py.mjs";
 import { extractClassNameFromH, isTemplateClass } from "./write-factor.mjs";
 
 const SUBMIT_TIMEOUT_SEC = 120;
