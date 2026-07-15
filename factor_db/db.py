@@ -437,6 +437,25 @@ def add_axiom(
     )
 
 
+def add_graph_node(conn: sqlite3.Connection, table: str, data: dict) -> int:
+    """写节点:table='axioms'→add_axiom;table='ideas'→带 argument_chain/necessity_grade/node_layer 的 idea。
+    与 factor-db.mjs addGraphNode 对称(graph-engine G4 落盘用)。"""
+    if table == "axioms":
+        return add_axiom(conn, **data)
+    if table == "ideas":
+        chain = data.get("argument_chain")
+        if chain is not None and not isinstance(chain, str):
+            chain = json.dumps(chain, ensure_ascii=False)
+        cur = conn.execute(
+            "INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, node_layer) "
+            "VALUES (?, ?, 'open', ?, ?, ?)",
+            (data.get("text"), data.get("parent_idea_id"), chain,
+             data.get("necessity_grade"), data.get("node_layer", "HYPOTHESIS")),
+        )
+        return int(cur.lastrowid)
+    raise ValueError(f"add_graph_node 不支持表: {table}")
+
+
 def add_graph_edge(
     conn: sqlite3.Connection,
     from_table: str,
