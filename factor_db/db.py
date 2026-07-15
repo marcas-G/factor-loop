@@ -389,6 +389,7 @@ def ensure_graph_schema(conn: sqlite3.Connection) -> None:
             "ALTER TABLE ideas ADD COLUMN node_layer TEXT DEFAULT 'HYPOTHESIS'"
         )
     migrate_graph_edge_bounds(conn)
+    ensure_angle_schema(conn)
 
 
 def add_axiom(
@@ -759,3 +760,80 @@ def migrate_graph_edge_bounds(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_edges_type ON graph_edges(edge_type);
         """
     )
+
+
+# ============ 信息角度元层（angle_ontology + factors.angle_code）============
+# 数据→信息角度字典。让 graph-engine 感知"哪些角度饱和、哪些未探索",自动换角度。
+
+def ensure_angle_schema(conn: sqlite3.Connection) -> None:
+    """建 angle_ontology 表 + factors.angle_code 列。幂等。"""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS angle_ontology (
+            code          TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            field_family  TEXT NOT NULL,
+            extraction    TEXT NOT NULL,
+            signal_target TEXT,
+            theory_axiom  TEXT,
+            description   TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family)")
+    fcols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "angle_code" not in fcols:
+        conn.execute("ALTER TABLE factors ADD COLUMN angle_code TEXT")
+
+
+def add_angle(
+    conn: sqlite3.Connection, code: str, name: str, field_family: str, extraction: str,
+    signal_target: str | None = None, theory_axiom: str | None = None, description: str | None = None,
+) -> None:
+    """写一条信息角度(幂等,code 主键)。"""
+    conn.execute(
+        """INSERT OR IGNORE INTO angle_ontology
+           (code,name,field_family,extraction,signal_target,theory_axiom,description)
+           VALUES (?,?,?,?,?,?,?)""",
+        (code, name, field_family, extraction, signal_target, theory_axiom, description),
+    )
+
+
+def tag_factor_angle(conn: sqlite3.Connection, xname: str, angle_code: str) -> None:
+    """标注因子所属信息角度。"""
+    conn.execute("UPDATE factors SET angle_code=? WHERE xname=?", (angle_code, xname))
+
+
+def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
+    """每角度的探索状态:因子数/dead_end/evaluated/最高icir/饱和度。explore_uncovered_angle 的输入。
+
+    饱和度启发:saturated=因子≥5且dead_end占≥60%; thin=因子≤2; unexplored=0因子; partial=其余。"""
+    rows = conn.execute(
+        """
+        SELECT a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom,
+               COUNT(f.xname) AS n_factors,
+               COALESCE(SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END),0) AS n_dead_end,
+               COALESCE(SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END),0) AS n_evaluated,
+               MAX(f.latest_icir) AS max_icir
+        FROM angle_ontology a
+        LEFT JOIN factors f ON f.angle_code = a.code AND f.deprecated_at IS NULL
+        GROUP BY a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom
+        ORDER BY n_factors ASC
+        """
+    ).fetchall()
+    out = []
+    for r in rows:
+        n, nd = r["n_factors"], r["n_dead_end"]
+        if n == 0:
+            sat = "unexplored"
+        elif n >= 5 and nd >= n * 0.6:
+            sat = "saturated"
+        elif n <= 2:
+            sat = "thin"
+        else:
+            sat = "partial"
+        out.append({
+            "code": r["code"], "name": r["name"], "field_family": r["field_family"],
+            "extraction": r["extraction"], "signal_target": r["signal_target"],
+            "theory_axiom": r["theory_axiom"], "n_factors": n, "n_dead_end": nd,
+            "n_evaluated": r["n_evaluated"], "max_icir": r["max_icir"], "saturation": sat,
+        })
+    return out

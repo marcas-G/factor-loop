@@ -195,11 +195,22 @@ export async function markContradictionBoundedHandler({ edge_id, regime, reason 
   return factorDb.markContradictionBounded({ edge_id, regime, reason });
 }
 
+export const angleCoverageSchema = {
+  name: "angle_coverage",
+  description:
+    "信息角度覆盖度:每角度的因子数/dead_end/饱和度(unexplored/thin/partial/saturated)。explore_uncovered_angle 的输入——看哪些角度饱和该跳过、哪些未探索该开挖。不靠人喂角度,图自己看地图换方向。",
+  inputSchema: { type: "object", properties: {} },
+};
+export async function angleCoverageHandler() {
+  return factorDb.queryAngleCoverage();
+}
+
 export const ALL_GRAPH_TRAVERSAL_SCHEMAS = [
   queryContradictionsSchema, getSubgraphSchema, neighborhoodSchema,
   findRefutationClustersSchema, graphStatsSchema,
   addGraphNodeSchema, addGraphEdgesSchema,
   markContradictionResolvedSchema, markContradictionBoundedSchema,
+  angleCoverageSchema,
 ];
 export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   query_contradictions: queryContradictionsHandler,
@@ -211,4 +222,5 @@ export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   add_graph_edges: addGraphEdgesHandler,
   mark_contradiction_resolved: markContradictionResolvedHandler,
   mark_contradiction_bounded: markContradictionBoundedHandler,
+  angle_coverage: angleCoverageHandler,
 };

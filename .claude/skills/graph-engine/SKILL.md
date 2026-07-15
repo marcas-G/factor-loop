@@ -28,10 +28,11 @@ G1→G2→G3→G4→G5,每个 G 完成后**必须立即在同一回合**发起�
 | 2 | generalize_from_refutation | 有 size≥3 聚簇 | `find_refutation_clusters {min_size:3,limit:1}` → 取 target + members |
 | 3 | fill_chain_gap | 某 DERIVED argument_chain 有空节 | `get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
 | 4 | orthogonal_branch | 某 HYPOTHESIS 有 3+ INSTANTIATES 无 ORTHOGONAL_TO | `neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
+| 5 | explore_uncovered_angle | 1-4 无触发点 或 聚簇都在 saturated 角度 | `angle_coverage` → 选 unexplored 优先,次 thin |
 
 **→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent。
 
-**fallback**:若 stats 全空(unresolved=0 且 find_refutation_clusters 无 size≥3 且无 chain_gap/orthogonal 触发)→ 立即调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
+**fallback**:若 1-4 无触发点 → 先 `mcp__quant-mcp__angle_coverage` 选 unexplored/thin 角度,触发 explore_uncovered_angle(开拓新角度,不靠人喂);**所有角度都 saturated 才**调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
 
 ## G2 · 派 graph-reasoner-agent 执行扩展操作
 

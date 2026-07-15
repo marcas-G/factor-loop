@@ -139,11 +139,33 @@ graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾�
 
 ---
 
+## 操作 5 · explore_uncovered_angle（开拓未探索角度）
+
+**这个操作为什么存在**:前 4 个操作都在"已有燃料(矛盾/反例/断点/正交缺口)"上推理。但当盘口不平衡等角度饱和、反例聚簇都在饱和角度内打转时,图会**在饱和角度里循环**。explore_uncovered_angle 让图**自己看 angle_coverage 地图,跳到未探索角度**——不靠人喂角度。
+
+**触发**:angle_coverage 有 unexplored(0因子)/thin(≤2) 角度。graph-engine G1 当 1-4 无好触发点或聚簇都饱和时触发。
+
+**拉取输入**:Task prompt 给选定角度的 {code,name,field_family,extraction,signal_target,theory_axiom}(来自 angle_ontology)。
+
+**推理框架**:
+- 这个角度用什么字段(field_family)、提取什么结构(extraction)?例:depth_shape = size × 档间分布矩(熵/偏度/凹凸)。
+- 对应理论命题(theory_axiom)?赚钱闭环——signal_target 指向 L1-L5 哪类钱?例:depth_shape→冲击→做市商 L2。
+- 构造可证伪假设:用 field_family 字段按 extraction 提取信号 → 预测 signal_target → 闭环 + falsifiable_trace(IC 验证什么)。
+- 默认 conditional(新角度探索,不强求 necessary)。底线:闭环 + falsifiable_trace。
+
+**输出 new_nodes[1]**:ideas,node_layer="HYPOTHESIS"(新角度种子)或 "DERIVED"(理论支撑强),necessity_grade="conditional"。
+
+**输出 new_edges**:
+- `{from_table:"ideas", from_id:"<NEW>", to_table:"axioms", to_id:<theory_axiom 的 id>, edge_type:"DERIVES_FROM", properties:{via:"explore_uncovered_angle", angle:"<角度 code>"}}`
+- properties.angle 是关键:graph-engine 落盘该假设衍生的因子时,用此 angle_code 标 factors.angle_code(让覆盖度地图正确回灌)。
+
+---
+
 ## 返回值（统一 JSON，不写库）
 
 ```json
 {
-  "operation": "resolve_contradiction|fill_chain_gap|orthogonal_branch|generalize_from_refutation",
+  "operation": "resolve_contradiction|fill_chain_gap|orthogonal_branch|generalize_from_refutation|explore_uncovered_angle",
   "trigger": { "type": "contradiction|chain_gap|orthogonal_gap|refutation_cluster", "ref": {"<edge_id|idea_id|cluster_target>": "..."} },
   "new_nodes": [
     { "table": "ideas|axioms",

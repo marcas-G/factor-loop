@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS factors (
     created_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_updated_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deprecated_at    TIMESTAMP,
-    emb_generated_at TIMESTAMP
+    emb_generated_at TIMESTAMP,
+    angle_code       TEXT          -- 信息角度元层标注(见 angle_ontology)
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);
@@ -393,4 +394,19 @@ CREATE TABLE IF NOT EXISTS observe_outputs (
 );
 CREATE INDEX IF NOT EXISTS idx_observe_axiom ON observe_outputs(axiom_code);
 CREATE INDEX IF NOT EXISTS idx_observe_script ON observe_outputs(script);
+
+-- ============ angle_ontology（信息角度元层：数据→提取角度字典）============
+-- 让 graph-engine 感知"哪些信息角度被探索/饱和/未探索",自动换角度(不靠人喂)。
+-- 角度 = 字段族 × 提取结构。factors.angle_code 标注每因子属哪角度。
+-- 覆盖度(query_angle_coverage)聚合每角度的因子数/dead_end/饱和度,驱动 explore_uncovered_angle。
+CREATE TABLE IF NOT EXISTS angle_ontology (
+    code          TEXT PRIMARY KEY,           -- 'book_imbalance'/'depth_shape'/...
+    name          TEXT NOT NULL,
+    field_family  TEXT NOT NULL,              -- size/add_cancel/volume/turnover/oi/mid/price/time
+    extraction    TEXT NOT NULL,               -- 截面差/分布矩/时间聚类/时序存活/游程/异常/水平动量
+    signal_target TEXT,                        -- 方向/流动性/冲击/意图/状态/资金事件
+    theory_axiom  TEXT,                        -- 关联 axiom code(软引用 axioms.code)
+    description   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family);
 

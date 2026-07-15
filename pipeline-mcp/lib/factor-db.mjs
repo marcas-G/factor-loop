@@ -106,6 +106,7 @@ function migrateGraphSchema() {
     _db.exec("ALTER TABLE ideas ADD COLUMN node_layer TEXT DEFAULT 'HYPOTHESIS'");
   }
   migrateGraphEdgeBounds();
+  migrateAngleSchema();
 }
 
 // graph_edges.edge_type CHECK 加 'BOUNDS'(SQLite 不能改 CHECK,需重建表)。幂等。
@@ -1371,4 +1372,43 @@ export function addGraphNode({ table, data }) {
     return Number(info.lastInsertRowid);
   }
   throw new Error(`addGraphNode 不支持表: ${table}`);
+}
+
+// ============ 信息角度元层(让 graph-engine 感知饱和/未探索,自动换角度)============
+function migrateAngleSchema() {
+  _db.exec(`CREATE TABLE IF NOT EXISTS angle_ontology (
+    code TEXT PRIMARY KEY, name TEXT NOT NULL, field_family TEXT NOT NULL,
+    extraction TEXT NOT NULL, signal_target TEXT, theory_axiom TEXT, description TEXT)`);
+  _db.exec("CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family)");
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (fcols.length > 0 && !fcols.includes("angle_code")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN angle_code TEXT");
+  }
+}
+
+export function addAngle({ code, name, field_family, extraction, signal_target = null, theory_axiom = null, description = null }) {
+  _db.prepare(`INSERT OR IGNORE INTO angle_ontology (code,name,field_family,extraction,signal_target,theory_axiom,description) VALUES (?,?,?,?,?,?,?)`)
+    .run(code, name, field_family, extraction, signal_target, theory_axiom, description);
+}
+
+export function tagFactorAngle({ xname, angle_code }) {
+  _db.prepare("UPDATE factors SET angle_code=? WHERE xname=?").run(angle_code, xname);
+}
+
+export function queryAngleCoverage() {
+  const rows = _db.prepare(`
+    SELECT a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom,
+           COUNT(f.xname) AS n_factors,
+           COALESCE(SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END),0) AS n_dead_end,
+           COALESCE(SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END),0) AS n_evaluated,
+           MAX(f.latest_icir) AS max_icir
+    FROM angle_ontology a
+    LEFT JOIN factors f ON f.angle_code=a.code AND f.deprecated_at IS NULL
+    GROUP BY a.code,a.name,a.field_family,a.extraction,a.signal_target,a.theory_axiom
+    ORDER BY n_factors ASC`).all();
+  return rows.map((r) => {
+    const n = r.n_factors, nd = r.n_dead_end;
+    const saturation = n === 0 ? "unexplored" : (n >= 5 && nd >= n * 0.6 ? "saturated" : (n <= 2 ? "thin" : "partial"));
+    return { ...r, saturation };
+  });
 }
