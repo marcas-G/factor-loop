@@ -361,9 +361,9 @@ def graph_constants() -> dict:
     return _GRAPH_CONSTANTS
 
 
-def ensure_graph_schema(conn: sqlite3.Connection) -> None:
-    """对现有库幂等补齐知识图表结构 + ideas.node_layer 列。
-    新库由 schema.sql 直接建；此函数给已存在的库做在线迁移。"""
+def _ensure_graph_tables(conn: sqlite3.Connection) -> None:
+    """建 axioms/graph_edges/observe_outputs 表(幂等)。migrations v2 graph_core 的表部分。
+    新库由 schema.sql 直建；此函数给老库在线补齐。"""
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS axioms (
@@ -395,12 +395,36 @@ def ensure_graph_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_observe_axiom ON observe_outputs(axiom_code);
         """
     )
-    # ideas.node_layer 列幂等加（ALTER 不能 IF NOT EXISTS，靠 pragma 检查）
+
+
+# ideas 必然假设字段：schema.sql ideas 表已全含；此映射给老库在线补列，对齐 mjs migrateIdeasSchema。
+# py 端此前缺此迁移（双端漂移点），阶段2 schema 版本化补齐。
+_IDEAS_NECESSITY_FIELDS = {
+    "node_layer":               "TEXT DEFAULT 'HYPOTHESIS'",
+    "argument_chain":           "TEXT",
+    "support_score":            "REAL",
+    "evaluated_factor_count":   "INTEGER NOT NULL DEFAULT 0",
+    "support_score_computed_at": "TIMESTAMP",
+    "necessity_grade":          "TEXT",
+}
+
+
+def ensure_ideas_necessity_fields(conn: sqlite3.Connection) -> None:
+    """补 ideas 必然假设字段(幂等,PRAGMA 检查 + ALTER ADD)。migrations v2 的列部分。
+    对齐 mjs migrateIdeasSchema——py 端此前缺此迁移,阶段2 补齐消双端漂移。"""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(ideas)")}
-    if "node_layer" not in cols:
-        conn.execute(
-            "ALTER TABLE ideas ADD COLUMN node_layer TEXT DEFAULT 'HYPOTHESIS'"
-        )
+    if not cols:
+        return  # ideas 表不存在(全新库,schema.sql 尚未跑),跳过
+    for col, decl in _IDEAS_NECESSITY_FIELDS.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE ideas ADD COLUMN {col} {decl}")
+
+
+def ensure_graph_schema(conn: sqlite3.Connection) -> None:
+    """对现有库幂等补齐知识图表结构(= migrations v2 graph_core + v3 bounds + v4 angle)。
+    新库由 schema.sql 直接建；此函数给已存在的库做在线迁移。向后兼容,调用方不变。"""
+    _ensure_graph_tables(conn)
+    ensure_ideas_necessity_fields(conn)
     migrate_graph_edge_bounds(conn)
     ensure_angle_schema(conn)
 
@@ -869,3 +893,36 @@ def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
             "n_evaluated": r["n_evaluated"], "max_icir": r["max_icir"], "saturation": sat,
         })
     return out
+
+
+# ============ schema 版本追踪（schema_version 表读写原语）============
+# 版本链定义在 factor_db/migrations.py（CURRENT_VERSION + MIGRATIONS）。
+# 这里只提供低级读写：建表 / 读当前版本 / 记一个版本。migrate(conn) 编排用。
+
+def ensure_schema_version_table(conn: sqlite3.Connection) -> None:
+    """建 schema_version 表(幂等)。新库由 schema.sql 直建,此函数给老库补。"""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS schema_version (
+            version     INTEGER PRIMARY KEY,
+            name        TEXT NOT NULL,
+            applied_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+
+
+def current_schema_version(conn: sqlite3.Connection) -> int:
+    """读当前 schema 版本。无 schema_version 表或空 = 0(史前库)。"""
+    try:
+        row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    except sqlite3.OperationalError:
+        return 0  # 表不存在
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def record_schema_version(conn: sqlite3.Connection, version: int, name: str) -> None:
+    """记录一个迁移版本(幂等:INSERT OR IGNORE)。"""
+    ensure_schema_version_table(conn)
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version, name) VALUES (?, ?)",
+        (version, name),
+    )

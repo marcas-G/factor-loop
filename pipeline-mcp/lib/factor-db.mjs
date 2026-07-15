@@ -55,6 +55,31 @@ function findVec0So() {
   throw new Error("找不到 sqlite_vec/vec0.so，请先 pip install sqlite-vec");
 }
 
+// schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
+// 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
+const CURRENT_SCHEMA_VERSION = 4;
+const SCHEMA_MILESTONES = [
+  [1, "baseline"],
+  [2, "graph_core"],
+  [3, "graph_bounds"],
+  [4, "angle"],
+];
+
+function migrateSchemaVersion() {
+  // 空库(连 factors 都没有)由 py init_db 负责,mjs 不处理;只给已有数据的库记录版本。
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all();
+  if (fcols.length === 0) return;
+  _db.exec(`CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+  const row = _db.prepare("SELECT MAX(version) AS v FROM schema_version").get();
+  if (!row || row.v == null) {
+    // 史前库首次纳入版本管理:migrate* 已补齐结构 → 记录完整版本链到 CURRENT。
+    const ins = _db.prepare("INSERT OR IGNORE INTO schema_version (version, name) VALUES (?, ?)");
+    for (const [v, name] of SCHEMA_MILESTONES) ins.run(v, name);
+  }
+}
+
 export function init({ dbPath = DB_PATH } = {}) {
   if (_db) return _db;
   _db = new DatabaseSync(dbPath, { allowExtension: true });
@@ -69,6 +94,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateFactorIcDaily();
   migratePatternCards();
   migrateGraphSchema();
+  migrateSchemaVersion();
   return _db;
 }
 

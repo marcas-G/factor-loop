@@ -410,3 +410,15 @@ CREATE TABLE IF NOT EXISTS angle_ontology (
 );
 CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family);
 
+-- ============ schema_version（schema 版本追踪）============
+-- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。
+-- 新库由 schema.sql 直建到最新结构 → init_db 直接标 CURRENT_VERSION。
+-- 老库（无此表 = 史前库，version 0）由 migrate() 幂等补齐 + 标版本。
+-- 单一真相：版本链定义在 factor_db/migrations.py（py）与 pipeline-mcp/lib/factor-db.mjs（mjs），
+-- 双端 CURRENT 一致性由 test_migrations 断言。
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    applied_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
