@@ -205,12 +205,23 @@ export async function angleCoverageHandler() {
   return factorDb.queryAngleCoverage();
 }
 
+export const selectGraphOperationSchema = {
+  name: "graph_select_operation",
+  description:
+    "动态优先级打分:按图状态(角度饱和度/聚簇位置/操作历史diversity)给 5 操作打分,推荐最高分+理由。替代 graph-engine G1 固定优先级表——角度饱和时强推 explore 换角度,防深度优先扎堆。graph-engine G1 调它选操作,不再用固定优先级表。",
+  inputSchema: { type: "object", properties: {} },
+};
+export async function selectGraphOperationHandler() {
+  return factorDb.selectGraphOperation();
+}
+
 export const ALL_GRAPH_TRAVERSAL_SCHEMAS = [
   queryContradictionsSchema, getSubgraphSchema, neighborhoodSchema,
   findRefutationClustersSchema, graphStatsSchema,
   addGraphNodeSchema, addGraphEdgesSchema,
   markContradictionResolvedSchema, markContradictionBoundedSchema,
   angleCoverageSchema,
+  selectGraphOperationSchema,
 ];
 export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   graph_query_contradictions: queryContradictionsHandler,
@@ -223,4 +234,5 @@ export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   graph_mark_contradiction_resolved: markContradictionResolvedHandler,
   graph_mark_contradiction_bounded: markContradictionBoundedHandler,
   graph_angle_coverage: angleCoverageHandler,
+  graph_select_operation: selectGraphOperationHandler,
 };

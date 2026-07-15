@@ -17,22 +17,25 @@ G1→G2→G3→G4→G5,每个 G 完成后**必须立即在同一回合**发起�
 
 汇报中间状态时,文字与下一 tool call 放同一回合(文字在前,call 紧随)。
 
-## G1 · 扫描图结构特征,选操作
+## G1 · 动态优先级选操作
 
-1. 调 `mcp__quant-mcp__graph_stats` 看全局。
-2. 按优先级选**第一个有触发点**的操作,并用对应工具取触发点 ref:
+调 `mcp__quant-mcp__graph_select_operation`——按图状态(角度饱和度 / 聚簇所在角度 / 操作历史 diversity)动态打分,返回推荐操作 + 分数 + 理由。
 
-| 优先级 | 操作 | 触发条件 | 取触发点 |
-|---|---|---|---|
-| 1 | resolve_contradiction | `unresolved_contradictions>0` | `graph_query_contradictions {resolved:false,limit:1}` → 取 edge_id + axiom + evidence |
-| 2 | generalize_from_refutation | 有 size≥3 聚簇 | `graph_find_refutation_clusters {min_size:3,limit:1}` → 取 target + members |
-| 3 | fill_chain_gap | 某 DERIVED argument_chain 有空节 | `graph_get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
-| 4 | orthogonal_branch | 某 HYPOTHESIS 有 3+ INSTANTIATES 无 ORTHOGONAL_TO | `graph_neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
-| 5 | explore_uncovered_angle | 1-4 无触发点 或 聚簇都在 saturated 角度 | `graph_angle_coverage` → 选 unexplored 优先,次 thin |
+**替代旧的固定优先级表**(resolve>generalize>...>explore)——固定表让 generalize 总赢 explore,导致深度优先扎堆(卡在饱和角度反复深挖)。动态打分:角度 saturated 时 explore 升到 0.85 > generalize(聚簇在饱和角度 ×0.3)→ 换角度;连续多次深挖时 +diversity。
+
+返回 `{recommended, score, scores, reason, saturated_angles, fresh_angles}`。按 `recommended` 操作取触发点 ref:
+
+| 操作 | 取触发点 |
+|---|---|
+| resolve_contradiction | `graph_query_contradictions {resolved:false,limit:1}` → edge_id + axiom + evidence |
+| generalize_from_refutation | `graph_find_refutation_clusters {min_size:3,limit:1}` → target + members |
+| fill_chain_gap | `graph_get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
+| orthogonal_branch | `graph_neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
+| explore_uncovered_angle | 返回的 `fresh_angles` 里选 unexplored 优先,次 thin |
 
 **→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent。
 
-**fallback**:若 1-4 无触发点 → 先 `mcp__quant-mcp__graph_angle_coverage` 选 unexplored/thin 角度,触发 explore_uncovered_angle(开拓新角度,不靠人喂);**所有角度都 saturated 才**调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
+**fallback**:推荐 explore 但 `fresh_angles` 空(所有角度都 saturated)→ 调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
 
 ## G2 · 派 graph-reasoner-agent 执行扩展操作
 

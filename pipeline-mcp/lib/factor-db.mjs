@@ -453,6 +453,17 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     conn.prepare(
       `INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)`
     ).run(ideaId, xname);
+    // angle_code 回灌: idea 的角度在 graph_edges DERIVES_FROM 边 properties.angle
+    // (explore_uncovered_angle 产 idea 时标)。落因子时回灌到 factors.angle_code,
+    // 让 angle_coverage 地图正确反映饱和度,驱动 explore 换角度(防主题扎堆)。
+    const a = conn.prepare(
+      `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
+       WHERE from_id=? AND edge_type='DERIVES_FROM'
+         AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
+    ).get(String(ideaId));
+    if (a && a.angle) {
+      conn.prepare(`UPDATE factors SET angle_code=? WHERE xname=?`).run(a.angle, xname);
+    }
   }
   return xname;
 }
@@ -1447,4 +1458,75 @@ export function queryAngleCoverage() {
     const saturation = n === 0 ? "unexplored" : (n >= sc.min_n_saturated && nd >= n * sc.dead_ratio_saturated ? "saturated" : (n <= sc.max_n_thin ? "thin" : "partial"));
     return { ...r, saturation };
   });
+}
+
+// ============ 操作选择(动态优先级打分,与 db.py select_graph_operation 双端一致) ============
+// 替代 graph-engine G1 固定优先级表。饱和时 explore 升权 / 聚簇在饱和角度 generalize 降权 / 操作历史防垄断。
+export function queryRecentOperations(n = 10) {
+  return _db.prepare(
+    `SELECT json_extract(properties,'$.via') AS via FROM graph_edges
+     WHERE edge_type='DERIVES_FROM' AND json_extract(properties,'$.via') IS NOT NULL
+     ORDER BY id DESC LIMIT ?`
+  ).all(n).map((r) => r.via).filter(Boolean);
+}
+
+export function selectGraphOperation() {
+  const stats = graphStats();
+  const coverage = queryAngleCoverage();
+  const recent = queryRecentOperations(10);
+  const saturated = coverage.filter((a) => a.saturation === "saturated");
+  const fresh = coverage.filter((a) => a.saturation === "unexplored" || a.saturation === "thin");
+  const satCodes = new Set(saturated.map((a) => a.code));
+  const recentGen = recent.filter((o) => o === "generalize_from_refutation").length;
+  const recentDeep = recent.filter((o) => o && o !== "explore_uncovered_angle").length;
+  const scores = {}, reasons = {};
+
+  if (stats.unresolved_contradictions > 0) {
+    scores.resolve_contradiction = 0.9;
+    reasons.resolve_contradiction = `${stats.unresolved_contradictions} 未解矛盾(强燃料)`;
+  } else scores.resolve_contradiction = 0;
+
+  const clusters = findRefutationClusters({ min_size: 3, limit: 5 });
+  if (clusters.length) {
+    let base = 0.7; const parts = ["有 size≥3 聚簇 0.7"];
+    let clusterInSat = false;
+    for (const cl of clusters) {
+      const a = _db.prepare(
+        `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
+         WHERE from_id=? AND edge_type='DERIVES_FROM'
+           AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
+      ).get(String(cl.target_id));
+      if (a && a.angle && satCodes.has(a.angle)) clusterInSat = true;
+    }
+    if (clusterInSat) { base *= 0.3; parts.push("聚簇在 saturated 角度 ×0.3"); }
+    if (recentGen >= 3) { base *= 0.5; parts.push(`连续 ${recentGen} 次 generalize ×0.5(防垄断)`); }
+    scores.generalize_from_refutation = base;
+    reasons.generalize_from_refutation = parts.join("; ");
+  } else scores.generalize_from_refutation = 0;
+
+  scores.fill_chain_gap = 0;
+  scores.orthogonal_branch = 0;
+
+  let e = 0.3; const eparts = [];
+  if (saturated.length && fresh.length) {
+    e = 0.85; eparts.push(`${saturated.length} saturated + ${fresh.length} fresh → 该换 0.85`);
+  } else eparts.push("无饱和或无 fresh 0.3");
+  if (recentDeep >= 3) {
+    e = Math.min(0.95, e + 0.1);
+    eparts.push(`连续 ${recentDeep} 次深挖 → diversity +0.1`);
+  }
+  scores.explore_uncovered_angle = e;
+  reasons.explore_uncovered_angle = eparts.join("; ");
+
+  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+  const r2 = (v) => Math.round(v * 1000) / 1000;
+  return {
+    recommended: best,
+    score: r2(scores[best]),
+    scores: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, r2(v)])),
+    reason: reasons[best] || "",
+    saturated_angles: saturated.map((a) => a.code).sort(),
+    fresh_angles: fresh.map((a) => a.code).sort(),
+    recent_operations: recent,
+  };
 }
