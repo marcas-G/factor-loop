@@ -1,9 +1,9 @@
 ---
-name: evaluate
-description: 量化因子结果评估。触发 `/evaluate <run_id> <factor_index>` 或被 research-loop 嵌套调用。忠实度(实现忠于假设)+三维度+一票否决 双轨出 verdict(pass/fail)并写库。
+name: assess
+description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>` 或被 research-loop 嵌套调用。忠实度(实现忠于假设)+三维度+一票否决 双轨出 verdict(pass/fail)并写库。
 ---
 
-# Evaluate — 量化因子结果评估
+# Assess — 量化因子结果评估
 
 基于代码从平台产物聚合的评估数据(**不是 LLM 自评**),按三维度+一票否决框架对单个因子做结果评估,调 MCP 持久化 verdict。
 
@@ -101,7 +101,7 @@ Task({
 | 正交 | pairwise `\|pearson\|<0.7` **且** 残差 IC 强度不低(`factor_residual_ic_strength` 高=预测力多为新息,低=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
 | **变换族预测力**(新增) | 最强变换 |IC| 显著优于原始(>20%) → 建议改用该变换；ridge_residual 最强=预测力来自新息 | transform_family(orig_ic / delta_ic / impulse_ic / asym_impulse_pos_ic / asym_impulse_neg_ic / ridge_residual_ic) |
 
-**变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;evaluate 自己从 6 个 |IC| 判最强变换):
+**变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;assess 自己从 6 个 |IC| 判最强变换):
 - 取 6 个字段 `|IC|` 最大者为 best_transform(比较 delta/impulse/asym_pos/asym_neg/ridge_residual 与 orig)
 - `ridge_residual_ic` 最大且 `>> orig_ic`(差>0.02):预测力来自新息(去自相关后的 surprise),原始因子含冗余趋势 → key_strengths 写"预测力核心是新息(ridge残差IC={ridge} vs 原始{orig}),建议改用残差信号"
 - `impulse_ic` 最大且 `≈ orig_ic`:预测力来自方向而非幅度,因子可二值化简化 → key_strengths

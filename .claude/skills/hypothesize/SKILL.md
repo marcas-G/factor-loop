@@ -1,9 +1,9 @@
 ---
-name: graph-engine
-description: 知识图驱动假设产生引擎。在分层知识图(AXIOM→DERIVED→HYPOTHESIS)上做结构化扩展(resolve_contradiction/generalize_from_refutation/fill_chain_gap/orthogonal_branch)产生必然假设,替代 hypothesis-generator 的统计扫描。触发:/graph-engine、或"图推理产假设"、或被 research-loop Step1 调用。
+name: hypothesize
+description: 知识图驱动假设产生引擎。在分层知识图(AXIOM→DERIVED→HYPOTHESIS)上做结构化扩展(resolve_contradiction/generalize_from_refutation/fill_chain_gap/orthogonal_branch)产生必然假设,替代 hypothesis-generator 的统计扫描。触发:/hypothesize、或"图推理产假设"、或被 research-loop Step1 调用。
 ---
 
-# Graph Engine — 知识图驱动假设产生
+# Hypothesize — 知识图驱动假设产生
 
 在分层知识图(AXIOM→DERIVED→HYPOTHESIS,EVIDENCE/REFUTATION)上做**结构化扩展**产生必然假设。新提案=图的结构化扩展,不是扫网格枚举。无穷来自推理链延伸。
 
@@ -106,5 +106,5 @@ Task({
 
 - ❌ 直接写 ideas/graph_edges 而不经 graph_add_node/graph_add_edges(绕过幂等和 node_layer)。
 - ❌ 跳过 reviewer 直接落盘 DERIVED(必然性必须经对抗审)。
-- ❌ 把统计 IC 当产生器——IC 是 HYPOTHESIS 节点的裁判(evaluate 阶段),不是这里的产生器。
+- ❌ 把统计 IC 当产生器——IC 是 HYPOTHESIS 节点的裁判(assess 阶段),不是这里的产生器。
 - ❌ 纯文字回合断流(见衔接硬规则)。

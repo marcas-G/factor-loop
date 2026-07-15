@@ -1,6 +1,6 @@
 # 因子假设方法论（hypothesis-framework）
 
-> 本文件 = **真相**。它是 reviewer / graph-reasoner / graph-engine / evaluate / hypothesis-generator 五个执行体的共同方法论基底;各 skill/agent 是它的执行投影。
+> 本文件 = **真相**。它是 reviewer / graph-reasoner / hypothesize / assess / hypothesis-generator 五个执行体的共同方法论基底;各 skill/agent 是它的执行投影。
 > 凡本文件与单个 skill/agent 的局部描述冲突,以本文件为准(局部描述应回写对齐)。
 >
 > 一句话:因子假设是对「现象依赖某机制」的**可证伪必然性断言**;产生与验证认知相反,故用对抗式审稿隔离;数据驱动默认 conditional,底线是**赚钱闭环 + 可证伪 trace**。
@@ -39,7 +39,7 @@
 - **necessary 降为 stretch goal**——靠理论内部张力(演绎)达成,非数据归纳。数据驱动默认 `conditional`。
 - **转变**:之前"或然 → bounded 空手";现在"**或然但有闭环 + 可证伪 trace → conditional 入图**"。只有 ①闭环都凑不出 / 无可证伪 trace / 数据不足,才 bounded 或空手。
 
-> IC + 样本外当最终裁判(evaluate 阶段),不靠 reviewer 的必然性。图的血缘/反例约束防重复。
+> IC + 样本外当最终裁判(assess 阶段),不靠 reviewer 的必然性。图的血缘/反例约束防重复。
 
 ### 0.4 产生 vs 验证:认知相反 → 对抗式审稿 + session 隔离
 
@@ -53,7 +53,7 @@
 
 ## 1. 形式化骨架:argument_chain(S1-S4)
 
-每个 DERIVED 层假设必须填 `argument_chain`(reviewer 模式一逐项攻;evaluate 忠实度审稿对照)。结构:
+每个 DERIVED 层假设必须填 `argument_chain`(reviewer 模式一逐项攻;assess 忠实度审稿对照)。结构:
 
 ```
 background_axioms[]          Σ 背景公理集(引用图中 axiom code 或 ideas id)
@@ -178,7 +178,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 ## 3. 假设产生:两条路径
 
-### 3.1 主路径 · graph-engine 图驱动 5 操作
+### 3.1 主路径 · hypothesize 图驱动 5 操作
 
 在分层知识图(AXIOM→DERIVED→HYPOTHESIS,EVIDENCE/REFUTATION)上做**结构化扩展**产生假设。新提案 = 图的结构化扩展,不是扫网格枚举;无穷来自推理链延伸。
 
@@ -194,7 +194,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 ### 3.2 fallback · hypothesis-generator lens 反常归纳
 
-graph-engine 触发点耗尽或所有角度 saturated 时,走 lens 多轮自主发现反常:
+hypothesize 触发点耗尽或所有角度 saturated 时,走 lens 多轮自主发现反常:
 
 1. 多轮调 data-lens(predictive/condition/memory/orderflow/...)自适应追线索,累积反常
 2. 识别反常(违反机制预期 / 跨维度矛盾 / 异常形态)
@@ -250,7 +250,7 @@ S2/S4 反复修正(K≥3)仍过不了 reviewer,且不是 C 过宽 / type 不可�
 
 `unfaithful` → **一票否决**,verdict=fail(即使 IC 高)。
 
-### 4.2 经验轨(evaluate 三维度 + 一票否决)
+### 4.2 经验轨(assess 三维度 + 一票否决)
 
 所有指标来自平台/本地代码聚合的评估数据(**非 LLM 自评**)。
 
@@ -324,6 +324,6 @@ L0 字段 → L1a 原语事件(字段差分) → L1b 构造观测量(统计才�
 本文件被以下执行体引用(改动本文件需同步检查它们):
 - `agents/reasoners/reviewer-agent.md` — 模式一(S2/S4 攻击)、模式二(忠实度)
 - `agents/reasoners/graph-reasoner-agent.md` — 5 操作的 S1-S4 推理框架 + 三道门槛
-- `skills/graph-engine/SKILL.md` — 5 操作编排 + reviewer 派遣
+- `skills/hypothesize/SKILL.md` — 5 操作编排 + reviewer 派遣
 - `skills/hypothesis-generator/SKILL.md` — lens 反常归纳 + S1-S4
-- `skills/evaluate/SKILL.md` — 双轨验证 + 三维度
+- `skills/assess/SKILL.md` — 双轨验证 + 三维度
