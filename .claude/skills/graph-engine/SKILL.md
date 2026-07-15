@@ -24,15 +24,15 @@ G1→G2→G3→G4→G5,每个 G 完成后**必须立即在同一回合**发起�
 
 | 优先级 | 操作 | 触发条件 | 取触发点 |
 |---|---|---|---|
-| 1 | resolve_contradiction | `unresolved_contradictions>0` | `query_contradictions {resolved:false,limit:1}` → 取 edge_id + axiom + evidence |
-| 2 | generalize_from_refutation | 有 size≥3 聚簇 | `find_refutation_clusters {min_size:3,limit:1}` → 取 target + members |
-| 3 | fill_chain_gap | 某 DERIVED argument_chain 有空节 | `get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
-| 4 | orthogonal_branch | 某 HYPOTHESIS 有 3+ INSTANTIATES 无 ORTHOGONAL_TO | `neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
-| 5 | explore_uncovered_angle | 1-4 无触发点 或 聚簇都在 saturated 角度 | `angle_coverage` → 选 unexplored 优先,次 thin |
+| 1 | resolve_contradiction | `unresolved_contradictions>0` | `graph_query_contradictions {resolved:false,limit:1}` → 取 edge_id + axiom + evidence |
+| 2 | generalize_from_refutation | 有 size≥3 聚簇 | `graph_find_refutation_clusters {min_size:3,limit:1}` → 取 target + members |
+| 3 | fill_chain_gap | 某 DERIVED argument_chain 有空节 | `graph_get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
+| 4 | orthogonal_branch | 某 HYPOTHESIS 有 3+ INSTANTIATES 无 ORTHOGONAL_TO | `graph_neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
+| 5 | explore_uncovered_angle | 1-4 无触发点 或 聚簇都在 saturated 角度 | `graph_angle_coverage` → 选 unexplored 优先,次 thin |
 
 **→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent。
 
-**fallback**:若 1-4 无触发点 → 先 `mcp__quant-mcp__angle_coverage` 选 unexplored/thin 角度,触发 explore_uncovered_angle(开拓新角度,不靠人喂);**所有角度都 saturated 才**调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
+**fallback**:若 1-4 无触发点 → 先 `mcp__quant-mcp__graph_angle_coverage` 选 unexplored/thin 角度,触发 explore_uncovered_angle(开拓新角度,不靠人喂);**所有角度都 saturated 才**调 `Skill hypothesis-generator`(旧 lens 多轮路径)。
 
 ## G2 · 派 graph-reasoner-agent 执行扩展操作
 
@@ -68,16 +68,16 @@ Task({
 ## G4 · 落盘 + fail 分诊
 
 **verdict = pass**(s2 且 s4 都 pass):
-1. `mcp__quant-mcp__add_graph_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>}}` → 拿 `idea_id`
+1. `mcp__quant-mcp__graph_add_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>}}` → 拿 `idea_id`
 2. 把 new_edges 里所有 `<NEW>` 替换为 `idea_id`
-3. `mcp__quant-mcp__add_graph_edges {edges: <替换后的 new_edges>}`
-4. 若操作=resolve_contradiction:`mcp__quant-mcp__mark_contradiction_resolved {edge_id:<触发边id>, idea_id}`
-5. 若操作=fill_chain_gap 且有 patch_to:把补的 axiom/中间节点 add_graph_node 后,更新原 idea 的 argument_chain(persist_argument_chain 或直接说明由主会话回填)
+3. `mcp__quant-mcp__graph_add_edges {edges: <替换后的 new_edges>}`
+4. 若操作=resolve_contradiction:`mcp__quant-mcp__graph_mark_contradiction_resolved {edge_id:<触发边id>, idea_id}`
+5. 若操作=fill_chain_gap 且有 patch_to:把补的 axiom/中间节点 graph_add_node 后,更新原 idea 的 argument_chain(persist_argument_chain 或直接说明由主会话回填)
 → G5
 
 **BOUNDS 落盘**(graph-reasoner 返 `verdict_hint="bounded"`,axiom 证伪,跳过 G3):
-1. `mcp__quant-mcp__add_graph_edges {edges: <new_edges 里的 BOUNDS 边>}`
-2. `mcp__quant-mcp__mark_contradiction_bounded {edge_id:<触发边id>, regime:<BOUNDS 边 properties.regime>, reason:<properties.reason>}`
+1. `mcp__quant-mcp__graph_add_edges {edges: <new_edges 里的 BOUNDS 边>}`
+2. `mcp__quant-mcp__graph_mark_contradiction_bounded {edge_id:<触发边id>, regime:<BOUNDS 边 properties.regime>, reason:<properties.reason>}`
 3. → G5(返回 operation_used="resolve_contradiction(bounded)",无 idea_id——本轮是边界限定,非新假设)
 
 **verdict = fail**,按 `achievable` 分诊:
@@ -104,7 +104,7 @@ Task({
 
 ## 不要做
 
-- ❌ 直接写 ideas/graph_edges 而不经 add_graph_node/add_graph_edges(绕过幂等和 node_layer)。
+- ❌ 直接写 ideas/graph_edges 而不经 graph_add_node/graph_add_edges(绕过幂等和 node_layer)。
 - ❌ 跳过 reviewer 直接落盘 DERIVED(必然性必须经对抗审)。
 - ❌ 把统计 IC 当产生器——IC 是 HYPOTHESIS 节点的裁判(evaluate 阶段),不是这里的产生器。
 - ❌ 纯文字回合断流(见衔接硬规则)。

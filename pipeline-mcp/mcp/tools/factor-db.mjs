@@ -144,7 +144,7 @@ export async function factorIcRefreshHandler({ xname, force = false }) {
 
 // ===== 迭代管道:evaluate 开建议 → brainstorm 检索接续 → realize 归档 → research-loop 失败 reopen =====
 export const openIterationSchema = {
-  name: "open_iteration",
+  name: "iteration_open",
   description:
     "evaluate 阶段开一个迭代建议(open suggestion):把当前因子的 suggested_iteration(换 horizon/品种/窗口)登记成待接续建议。pass 精进 / dead_end 显式重试用这个;dead_end 无救方向不用这个(改走 dead_end lesson 避雷)。同 (from,change) 已 open 则幂等返回已有 id。",
   inputSchema: {
@@ -166,13 +166,13 @@ export async function openIterationHandler({ from_xname, change_note, reason, it
 }
 
 export const realizeIterationSchema = {
-  name: "realize_iteration",
+  name: "iteration_realize",
   description:
     "接续因子 B 的 evaluate 阶段归档(在 persist_factor 之后调用,B 已入库):建议 in_progress→realized,填 to_xname=B、icir_delta。outcome 由 icir_delta 自动推导(improved/declined/neutral)。演进链 from→to 就此落定。",
   inputSchema: {
     type: "object",
     properties: {
-      suggestion_id: { type: "number", description: "open_iteration 返回的 id(从 state.factors[i].suggestion_id 取)" },
+      suggestion_id: { type: "number", description: "iteration_open 返回的 id(从 state.factors[i].suggestion_id 取)" },
       to_xname: { type: "string", description: "接续因子 B 的 xname(当前 evaluate 的因子)" },
       icir_delta: { type: "number", description: "B.latest_icir - A.latest_icir(正=提升)" },
     },
@@ -184,7 +184,7 @@ export async function realizeIterationHandler({ suggestion_id, to_xname, icir_de
 }
 
 export const reopenIterationSchema = {
-  name: "reopen_iteration",
+  name: "iteration_reopen",
   description:
     "失败回滚(research-loop 兜底用):接续候选 B 最终 status=failed 时,建议 in_progress→open,允许下次再接续。只在 in_progress 状态有效。",
   inputSchema: {
@@ -198,7 +198,7 @@ export async function reopenIterationHandler({ suggestion_id }) {
 }
 
 export const listOpenIterationsSchema = {
-  name: "list_open_iterations",
+  name: "iteration_list_open",
   description:
     "brainstorm 检索待接续的迭代建议(open suggestions),按 priority 降序。priority=(evaluated?2.0:0.5) × max(icir,0.1) × exp(-age/14)——pass 精进优先、强因子优先、老建议降权。接续高 priority 建选作为本轮候选之一。",
   inputSchema: {
@@ -251,7 +251,7 @@ export async function coverageGapsHandler({ top_k }) {
 }
 
 export const residualIcStrengthSchema = {
-  name: "residual_ic_strength",
+  name: "factor_residual_ic_strength",
   description:
     "残差 IC 强度:新因子日级 IC 序列在库内基底 IC 张成空间的残差比例(预测能力不被已有因子线性解释的程度)。"
     + "高=真新颖,低=冗余。补 factor_ic_correlate(pairwise 查'和某个最像')——这个给'相对全库基底的新颖性标量'。"
@@ -279,7 +279,7 @@ export const patternFeedSchema = {
   name: "pattern_feed",
   description:
     "衔接①(归纳→演绎):拉 archived 高优先 + 未解释的模式卡,供 hypothesis-generator 解释机制。"
-    + "归纳引擎的自动喂队列。hypothesis-generator 先调它,有模式卡则解释(产 idea 后 link_pattern_idea 回写),无则走 lens 自主发现反常。",
+    + "归纳引擎的自动喂队列。hypothesis-generator 先调它,有模式卡则解释(产 idea 后 pattern_link_idea 回写),无则走 lens 自主发现反常。",
   inputSchema: {
     type: "object",
     properties: { top_n: { type: "number", default: 3 } },
@@ -290,7 +290,7 @@ export async function patternFeedHandler({ top_n }) {
 }
 
 export const linkPatternIdeaSchema = {
-  name: "link_pattern_idea",
+  name: "pattern_link_idea",
   description:
     "衔接①回写:hypothesis-generator 解释模式卡产 idea 后,回写 pattern_cards.idea_id + status='explained'。"
     + "pattern_card 必须 archived。闭合归纳→演绎衔接。",
@@ -338,13 +338,13 @@ export const ALL_FACTOR_DB_HANDLERS = {
   factor_counts: factorCountsHandler,
   factor_ic_correlate: factorIcCorrelateHandler,
   factor_ic_refresh: factorIcRefreshHandler,
-  open_iteration: openIterationHandler,
-  realize_iteration: realizeIterationHandler,
-  reopen_iteration: reopenIterationHandler,
-  list_open_iterations: listOpenIterationsHandler,
+  iteration_open: openIterationHandler,
+  iteration_realize: realizeIterationHandler,
+  iteration_reopen: reopenIterationHandler,
+  iteration_list_open: listOpenIterationsHandler,
   coverage_map: coverageMapHandler,
   coverage_gaps: coverageGapsHandler,
-  residual_ic_strength: residualIcStrengthHandler,
+  factor_residual_ic_strength: residualIcStrengthHandler,
   pattern_feed: patternFeedHandler,
-  link_pattern_idea: linkPatternIdeaHandler,
+  pattern_link_idea: linkPatternIdeaHandler,
 };

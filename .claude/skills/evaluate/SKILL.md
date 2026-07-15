@@ -41,13 +41,13 @@ description: 量化因子结果评估。触发 `/evaluate <run_id> <factor_index
 
 因子是否真验证了它声称的假设?IC 高 ≠ 验证假设——可能来自别的机制(冒充)。
 
-**前提**:假设有结构化 argument_chain(hypothesis-generator 产,在 ideas.argument_chain,用 `get_hypothesis` 读)。散文 hypothesis(旧 brainstorm 无论证链)→ 跳过本维(无法对照),仅经验维度评估。
+**前提**:假设有结构化 argument_chain(hypothesis-generator 产,在 ideas.argument_chain,用 `hypothesis_get` 读)。散文 hypothesis(旧 brainstorm 无论证链)→ 跳过本维(无法对照),仅经验维度评估。
 
 **审稿**:派 reviewer-agent 忠实度模式(模式二):
 ```
 Task({
   subagent_type: "reviewer-agent",
-  prompt: "忠实度审稿:假设论证链 idea_id=<state.idea_id>(用 get_hypothesis 读),因子实现 .h 路径=<state.factors[i].factor_file>(用 Read)。审实现是否忠于论证链核心机制"
+  prompt: "忠实度审稿:假设论证链 idea_id=<state.idea_id>(用 hypothesis_get 读),因子实现 .h 路径=<state.factors[i].factor_file>(用 Read)。审实现是否忠于论证链核心机制"
 })
 ```
 
@@ -98,7 +98,7 @@ Task({
 | **换手率** | 日均换手低;高换手=追微波动 | `tradability.avg_turnover_per_day` |
 | **成本后 Sharpe(8bps)** | 毛 Sharpe vs 成本后(8bps 严格);转负=毛强净亏 | `tradability.sharpe_net_8bps` |
 | 容量 | 日换手>100 → 容量受限(固定代理) | `tradability.capacity_risk` |
-| 正交 | pairwise `\|pearson\|<0.7` **且** 残差 IC 强度不低(`residual_ic_strength` 高=预测力多为新息,低=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
+| 正交 | pairwise `\|pearson\|<0.7` **且** 残差 IC 强度不低(`factor_residual_ic_strength` 高=预测力多为新息,低=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
 | **变换族预测力**(新增) | 最强变换 |IC| 显著优于原始(>20%) → 建议改用该变换；ridge_residual 最强=预测力来自新息 | transform_family(orig_ic / delta_ic / impulse_ic / asym_impulse_pos_ic / asym_impulse_neg_ic / ridge_residual_ic) |
 
 **变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;evaluate 自己从 6 个 |IC| 判最强变换):
@@ -150,7 +150,7 @@ Task({
      - `|pearson| ≥ 0.7` → `key_weaknesses` 写"与 {factor} IC 行为冗余 pearson={x}({vs_scene}),增量有限",倾向 fail(除非其它维度极强)
      - 最高 `|pearson| < 0.5` → `key_strengths` 写"与库内因子 IC 行为正交(最高 |pearson|={x}),增量空间大"
      - `0.5 ≤ |pearson| < 0.7` → 中性,`key_weaknesses` 提一句
-   - 调 `residual_ic_strength {target: xname}`(库内有 factor_ic_daily 时,补 pairwise 盲区):相对全库基底的残差比例——某因子 pairwise 都不高(和谁都不像)但合起来仍冗余时,pearson 抓不到,residual 能抓。判据:`residual_ic_strength < 0.4` → 整体冗余(预测力被库内线性解释),`key_weaknesses` 写"残差 IC 强度={x},预测力多被库内解释",倾向 fail;`> 0.7` → `key_strengths` 写"残差 IC 强度={x},预测力多为新息"。**容错**:库不足/无 factor_ic_daily → 脚本返回 strength=1.0(无区分力),`key_weaknesses` 注"残差 IC 未评估(库不足)",不据此判。
+   - 调 `factor_residual_ic_strength {target: xname}`(库内有 factor_ic_daily 时,补 pairwise 盲区):相对全库基底的残差比例——某因子 pairwise 都不高(和谁都不像)但合起来仍冗余时,pearson 抓不到,residual 能抓。判据:`factor_residual_ic_strength < 0.4` → 整体冗余(预测力被库内线性解释),`key_weaknesses` 写"残差 IC 强度={x},预测力多被库内解释",倾向 fail;`> 0.7` → `key_strengths` 写"残差 IC 强度={x},预测力多为新息"。**容错**:库不足/无 factor_ic_daily → 脚本返回 strength=1.0(无区分力),`key_weaknesses` 注"残差 IC 未评估(库不足)",不据此判。
 5. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
 
 > IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.7。
@@ -185,7 +185,7 @@ verdict 定后、**persist_factor 之后**执行（open/realize 都要求因子�
 3. `icir_delta = B.latest_icir - A.latest_icir`
 4. 调：
    ```
-   realize_iteration {
+   iteration_realize {
      suggestion_id: state.factors[i].suggestion_id,
      to_xname: <当前因子 B 的 xname>,
      icir_delta: <B.icir - A.icir>
@@ -199,13 +199,13 @@ verdict 定后、**persist_factor 之后**执行（open/realize 都要求因子�
 
 | verdict | suggested_iteration 性质 | iterable | 动作 |
 |---|---|---|---|
-| pass | "换 horizon/窗口可能更强"类精进 | true | `open_iteration` 开建议 |
-| fail/dead_end | "换品种/换维度重试"且 `\|latest_icir\|≥0.05` | true | `open_iteration` 开建议（显式重试，避免下次换皮盲撞）|
+| pass | "换 horizon/窗口可能更强"类精进 | true | `iteration_open` 开建议 |
+| fail/dead_end | "换品种/换维度重试"且 `\|latest_icir\|≥0.05` | true | `iteration_open` 开建议（显式重试，避免下次换皮盲撞）|
 | fail/dead_end | 方向本身无救（`\|latest_icir\|<0.05` 或机制判定无效） | **false** | **不开 suggestion**；persist_factor 已自动写 dead_end lesson，brainstorm 的 `factor_recent_lessons` 会检索到 → 避雷 |
 
 iterable=true 时调：
 ```
-open_iteration {
+iteration_open {
   from_xname: <当前因子>,
   change_note: <suggested_iteration 核心,如 "换 60s horizon">,
   reason: <基于 7 维数据的依据,一句话>,

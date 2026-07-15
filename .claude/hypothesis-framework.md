@@ -217,7 +217,7 @@ graph-engine 触发点耗尽或所有角度 saturated 时,走 lens 多轮自主�
 若推理结论是 **axiom 在此 regime 不完备/被证伪**——A∧B 只否定 axiom 完备性,不单向逼向任何必然机制 C(候选解释全或然);超加性证不出、唯一性证不出、三门槛断在微观 E/闭环——这是**有价值的否定性结论,不丢弃**:
 
 - 产一条 `BOUNDS` 边:`observe_outputs → axioms`,properties 标 `{regime, reason}`
-- `mark_contradiction_bounded` → 该矛盾不再悬着被反复 resolve
+- `graph_mark_contradiction_bounded` → 该矛盾不再悬着被反复 resolve
 
 **区分两种空手**:axiom 证伪(或然非必然)→ 产 BOUNDS(否定性入图);数据不足无法判断 → 真·空手(new_edges 也空),待数据补。
 
@@ -240,7 +240,7 @@ S2/S4 反复修正(K≥3)仍过不了 reviewer,且不是 C 过宽 / type 不可�
 
 **IC 高 ≠ 验证假设**。一个因子 IC 高,可能来自假设声称的机制(真验证),也可能来自别的机制(冒充)。不审忠实度,会把"碰巧有效的无关因子"误当"假设验证"。
 
-前提:假设有结构化 argument_chain(用 `get_hypothesis` 读)。散文 hypothesis(旧 brainstorm)→ 跳过本轨,仅经验维度。
+前提:假设有结构化 argument_chain(用 `hypothesis_get` 读)。散文 hypothesis(旧 brainstorm)→ 跳过本轨,仅经验维度。
 
 审稿维度(对照论证链审 .h 实现):
 - **核心机制捕捉**:实现是否实现了 C 声称的机制 / S4 type 对应的结构?

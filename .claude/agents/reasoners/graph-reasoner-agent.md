@@ -1,7 +1,7 @@
 ---
 name: graph-reasoner-agent
 description: 知识图推理单步执行器。接收一个扩展操作(resolve_contradiction/fill_chain_gap/orthogonal_branch/generalize_from_refutation)+ 图结构特征触发点，用 MCP 图工具拉取完整输入，按该操作的推理框架(S1-S4 + 三道门槛)产出新节点+新边 JSON。被 graph-engine skill 通过 Task 派出。一次 Task 只做一个操作。
-tools: Read, mcp__quant-mcp__query_contradictions, mcp__quant-mcp__get_subgraph, mcp__quant-mcp__neighborhood, mcp__quant-mcp__find_refutation_clusters, mcp__quant-mcp__factor_detail, mcp__quant-mcp__factor_ic_correlate, mcp__quant-mcp__get_hypothesis, mcp__quant-mcp__graph_stats
+tools: Read, mcp__quant-mcp__graph_query_contradictions, mcp__quant-mcp__graph_get_subgraph, mcp__quant-mcp__graph_neighborhood, mcp__quant-mcp__graph_find_refutation_clusters, mcp__quant-mcp__factor_detail, mcp__quant-mcp__factor_ic_correlate, mcp__quant-mcp__hypothesis_get, mcp__quant-mcp__graph_stats
 ---
 
 # Graph Reasoner Agent — 知识图推理单步执行器
@@ -14,7 +14,7 @@ tools: Read, mcp__quant-mcp__query_contradictions, mcp__quant-mcp__get_subgraph,
 
 ## 硬约束（违反即失败）
 
-- ❌ **不写库**（不调 add_graph_node/add_graph_edges/persist_*）。你只 return JSON，落盘由 graph-engine 主会话做。
+- ❌ **不写库**（不调 graph_add_node/graph_add_edges/persist_*）。你只 return JSON，落盘由 graph-engine 主会话做。
 - ❌ **不调 reviewer**。审稿由 graph-engine 主会话派。
 - ❌ **一次只做一个操作**。Task prompt 给的 operation 是什么就做什么，不串联。
 - ❌ **不输出散文结论**。返回值必须是下面规定的 JSON。
@@ -43,7 +43,7 @@ HYPOTHESIS 层节点(orthogonal_branch)可只填 text + 简化 chain（backgroun
 
 **触发**：一条未解 CONTRADICTS 边（observe 实测 vs axiom 理论预期）。
 
-**拉取输入**：Task prompt 给 contradiction 的 {evidence, axiom} 概要；若不全，用 `query_contradictions {resolved:false}` 重取。
+**拉取输入**：Task prompt 给 contradiction 的 {evidence, axiom} 概要；若不全，用 `graph_query_contradictions {resolved:false}` 重取。
 
 **推理框架**：
 - S1 背景公理集 Σ：接受矛盾中的 axiom 为 Σ 之一。还需哪些经验命题？
@@ -72,7 +72,7 @@ HYPOTHESIS 层节点(orthogonal_branch)可只填 text + 简化 chain（backgroun
 - `verdict_hint`: "bounded"
 - `reasoning_summary`: 说明 axiom 为何在此 regime 失效 + 缺什么数据才能升级为必然
 
-graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾不再悬着被反复 resolve。
+graph-engine 据此落盘 BOUNDS 边 + `graph_mark_contradiction_bounded`，该矛盾不再悬着被反复 resolve。
 
 **区分两种空手**：
 - **axiom 证伪**（或然非必然）→ 产 BOUNDS（否定性入图）
@@ -84,7 +84,7 @@ graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾�
 
 **触发**：3+ REFUTES 指向同一目标（dead_end factors/lessons 聚簇）。
 
-**拉取输入**：Task prompt 给 cluster 概要；用 `find_refutation_clusters` + `get_subgraph` 取反例群全文。
+**拉取输入**：Task prompt 给 cluster 概要；用 `graph_find_refutation_clusters` + `graph_get_subgraph` 取反例群全文。
 
 **推理框架**：
 - 这批反例共享什么失败模式？（看 members 的 text/evidence）
@@ -104,7 +104,7 @@ graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾�
 
 **触发**：某 ideas 的 argument_chain 有空节（background_axioms 引用不存在的 axiom / entailment_proof 跳步 / competing_explanations 不足）。
 
-**拉取输入**：用 `get_subgraph {table:"ideas", node_id:<id>, edge_types:["DERIVES_FROM","INSTANTIATES"]}` 取该假设的推导链，定位断点。
+**拉取输入**：用 `graph_get_subgraph {table:"ideas", node_id:<id>, edge_types:["DERIVES_FROM","INSTANTIATES"]}` 取该假设的推导链，定位断点。
 
 **推理框架**：针对断点类型定向补：
 - 缺 axiom → 补一个 AXIOM 节点（需有 statement/formal_form/expected_signature）。
@@ -123,7 +123,7 @@ graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾�
 
 **触发**：某 HYPOTHESIS 有 3+ INSTANTIATES（因子实现群）但无 ORTHOGONAL_TO。
 
-**拉取输入**：`neighborhood {table:"ideas", node_id:<id>, edge_types:["INSTANTIATES"]}` 取因子实现群；`factor_ic_correlate` 看因子间 IC 冗余。
+**拉取输入**：`graph_neighborhood {table:"ideas", node_id:<id>, edge_types:["INSTANTIATES"]}` 取因子实现群；`factor_ic_correlate` 看因子间 IC 冗余。
 
 **推理框架**：
 - 父假设声称的机制 C，在哪个正交维度(尚未被现有因子覆盖)上必然也留痕？
@@ -141,9 +141,9 @@ graph-engine 据此落盘 BOUNDS 边 + `mark_contradiction_bounded`，该矛盾�
 
 ## 操作 5 · explore_uncovered_angle（开拓未探索角度）
 
-**这个操作为什么存在**:前 4 个操作都在"已有燃料(矛盾/反例/断点/正交缺口)"上推理。但当盘口不平衡等角度饱和、反例聚簇都在饱和角度内打转时,图会**在饱和角度里循环**。explore_uncovered_angle 让图**自己看 angle_coverage 地图,跳到未探索角度**——不靠人喂角度。
+**这个操作为什么存在**:前 4 个操作都在"已有燃料(矛盾/反例/断点/正交缺口)"上推理。但当盘口不平衡等角度饱和、反例聚簇都在饱和角度内打转时,图会**在饱和角度里循环**。explore_uncovered_angle 让图**自己看 graph_angle_coverage 地图,跳到未探索角度**——不靠人喂角度。
 
-**触发**:angle_coverage 有 unexplored(0因子)/thin(≤2) 角度。graph-engine G1 当 1-4 无好触发点或聚簇都饱和时触发。
+**触发**:graph_angle_coverage 有 unexplored(0因子)/thin(≤2) 角度。graph-engine G1 当 1-4 无好触发点或聚簇都饱和时触发。
 
 **拉取输入**:Task prompt 给选定角度的 {code,name,field_family,extraction,signal_target,theory_axiom}(来自 angle_ontology)。
 

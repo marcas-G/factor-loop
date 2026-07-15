@@ -80,14 +80,14 @@ test("所有 18 个 schema 名称正确", () => {
     "factor_search",
     "factor_semantic_search",
     "factor_similar",
-    "link_pattern_idea",
-    "list_open_iterations",
-    "open_iteration",
+    "pattern_link_idea",
+    "iteration_list_open",
+    "iteration_open",
     "pattern_feed",
-    "realize_iteration",
-    "reopen_iteration",
-    "residual_ic_strength",
-  ]);
+    "iteration_realize",
+    "iteration_reopen",
+    "factor_residual_ic_strength",
+  ].sort());
 });
 
 test("coverage_map 空库返回数组(结构正确)", async () => {

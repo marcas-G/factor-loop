@@ -3,9 +3,9 @@
 // 分层知识图：AXIOM(axioms) → DERIVED/HYPOTHESIS(ideas) → EVIDENCE/REFUTATION(lessons/factors/observe_outputs)。
 // graph_edges 跨表软引用。本组工具供 graph-engine skill / graph-reasoner-agent 读写图。
 //
-// 读类：query_contradictions(解矛盾输入) / get_subgraph(填链输入) / neighborhood(正交输入)
-//       / find_refutation_clusters(归纳输入) / graph_stats(停止条件)
-// 写类：add_graph_node / add_graph_edges / mark_contradiction_resolved
+// 读类：graph_query_contradictions(解矛盾输入) / graph_get_subgraph(填链输入) / graph_neighborhood(正交输入)
+//       / graph_find_refutation_clusters(归纳输入) / graph_stats(停止条件)
+// 写类：graph_add_node / graph_add_edges / graph_mark_contradiction_resolved
 
 import * as factorDb from "../../lib/factor-db.mjs";
 
@@ -15,7 +15,7 @@ const EDGE_TYPES = [
 const NODE_TABLES = ["axioms", "ideas", "factors", "lessons", "observe_outputs"];
 
 export const queryContradictionsSchema = {
-  name: "query_contradictions",
+  name: "graph_query_contradictions",
   description:
     "查 CONTRADICTS 边（推理燃料）。resolved=false（默认）返回未解矛盾：observe 实测 vs axiom 理论预期。resolve_contradiction 操作的输入。",
   inputSchema: {
@@ -36,7 +36,7 @@ export async function queryContradictionsHandler(args = {}) {
 }
 
 export const getSubgraphSchema = {
-  name: "get_subgraph",
+  name: "graph_get_subgraph",
   description:
     "取以某节点为中心、depth 跳内的子图（节点+边，BFS）。fill_chain_gap / orthogonal_branch 的输入。返回跨表 join 的节点全字段。",
   inputSchema: {
@@ -59,9 +59,9 @@ export async function getSubgraphHandler(args = {}) {
 }
 
 export const neighborhoodSchema = {
-  name: "neighborhood",
+  name: "graph_neighborhood",
   description:
-    "取某节点 1 跳邻居（比 get_subgraph 轻）。orthogonal_branch 先用它看因子实现群。direction: out/in/both。",
+    "取某节点 1 跳邻居（比 graph_get_subgraph 轻）。orthogonal_branch 先用它看因子实现群。direction: out/in/both。",
   inputSchema: {
     type: "object",
     required: ["table", "node_id"],
@@ -75,14 +75,14 @@ export const neighborhoodSchema = {
   },
 };
 export async function neighborhoodHandler(args = {}) {
-  return factorDb.neighborhood({
+  return factorDb.graph_neighborhood({
     table: args.table, node_id: args.node_id, edge_types: args.edge_types ?? null,
     direction: args.direction ?? "both", limit: args.limit ?? 10,
   });
 }
 
 export const findRefutationClustersSchema = {
-  name: "find_refutation_clusters",
+  name: "graph_find_refutation_clusters",
   description:
     "找 REFUTES/SUPPORTS 边指向同一目标的聚簇（3+ 反例指向同一 axiom/idea）。generalize_from_refutation 操作的输入。",
   inputSchema: {
@@ -112,7 +112,7 @@ export async function graphStatsHandler() {
 }
 
 export const addGraphNodeSchema = {
-  name: "add_graph_node",
+  name: "graph_add_node",
   description:
     "写新节点到图。table='axioms'→公理；table='ideas'→带 argument_chain/necessity_grade/node_layer 的假设。返回新 id。",
   inputSchema: {
@@ -134,7 +134,7 @@ export async function addGraphNodeHandler({ table, data }) {
 }
 
 export const addGraphEdgesSchema = {
-  name: "add_graph_edges",
+  name: "graph_add_edges",
   description:
     "批量写图边（幂等）。graph-reasoner 产出新边后调用。每条 {from_table,from_id,to_table,to_id,edge_type,weight?,properties?}。",
   inputSchema: {
@@ -164,7 +164,7 @@ export async function addGraphEdgesHandler({ edges }) {
 }
 
 export const markContradictionResolvedSchema = {
-  name: "mark_contradiction_resolved",
+  name: "graph_mark_contradiction_resolved",
   description:
     "标记某 CONTRADICTS 边已由某 idea 解决（properties 加 resolved_by）。resolve_contradiction 产 idea 过 reviewer 后调用。",
   inputSchema: {
@@ -178,9 +178,9 @@ export async function markContradictionResolvedHandler({ edge_id, idea_id }) {
 }
 
 export const markContradictionBoundedSchema = {
-  name: "mark_contradiction_bounded",
+  name: "graph_mark_contradiction_bounded",
   description:
-    "标记 CONTRADICTS 边为「axiom 边界限定」(否定性结论:axiom 在此 regime 不完备,产不出必然正命题)。与 mark_contradiction_resolved 对称:resolved=肯定解决(产 idea),bounded=否定解决(axiom 证伪)。bounded 后该矛盾不再算 unresolved。graph-reasoner 判定矛盾为或然(axiom 证伪而非数据不足)时调用。",
+    "标记 CONTRADICTS 边为「axiom 边界限定」(否定性结论:axiom 在此 regime 不完备,产不出必然正命题)。与 graph_mark_contradiction_resolved 对称:resolved=肯定解决(产 idea),bounded=否定解决(axiom 证伪)。bounded 后该矛盾不再算 unresolved。graph-reasoner 判定矛盾为或然(axiom 证伪而非数据不足)时调用。",
   inputSchema: {
     type: "object",
     required: ["edge_id", "regime", "reason"],
@@ -196,7 +196,7 @@ export async function markContradictionBoundedHandler({ edge_id, regime, reason 
 }
 
 export const angleCoverageSchema = {
-  name: "angle_coverage",
+  name: "graph_angle_coverage",
   description:
     "信息角度覆盖度:每角度的因子数/dead_end/饱和度(unexplored/thin/partial/saturated)。explore_uncovered_angle 的输入——看哪些角度饱和该跳过、哪些未探索该开挖。不靠人喂角度,图自己看地图换方向。",
   inputSchema: { type: "object", properties: {} },
@@ -213,14 +213,14 @@ export const ALL_GRAPH_TRAVERSAL_SCHEMAS = [
   angleCoverageSchema,
 ];
 export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
-  query_contradictions: queryContradictionsHandler,
-  get_subgraph: getSubgraphHandler,
-  neighborhood: neighborhoodHandler,
-  find_refutation_clusters: findRefutationClustersHandler,
+  graph_query_contradictions: queryContradictionsHandler,
+  graph_get_subgraph: getSubgraphHandler,
+  graph_neighborhood: neighborhoodHandler,
+  graph_find_refutation_clusters: findRefutationClustersHandler,
   graph_stats: graphStatsHandler,
-  add_graph_node: addGraphNodeHandler,
-  add_graph_edges: addGraphEdgesHandler,
-  mark_contradiction_resolved: markContradictionResolvedHandler,
-  mark_contradiction_bounded: markContradictionBoundedHandler,
-  angle_coverage: angleCoverageHandler,
+  graph_add_node: addGraphNodeHandler,
+  graph_add_edges: addGraphEdgesHandler,
+  graph_mark_contradiction_resolved: markContradictionResolvedHandler,
+  graph_mark_contradiction_bounded: markContradictionBoundedHandler,
+  graph_angle_coverage: angleCoverageHandler,
 };

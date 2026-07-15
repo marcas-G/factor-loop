@@ -42,7 +42,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 ## Step 1 · 假设生成 + 因子候选（graph-engine → brainstorm）
 
 1. **假设生成**（图驱动，替代坐标抽样）：调 Skill `graph-engine`，传 `{run_id}`。
-   - graph-engine 内部自主：`graph_stats` 选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `add_graph_node` / `add_graph_edges` 落盘
+   - graph-engine 内部自主：`graph_stats` 选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `graph_add_node` / `graph_add_edges` 落盘
    - 产出：1 个必然假设（necessary/identification）+ argument_chain + necessity_grade + idea_id + operation_used
    - 回主会话：`state.idea` / `state.idea_id`（带 argument_chain + grade）已落盘
    - **fallback**：图无触发点时 graph-engine 自动调 `hypothesis-generator`（旧 lens 多轮路径），新旧产生器并存可对比
@@ -65,11 +65,11 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 2. 等待 3 个全部返回，收集每个的 `{xname, failure_layer}`（轻量路由信息，agent.md 规定的 return contract）
 3. agent 已在最终态自己调 `run_save` 落盘了完整字段（status / failure_layer / evidence / retry_trace / last_rewrite）——主会话**不再写这些**，避免靠 return message 传 state 时被 Claude 总结倾向截断
 4. 兜底（**断流根治**）：对每个返回结果，调 `run_load {run_id}` 确认 `factors[i].status` 是终态且字段齐全。**如缺失（agent 停在 write-factor 返回处断流——头号 bug，见 memory `run-factor-agent-stalls`，衔接硬规则 model 会忽略）**：
-   ① 先 `ls factors/<name>.h` 确认 .h 已生成；已生成则**重派**同 agent，prompt 明令**禁调任何 Skill（含 write-factor）**、从 `submit_factor` 起步 A→E 跑完——此为已验证的可靠推进方式（硬规则无效，唯禁 Skill + submit 起步有效）。
+   ① 先 `ls factors/<name>.h` 确认 .h 已生成；已生成则**重派**同 agent，prompt 明令**禁调任何 Skill（含 write-factor）**、从 `platform_submit_factor` 起步 A→E 跑完——此为已验证的可靠推进方式（硬规则无效，唯禁 Skill + submit 起步有效）。
    ② 重派仍卡 → 才 `run_save {patch: {"factors.<i>.status": "failed", "factors.<i>.failure_layer": "agent_crashed"}}` 兜底，继续其它 factor。
    ③ .h 未生成（write 步就断）→ 兜底 agent_crashed，后续单独调 write-factor 生成 .h 再重派。
 
-5. **迭代回滚**：本批 3 个跑完 + 兜底确认后，扫一遍因子，对 `status==failed` 且 `suggestion_id` 非空的（接续候选 B 没跑成），调 `reopen_iteration {suggestion_id}` 把建议从 in_progress→open，允许下次再接续（不浪费这条精进/重试线索）。check_done 的不回滚（由 evaluate 的 realize 归档）。
+5. **迭代回滚**：本批 3 个跑完 + 兜底确认后，扫一遍因子，对 `status==failed` 且 `suggestion_id` 非空的（接续候选 B 没跑成），调 `iteration_reopen {suggestion_id}` 把建议从 in_progress→open，允许下次再接续（不浪费这条精进/重试线索）。check_done 的不回滚（由 evaluate 的 realize 归档）。
 
 下一批 3 个，直到所有 factor 跑完。
 
@@ -90,7 +90,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 ## Step 4 · 汇总报告（support_score 连续，不绝对判断）
 
 1. **汇总结论**——读假设支持度（连续分数，**不判成立/否决**——假设级保留不确定性）：
-   - 调 `mcp__quant-mcp__get_hypothesis {idea_id: state.idea_id}` 读 `support_score`（贝叶斯平滑，0-1 连续）+ `evaluated_factor_count` + `necessity_grade`
+   - 调 `mcp__quant-mcp__hypothesis_get {idea_id: state.idea_id}` 读 `support_score`（贝叶斯平滑，0-1 连续）+ `evaluated_factor_count` + `necessity_grade`
    - support_score 是连续支持度（necessary 假设 pass 权重高 / identification 次之），不转绝对判断
    - 记 state: `run_save {run_id, patch: {"idea_support_score": <support_score>, "idea_evaluated_count": <count>, "idea_conclusion": "<一句话: 支持度=N, grade=X, N 因子 pass/fail 分布>"}}`
    - 报告：support_score + evaluated_factor_count + necessity_grade + pass/fail 分布 + key 教训（成功经验 / dead_end 方向）

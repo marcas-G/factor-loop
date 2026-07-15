@@ -30,7 +30,7 @@ description: 必然假设生成机。从约束耦合矛盾（反常 A vs B）逼
 
 若归纳引擎在跑（`pattern_cards` 有 archived 卡），**先调 `pattern_feed {top_n: 3}`** 拉 archived 高优先 + 未解释的模式卡（统计已验证的异常：F/T/C/S/Y/H/R 坐标 + 证据）。
 
-- **有模式卡**：以其为"已验证异常"，解释它的**机制**（F 为何在 S 结构、C 条件下预测 Y）。模式卡给的是统计事实，本 skill 逼出"为何必然如此"的论证链：用 data-lens 深挖该 F 的机制（`lens_orderflow`/`lens_condition`/`lens_memory`）→ 构造约束耦合矛盾（S 结构常含矛盾，如 bsi_ask 负 vs bsi_bid 正 = 方向不对称耦合）→ S1-S4。**产 idea 后必须调 `link_pattern_idea {pattern_card_id, idea_id}`** 回写（archived→explained），闭合衔接①。
+- **有模式卡**：以其为"已验证异常"，解释它的**机制**（F 为何在 S 结构、C 条件下预测 Y）。模式卡给的是统计事实，本 skill 逼出"为何必然如此"的论证链：用 data-lens 深挖该 F 的机制（`lens_orderflow`/`lens_condition`/`lens_memory`）→ 构造约束耦合矛盾（S 结构常含矛盾，如 bsi_ask 负 vs bsi_bid 正 = 方向不对称耦合）→ S1-S4。**产 idea 后必须调 `pattern_link_idea {pattern_card_id, idea_id}`** 回写（archived→explained），闭合衔接①。
 - **无模式卡**（库空/都解释过）：走下面的 lens 自主发现反常。
 
 ### lens 自主发现反常（无模式卡时）

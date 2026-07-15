@@ -54,7 +54,7 @@ test("persist_argument_chain 写入并返回 idea_id", async () => {
   assert.ok(result.idea_id > 0);
 });
 
-test("get_hypothesis 读回论证链(JSON 反序列化往返)", async () => {
+test("hypothesis_get 读回论证链(JSON 反序列化往返)", async () => {
   setupTempDb();
   const { idea_id } = await tools.persistArgumentChainHandler({
     text: "测试假设",
@@ -69,7 +69,7 @@ test("get_hypothesis 读回论证链(JSON 反序列化往返)", async () => {
   assert.equal(r.status, "open");
 });
 
-test("get_hypothesis 不存在的 idea_id 返回 ok:false", async () => {
+test("hypothesis_get 不存在的 idea_id 返回 ok:false", async () => {
   setupTempDb();
   const r = await tools.getHypothesisHandler({ idea_id: 999999 });
   assert.equal(r.ok, false);
@@ -77,7 +77,7 @@ test("get_hypothesis 不存在的 idea_id 返回 ok:false", async () => {
 
 test("schema 名称正确", () => {
   const names = tools.ALL_HYPOTHESIS_SCHEMAS.map((s) => s.name);
-  assert.deepEqual(names.sort(), ["get_hypothesis", "persist_argument_chain"]);
+  assert.deepEqual(names.sort(), ["hypothesis_get", "persist_argument_chain"]);
 });
 
 test("argument_chain 落在 ideas 表(非 factors 表)——层级正确", async () => {

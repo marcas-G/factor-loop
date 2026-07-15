@@ -2,7 +2,7 @@
 //
 // persist_argument_chain: 写假设 + 结构化论证链（argument_chain）到 ideas 表。
 //   区别于 persist_idea（纯文本 idea）——本工具携带从约束耦合逼出的完整论证。
-// get_hypothesis: 读假设论证链 + 支持度（reviewer-agent 审稿 / 忠实度判定 读用）。
+// hypothesis_get: 读假设论证链 + 支持度（reviewer-agent 审稿 / 忠实度判定 读用）。
 //
 // 设计依据（严格以新框架为准）:
 //   - 论证链是【假设】的属性（一假设挂多因子），放 ideas 表，不放 factors 表
@@ -46,7 +46,7 @@ export async function persistArgumentChainHandler({ text, argument_chain, parent
 }
 
 export const getHypothesisSchema = {
-  name: "get_hypothesis",
+  name: "hypothesis_get",
   description:
     "读假设的论证链 + 支持度。reviewer-agent 对抗审稿、忠实度判定（因子实现是否忠于论证链）时读用。argument_chain 自动从 JSON 反序列化。",
   inputSchema: {
@@ -83,5 +83,5 @@ export async function getHypothesisHandler({ idea_id }) {
 export const ALL_HYPOTHESIS_SCHEMAS = [persistArgumentChainSchema, getHypothesisSchema];
 export const ALL_HYPOTHESIS_HANDLERS = {
   persist_argument_chain: persistArgumentChainHandler,
-  get_hypothesis: getHypothesisHandler,
+  hypothesis_get: getHypothesisHandler,
 };

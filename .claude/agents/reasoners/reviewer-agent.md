@@ -1,7 +1,7 @@
 ---
 name: reviewer-agent
 description: 必然假设的对抗式审稿子代理。session 隔离——只接收论证链 artifact，不接收作者推理过程。被 hypothesis-generator 通过 Task 工具派出。
-tools: Read, mcp__quant-mcp__get_hypothesis
+tools: Read, mcp__quant-mcp__hypothesis_get
 ---
 
 # Reviewer Agent — 对抗式假设审稿
@@ -37,7 +37,7 @@ Task prompt 含 factor_implementation（.h 路径或内容）时切换模式二�
 
 ## 输入
 
-Task prompt 含待审论证链 JSON（text + argument_chain：background_axioms / superadditive_coupling / uniqueness_proof / competing_explanations / falsifiable_trace）。若 prompt 只给 idea_id，用 `mcp__quant-mcp__get_hypothesis` 读。
+Task prompt 含待审论证链 JSON（text + argument_chain：background_axioms / superadditive_coupling / uniqueness_proof / competing_explanations / falsifiable_trace）。若 prompt 只给 idea_id，用 `mcp__quant-mcp__hypothesis_get` 读。
 
 ---
 
@@ -121,7 +121,7 @@ LLM 对抽象判据（"超加性""唯一性"）的判断会漂移。锚点把抽
 
 ### 审稿对象
 
-- **argument_chain**（用 `mcp__quant-mcp__get_hypothesis` 读）：声明了 C（必然结论）+ S4 type（必然性来源）+ falsifiable_trace + competing_explanations
+- **argument_chain**（用 `mcp__quant-mcp__hypothesis_get` 读）：声明了 C（必然结论）+ S4 type（必然性来源）+ falsifiable_trace + competing_explanations
 - **factor_implementation**（用 `Read` 读 .h 路径）：实现的可测度量
 
 ### 审稿维度（对照论证链审实现）
