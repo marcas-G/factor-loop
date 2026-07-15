@@ -38,8 +38,7 @@ def scan_triggers(conn) -> list[dict]:
            JOIN axioms a ON a.id = ge.to_id AND ge.to_table='axioms'
            LEFT JOIN observe_outputs oo ON oo.id = ge.from_id AND ge.from_table='observe_outputs'
            WHERE ge.edge_type='CONTRADICTS'
-             AND json_extract(ge.properties,'$.resolved_by') IS NULL
-             AND json_extract(ge.properties,'$.resolution') IS NULL
+             AND NOT ({db.graph_constants()['resolved_clause']})
            ORDER BY COALESCE(ge.weight,0) DESC LIMIT 5"""
     ).fetchall():
         triggers.append({

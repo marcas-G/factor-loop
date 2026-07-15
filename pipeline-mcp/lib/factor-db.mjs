@@ -25,6 +25,15 @@ const VALID_STATUS = ["draft", "submitted", "evaluated", "failed", "dead_end"];
 const VALID_LESSON_TYPE = ["dead_end", "success_pattern"];
 const VALID_LESSON_SCOPE = ["factor"];
 
+let _CONSTANTS = null;
+function graphConstants() {
+  // db.py 与 factor-db.mjs 共读 factor_db/graph_constants.json → 判据一处,防双端漂移
+  if (_CONSTANTS === null) {
+    _CONSTANTS = JSON.parse(fs.readFileSync(path.join(CWD, "factor_db", "graph_constants.json"), "utf-8"));
+  }
+  return _CONSTANTS;
+}
+
 let _db = null;
 
 function findVec0So() {
@@ -1219,7 +1228,7 @@ function nodeRow(table, id) {
 
 // 查 CONTRADICTS 边。resolved=false 返回未解矛盾（resolve_contradiction 输入）。
 export function queryContradictions({ resolved = false, axiom_code = null, limit = 5 } = {}) {
-  const hasResolved = "(json_extract(properties,'$.resolved_by') IS NOT NULL OR json_extract(properties,'$.resolution') IS NOT NULL)";
+  const hasResolved = graphConstants().resolved_clause;
   let where = `ge.edge_type='CONTRADICTS' AND ${resolved ? "" : "NOT "}(${hasResolved})`;
   const params = [];
   if (axiom_code) { where += " AND a.code = ?"; params.push(axiom_code); }
@@ -1328,7 +1337,7 @@ export function graphStats() {
     edges_by_type,
     total_edges: c("SELECT COUNT(*) AS c FROM graph_edges"),
     unresolved_contradictions: c(
-      "SELECT COUNT(*) AS c FROM graph_edges WHERE edge_type='CONTRADICTS' AND json_extract(properties,'$.resolved_by') IS NULL AND json_extract(properties,'$.resolution') IS NULL"
+      `SELECT COUNT(*) AS c FROM graph_edges WHERE edge_type='CONTRADICTS' AND NOT (${graphConstants().resolved_clause})`
     ),
   };
 }
@@ -1408,7 +1417,8 @@ export function queryAngleCoverage() {
     ORDER BY n_factors ASC`).all();
   return rows.map((r) => {
     const n = r.n_factors, nd = r.n_dead_end;
-    const saturation = n === 0 ? "unexplored" : (n >= 5 && nd >= n * 0.6 ? "saturated" : (n <= 2 ? "thin" : "partial"));
+    const sc = graphConstants().saturation;
+    const saturation = n === 0 ? "unexplored" : (n >= sc.min_n_saturated && nd >= n * sc.dead_ratio_saturated ? "saturated" : (n <= sc.max_n_thin ? "thin" : "partial"));
     return { ...r, saturation };
   });
 }

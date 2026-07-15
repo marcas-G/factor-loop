@@ -347,6 +347,19 @@ NODE_PK = {
     "observe_outputs": "id",
 }
 
+_GRAPH_CONSTANTS = None
+
+
+def graph_constants() -> dict:
+    """加载共享图常量(判据/阈值)。db.py 与 factor-db.mjs 共读 factor_db/graph_constants.json
+    → 判据一处,防双端漂移(has_resolved / 饱和度阈值等)。"""
+    global _GRAPH_CONSTANTS
+    if _GRAPH_CONSTANTS is None:
+        _GRAPH_CONSTANTS = json.loads(
+            (Path(__file__).resolve().parent / "graph_constants.json").read_text(encoding="utf-8")
+        )
+    return _GRAPH_CONSTANTS
+
 
 def ensure_graph_schema(conn: sqlite3.Connection) -> None:
     """对现有库幂等补齐知识图表结构 + ideas.node_layer 列。
@@ -497,7 +510,7 @@ def query_contradictions(
 ) -> list[dict]:
     """查 CONTRADICTS 边。resolved=False 返回未解矛盾（resolve_contradiction 输入）。
     resolved 判据：properties JSON 含 resolved_by。"""
-    has_resolved = "(json_extract(properties,'$.resolved_by') IS NOT NULL OR json_extract(properties,'$.resolution') IS NOT NULL)"
+    has_resolved = graph_constants()["resolved_clause"]
     where = f"ge.edge_type='CONTRADICTS' AND {'NOT' if not resolved else ''} ({has_resolved})"
     params: list[Any] = []
     if axiom_code:
@@ -688,9 +701,8 @@ def graph_stats(conn: sqlite3.Connection) -> dict:
         },
         "total_edges": count("SELECT COUNT(*) FROM graph_edges"),
         "unresolved_contradictions": count(
-            """SELECT COUNT(*) FROM graph_edges WHERE edge_type='CONTRADICTS'
-               AND json_extract(properties,'$.resolved_by') IS NULL
-               AND json_extract(properties,'$.resolution') IS NULL"""
+            f"SELECT COUNT(*) FROM graph_edges WHERE edge_type='CONTRADICTS' "
+            f"AND NOT ({graph_constants()['resolved_clause']})"
         ),
     }
 
@@ -822,11 +834,12 @@ def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
     out = []
     for r in rows:
         n, nd = r["n_factors"], r["n_dead_end"]
+        sc = graph_constants()["saturation"]
         if n == 0:
             sat = "unexplored"
-        elif n >= 5 and nd >= n * 0.6:
+        elif n >= sc["min_n_saturated"] and nd >= n * sc["dead_ratio_saturated"]:
             sat = "saturated"
-        elif n <= 2:
+        elif n <= sc["max_n_thin"]:
             sat = "thin"
         else:
             sat = "partial"
