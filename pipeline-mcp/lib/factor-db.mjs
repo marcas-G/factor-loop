@@ -57,7 +57,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -95,6 +95,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   migratePatternCards();
   migrateGraphSchema();
   migrateSchemaVersion();
+  migrateQualitySchema();
   return _db;
 }
 
@@ -1429,6 +1430,17 @@ function migrateAngleSchema() {
   const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
   if (fcols.length > 0 && !fcols.includes("angle_code")) {
     _db.exec("ALTER TABLE factors ADD COLUMN angle_code TEXT");
+  }
+}
+
+// factors.quality_score/quality_grade(多指标聚合分 v6)
+function migrateQualitySchema() {
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (fcols.length > 0 && !fcols.includes("quality_score")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN quality_score REAL");
+  }
+  if (fcols.length > 0 && !fcols.includes("quality_grade")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN quality_grade TEXT");
   }
 }
 

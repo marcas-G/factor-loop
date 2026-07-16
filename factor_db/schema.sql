@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS factors (
     last_updated_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deprecated_at    TIMESTAMP,
     emb_generated_at TIMESTAMP,
-    angle_code       TEXT          -- 信息角度元层标注(见 angle_ontology)
+    angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
+    quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
+    quality_grade    TEXT          -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);

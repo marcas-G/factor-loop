@@ -1034,3 +1034,87 @@ def record_schema_version(conn: sqlite3.Connection, version: int, name: str) -> 
         "INSERT OR IGNORE INTO schema_version (version, name) VALUES (?, ?)",
         (version, name),
     )
+
+
+# ============ 质量聚合分(方案1 加权线性 + 固定阈值归一 + 方案4 等级) ============
+# Gate(ICIR≥1.5 + 成本后正 + 忠实 + 不否决)过门槛后,按独立性+稳定性加权。
+# ICIR 只作门槛不进分(边际递减)。固定阈值归一(不依赖库分布,新因子不动别人分)。
+# stability 用 deep_best 的 monthly_icir + signal_instability(core_metrics 历史全 null)。
+
+def ensure_quality_fields(conn: sqlite3.Connection) -> None:
+    """补 factors.quality_score/quality_grade 列(幂等)。v6 quality_fields。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "quality_score" not in cols:
+        conn.execute("ALTER TABLE factors ADD COLUMN quality_score REAL")
+    if "quality_grade" not in cols:
+        conn.execute("ALTER TABLE factors ADD COLUMN quality_grade TEXT")
+
+
+def _map_monthly_icir(x: float | None) -> float:
+    """monthly_icir 固定阈值归一(不依赖库)。≥2→1, ≥1→0.7, ≥0.5→0.4, ≥0.2→0.2, 否则0。"""
+    if x is None:
+        return 0.3  # 缺数据中性
+    if x >= 2.0:
+        return 1.0
+    if x >= 1.0:
+        return 0.7
+    if x >= 0.5:
+        return 0.4
+    if x >= 0.2:
+        return 0.2
+    return 0.0
+
+
+def _map_ic_std(x: float | None) -> float:
+    """session IC std 固定阈值归一(低好,跨时段平稳)。"""
+    if x is None:
+        return 0.3
+    if x < 0.0005:
+        return 1.0
+    if x < 0.001:
+        return 0.7
+    if x < 0.002:
+        return 0.4
+    return 0.0
+
+
+def quality_score_from_parts(
+    independence: float | None,
+    train_test: dict | None,
+    monthly_icir: float | None,
+    signal_instability_pct: float | None,
+    session_ic_std: float | None,
+    vol_regime_sign_consistent: bool | None,
+) -> tuple[float, str]:
+    """多指标聚合分(方案1 加权线性)+等级(方案4)。固定阈值归一,从质量出发。
+
+    independence: residual_ic_strength(0-1,vs 库内基底残差,高=真新颖不冗余)。
+    train_test: {decay, same_sign} 样本外衰减——**防过拟合核心**。
+    monthly_icir / signal_instability_pct / session_ic_std: 时间稳定(deep_best + core_metrics)。
+    vol_regime_sign_consistent: 跨波动 regime 符号一致(regime 鲁棒)。
+    返回 (score 0-1, grade A≥0.7 / B 0.4-0.7 / C<0.4)。
+
+    stability = 0.4×样本(train_test,防过拟合) + 0.4×时间(monthly+std+signal) + 0.2×regime
+    样本维最关键:符号反(same_sign=False)→过拟合/反转,直接 0 分。
+    """
+    ind = max(0.0, min(independence or 0.0, 1.0))
+    # 样本稳定(防过拟合)
+    decay = train_test.get("decay") if isinstance(train_test, dict) else None
+    same_sign = train_test.get("same_sign") if isinstance(train_test, dict) else None
+    if same_sign is False:
+        sample_stab = 0.0  # 样本内外符号反→过拟合/反转,重罚
+    elif decay is None:
+        sample_stab = 0.3
+    else:
+        sample_stab = max(0.0, 1.0 - (decay or 3.0) / 3.0)  # decay 0→1(无衰减), 3→0
+    # 时间稳定
+    month_consist = _map_monthly_icir(monthly_icir)
+    ic_std_stab = _map_ic_std(session_ic_std)
+    signal_stab = 1.0 - min((signal_instability_pct or 50.0) / 100.0, 1.0)
+    time_stab = 0.4 * month_consist + 0.4 * ic_std_stab + 0.2 * signal_stab
+    # regime 稳定
+    regime_stab = 1.0 if vol_regime_sign_consistent else 0.0
+    stability = 0.4 * sample_stab + 0.4 * time_stab + 0.2 * regime_stab
+    score = 0.5 * ind + 0.5 * stability
+    grade = "A" if score >= 0.7 else ("B" if score >= 0.4 else "C")
+    return round(score, 3), grade
