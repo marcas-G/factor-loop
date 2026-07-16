@@ -55,7 +55,7 @@ __pycache__/
 /中小盘_周频rent蓝图.md
 /docs/*
 !/docs/architecture.md
-!/docs/task-ic-daily-backfill.md
+!/docs/data-backfill.md
 /research/
 /factors/
 /factors_to_import/
