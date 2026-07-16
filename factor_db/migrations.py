@@ -5,7 +5,7 @@
                   + factor_ic_vec/coverage_map/factor_ic_daily/pattern_*)
                   —— 由 schema.sql 全量直建,迁移链不重建,up 为 noop
                   (新库 schema.sql 直建;py 端从未管 v1 迁移,老库假定已具备基线)
-  v2 graph_core   知识图表(axioms/graph_edges/observe_outputs) + ideas 必然假设字段
+  v2 graph_core   知识图表(axioms/graph_edges) + ideas 必然假设字段
   v3 graph_bounds graph_edges.edge_type CHECK 加 BOUNDS(重建表,幂等)
   v4 angle        信息角度元层 angle_ontology + factors.angle_code
   v5 rename_eval_metrics  factor_evals.seven_dim → eval_metrics(消七维命名残留)
@@ -39,7 +39,7 @@ def _baseline(conn: sqlite3.Connection) -> None:
 
 
 def _graph_core(conn: sqlite3.Connection) -> None:
-    """v2 知识图表(axioms/graph_edges/observe_outputs) + ideas 必然假设字段。"""
+    """v2 知识图表(axioms/graph_edges) + ideas 必然假设字段。"""
     db._ensure_graph_tables(conn)
     db.ensure_ideas_necessity_fields(conn)
 

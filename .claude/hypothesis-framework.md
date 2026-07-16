@@ -184,7 +184,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 | 操作 | 触发条件 | 产物 |
 |---|---|---|
-| **resolve_contradiction** | 未解 CONTRADICTS 边(observe 实测 vs axiom 理论预期) | 解释矛盾的 DERIVED 假设 |
+| **resolve_contradiction** | 未解 CONTRADICTS 边(节点 vs axiom 矛盾) | 解释矛盾的 DERIVED 假设 |
 | **generalize_from_refutation** | 3+ REFUTES 指向同一目标(dead_end 聚簇) | 共同失败模式逼出的必要条件 DERIVED |
 | **fill_chain_gap** | 某 DERIVED 的 argument_chain 有空节 | 补 axiom / 中间推导 / 竞争解释 |
 | **orthogonal_branch** | 某 HYPOTHESIS 有 3+ INSTANTIATES 无 ORTHOGONAL_TO | 正交维度上的子假设(HYPOTHESIS,conditional) |
@@ -198,7 +198,7 @@ HYPOTHESIS 层(orthogonal_branch / explore 新角度种子)可只填 `text` + �
 
 若推理结论是 **axiom 在此 regime 不完备/被证伪**——A∧B 只否定 axiom 完备性,不单向逼向任何必然机制 C(候选解释全或然);超加性证不出、唯一性证不出、三门槛断在微观 E/闭环——这是**有价值的否定性结论,不丢弃**:
 
-- 产一条 `BOUNDS` 边:`observe_outputs → axioms`,properties 标 `{regime, reason}`
+- 产一条 `BOUNDS` 边:`触发节点 → axioms`,properties 标 `{regime, reason}`
 - `graph_mark_contradiction_bounded` → 该矛盾不再悬着被反复 resolve
 
 **区分两种空手**:axiom 证伪(或然非必然)→ 产 BOUNDS(否定性入图);数据不足无法判断 → 真·空手(new_edges 也空),待数据补。

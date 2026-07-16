@@ -41,7 +41,7 @@ HYPOTHESIS 层节点(orthogonal_branch)可只填 text + 简化 chain（backgroun
 
 ## 操作 1 · resolve_contradiction（解矛盾）
 
-**触发**：一条未解 CONTRADICTS 边（observe 实测 vs axiom 理论预期）。
+**触发**：一条未解 CONTRADICTS 边（某节点 vs axiom 的矛盾）。
 
 **拉取输入**：Task prompt 给 contradiction 的 {evidence, axiom} 概要；若不全，用 `graph_query_contradictions {resolved:false}` 重取。
 
@@ -58,7 +58,7 @@ HYPOTHESIS 层节点(orthogonal_branch)可只填 text + 简化 chain（backgroun
 
 **输出 new_edges**：
 - `{from_table:"ideas", from_id:"<NEW>", to_table:"axioms", to_id:<axiom.id>, edge_type:"DERIVES_FROM", properties:{via:"resolve_contradiction"}}`
-- `{from_table:"observe_outputs"(或 evidence 所在表), from_id:<ev.id>, to_table:"ideas", to_id:"<NEW>", edge_type:"SUPPORTS", properties:{role:"trigger_evidence"}}`
+- `{from_table:"<触发节点表>", from_id:<触发节点id>, to_table:"ideas", to_id:"<NEW>", edge_type:"SUPPORTS", properties:{role:"trigger_evidence"}}`
 
 `<NEW>` 是占位，hypothesize 落盘时替换为真实 idea_id。
 
@@ -67,7 +67,7 @@ HYPOTHESIS 层节点(orthogonal_branch)可只填 text + 简化 chain（backgroun
 若推理结论是 **axiom 在此 regime 不完备/被证伪**——即 A∧B 只**否定** axiom 完备性，不单向逼向任何具体必然机制 C（候选解释全是或然）；超加性证不出、唯一性证不出、三门槛断在微观 E / 闭环——这是**有价值的否定性结论，不要丢弃**：
 
 - `new_nodes`: []（产不出肯定 DERIVED）
-- `new_edges`: [一条 BOUNDS 边]`{from_table:"observe_outputs", from_id:<ev.id>, to_table:"axioms", to_id:<axiom.id>, edge_type:"BOUNDS", properties:{regime:"<失效 regime>", reason:"<为何或然非必然>"}}`
+- `new_edges`: [一条 BOUNDS 边]`{from_table:"<触发节点表>", from_id:<触发节点id>, to_table:"axioms", to_id:<axiom.id>, edge_type:"BOUNDS", properties:{regime:"<失效 regime>", reason:"<为何或然非必然>"}}`
 - `confidence`: 中（0.3-0.6）
 - `verdict_hint`: "bounded"
 - `reasoning_summary`: 说明 axiom 为何在此 regime 失效 + 缺什么数据才能升级为必然

@@ -33,15 +33,15 @@ def test_graph_stats_uses_resolved_clause():
     """graph_stats 的 unresolved 判据来自常量:建未解矛盾→1,mark resolved→0。"""
     tmp = tempfile.mktemp(suffix=".db")
     with db.get_conn(tmp) as conn:
-        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT)",
+        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT, parent_idea_id INTEGER, status TEXT)",
                     "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
                     "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, deprecated_at TIMESTAMP)"]:
             conn.execute(ddl)
         db.ensure_graph_schema(conn)
         db.ensure_angle_schema(conn)
         aid = db.add_axiom(conn, "test_axiom", "microstructure", "test statement")
-        oid = db.add_observe_output(conn, "test_script", "test_axiom", "violation")
-        eid = db.add_graph_edge(conn, "observe_outputs", oid, "axioms", aid, "CONTRADICTS")
+        iid = db.add_idea(conn, "test idea")
+        eid = db.add_graph_edge(conn, "ideas", iid, "axioms", aid, "CONTRADICTS")
         s1 = db.graph_stats(conn)
         assert s1["unresolved_contradictions"] == 1, f"未解应为1, 实际{s1['unresolved_contradictions']}"
         db.mark_contradiction_resolved(conn, eid, 999)
@@ -55,7 +55,7 @@ def test_angle_coverage_uses_saturation():
     """query_angle_coverage 的饱和度阈值来自常量。"""
     tmp = tempfile.mktemp(suffix=".db")
     with db.get_conn(tmp) as conn:
-        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT)",
+        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT, parent_idea_id INTEGER, status TEXT)",
                     "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
                     "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, deprecated_at TIMESTAMP)"]:
             conn.execute(ddl)

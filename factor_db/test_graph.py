@@ -61,13 +61,13 @@ def test_query_contradictions_resolved_states():
     """resolved_by 和 resolution=bounded 都算消解(三态判据)。"""
     tmp, c = _setup()
     aid = db.add_axiom(c, "ax", "micro", "s")
-    oid = db.add_observe_output(c, "obs", "ax", "v")
-    eid = db.add_graph_edge(c, "observe_outputs", oid, "axioms", aid, "CONTRADICTS")
+    iid = db.add_idea(c, "test idea")
+    eid = db.add_graph_edge(c, "ideas", iid, "axioms", aid, "CONTRADICTS")
     assert len(db.query_contradictions(c)) == 1 and len(db.query_contradictions(c, resolved=True)) == 0
     db.mark_contradiction_resolved(c, eid, 99)  # resolved_by
     assert len(db.query_contradictions(c)) == 0 and len(db.query_contradictions(c, resolved=True)) == 1
-    oid2 = db.add_observe_output(c, "obs2", "ax", "v2")
-    eid2 = db.add_graph_edge(c, "observe_outputs", oid2, "axioms", aid, "CONTRADICTS")
+    iid2 = db.add_idea(c, "test idea2")
+    eid2 = db.add_graph_edge(c, "ideas", iid2, "axioms", aid, "CONTRADICTS")
     db.mark_contradiction_bounded(c, eid2, "regime", "或然")  # resolution=bounded
     assert len(db.query_contradictions(c)) == 0, "bounded 也应算消解(不算未解)"
     _teardown(tmp, c)

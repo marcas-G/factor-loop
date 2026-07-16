@@ -99,7 +99,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   return _db;
 }
 
-// 知识图表结构幂等迁移：axioms / graph_edges / observe_outputs + ideas.node_layer。
+// 知识图表结构幂等迁移：axioms / graph_edges + ideas.node_layer。
 // 新库由 schema.sql 直接建；此函数给已存在的库在线补齐。与 db.py ensure_graph_schema 对齐。
 function migrateGraphSchema() {
   const fcols = _db.prepare("PRAGMA table_info(factors)").all();
@@ -127,14 +127,6 @@ function migrateGraphSchema() {
     CREATE INDEX IF NOT EXISTS idx_edges_to        ON graph_edges(to_table, to_id);
     CREATE INDEX IF NOT EXISTS idx_edges_type      ON graph_edges(edge_type);
     CREATE INDEX IF NOT EXISTS idx_edges_type_from ON graph_edges(edge_type, from_table, from_id);
-    CREATE TABLE IF NOT EXISTS observe_outputs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, script TEXT NOT NULL,
-      axiom_code TEXT NOT NULL, violation TEXT NOT NULL, summary TEXT,
-      evidence TEXT, symbol TEXT,
-      detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_observe_axiom   ON observe_outputs(axiom_code);
-    CREATE INDEX IF NOT EXISTS idx_observe_script  ON observe_outputs(script);
   `);
   // ideas.node_layer 列幂等加
   const icols = _db.prepare("PRAGMA table_info(ideas)").all().map((c) => c.name);
@@ -1212,12 +1204,12 @@ export function linkPatternIdea(patternCardId, ideaId) {
   return { ok: true };
 }
 
-// ============ 知识图（axioms / graph_edges / observe_outputs）============
+// ============ 知识图（axioms / graph_edges）============
 // 分层知识图。graph_edges 跨表软引用 (from_table, from_id)，from_id: factors 存 xname，其余存 integer id 字符串。
 // 与 db.py 对齐。graph-engine 推理引擎经 MCP 工具读写此图。
 
 const NODE_PK = {
-  axioms: "id", ideas: "id", factors: "xname", lessons: "id", observe_outputs: "id",
+  axioms: "id", ideas: "id", factors: "xname", lessons: "id",
 };
 
 // AXIOM 层：写公理。幂等（code 唯一）。expected_signature 接受 object/string。
@@ -1249,14 +1241,6 @@ export function addGraphEdge({ from_table, from_id, to_table, to_id, edge_type, 
   ).run(from_table, fid, to_table, tid, edge_type, weight, props).lastInsertRowid);
 }
 
-// EVIDENCE 层：observe 理论违反观测。
-export function addObserveOutput({ script, axiom_code, violation, summary = null, evidence = null, symbol = null }) {
-  const ev = evidence ? JSON.stringify(evidence) : null;
-  return Number(db().prepare(
-    `INSERT INTO observe_outputs (script,axiom_code,violation,summary,evidence,symbol) VALUES (?,?,?,?,?,?)`
-  ).run(script, axiom_code, violation, summary, ev, symbol).lastInsertRowid);
-}
-
 // 取节点完整行（按表主键）。
 function nodeRow(table, id) {
   const pk = NODE_PK[table];
@@ -1272,16 +1256,14 @@ export function queryContradictions({ resolved = false, axiom_code = null, limit
   if (axiom_code) { where += " AND a.code = ?"; params.push(axiom_code); }
   const rows = db().prepare(
     `SELECT ge.id AS edge_id, ge.weight, ge.properties,
-            oo.id AS ev_id, oo.script, oo.summary, oo.evidence AS ev_json, oo.violation,
             a.id AS axiom_id, a.code AS axiom_code, a.statement, a.formal_form, a.expected_signature
      FROM graph_edges ge
-     LEFT JOIN observe_outputs oo ON oo.id = ge.from_id AND ge.from_table='observe_outputs'
      JOIN axioms a ON a.id = ge.to_id AND ge.to_table='axioms'
      WHERE ${where} ORDER BY COALESCE(ge.weight,0) DESC LIMIT ?`
   ).all(...params, limit);
   return rows.map((r) => ({
     edge_id: r.edge_id, weight: r.weight, properties: r.properties,
-    evidence: r.ev_id ? { id: r.ev_id, script: r.script, summary: r.summary, violation: r.violation, evidence: r.ev_json } : null,
+    evidence: null,
     axiom: { id: r.axiom_id, code: r.axiom_code, statement: r.statement, formal_form: r.formal_form, expected_signature: r.expected_signature },
   }));
 }
@@ -1371,7 +1353,6 @@ export function graphStats() {
     hypothesis: c("SELECT COUNT(*) AS c FROM ideas WHERE node_layer='HYPOTHESIS' OR node_layer IS NULL"),
     evidence_lessons: c("SELECT COUNT(*) AS c FROM lessons WHERE type='success_pattern' AND deprecated_at IS NULL"),
     refutation_lessons: c("SELECT COUNT(*) AS c FROM lessons WHERE type='dead_end' AND deprecated_at IS NULL"),
-    observe_outputs: c("SELECT COUNT(*) AS c FROM observe_outputs"),
     edges_by_type,
     total_edges: c("SELECT COUNT(*) AS c FROM graph_edges"),
     unresolved_contradictions: c(

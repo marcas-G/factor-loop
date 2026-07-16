@@ -32,11 +32,10 @@ def scan_triggers(conn) -> list[dict]:
 
     # 优先级 1：未解矛盾（CONTRADICTS 无 resolved_by）
     for r in conn.execute(
-        """SELECT ge.id AS edge_id, a.code AS axiom_code, a.statement, oo.violation, oo.summary,
+        """SELECT ge.id AS edge_id, a.code AS axiom_code, a.statement,
                   ge.weight
            FROM graph_edges ge
            JOIN axioms a ON a.id = ge.to_id AND ge.to_table='axioms'
-           LEFT JOIN observe_outputs oo ON oo.id = ge.from_id AND ge.from_table='observe_outputs'
            WHERE ge.edge_type='CONTRADICTS'
              AND NOT ({db.graph_constants()['resolved_clause']})
            ORDER BY COALESCE(ge.weight,0) DESC LIMIT 5"""
@@ -85,7 +84,7 @@ def should_stop(conn, round_num: int, max_rounds: int, consecutive_fails: int) -
     if consecutive_fails >= 5:
         return True, f"连续 {consecutive_fails} 次 reviewer fail"
     if stats["unresolved_contradictions"] == 0 and not scan_triggers(conn):
-        return True, "无未解矛盾且无触发点——图推理链暂穷尽（可跑新 observe 补燃料）"
+        return True, "无未解矛盾且无触发点——图推理链暂穷尽"
     return False, ""
 
 
@@ -120,7 +119,7 @@ def main():
                 print(f"  [P{t['priority']}] {t['op']}: {t['desc']}  ref={t['ref']}")
             print("\n→ 起 claude session 调 /graph-engine 推进（每轮解 1 个触发点）。")
         else:
-            print("无触发点：图推理链暂穷尽。跑新 observe 脚本补 CONTRADICTS 燃料，或调 /hypothesis-generator fallback。")
+            print("无触发点：图推理链暂穷尽。")
             if args.watch:
                 break
             sys.exit(1)

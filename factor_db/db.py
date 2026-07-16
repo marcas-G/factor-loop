@@ -343,8 +343,8 @@ def search_similar(
     return conn.execute(sql, params).fetchall()
 
 
-# ============ 知识图（axioms / graph_edges / observe_outputs）============
-# 分层知识图：AXIOM(axioms表) → DERIVED/HYPOTHESIS(ideas表) → EVIDENCE/REFUTATION(lessons/factors/observe_outputs)。
+# ============ 知识图（axioms / graph_edges）============
+# 分层知识图：AXIOM(axioms表) → DERIVED/HYPOTHESIS(ideas表) → EVIDENCE/REFUTATION(lessons/factors)。
 # graph_edges 跨表软引用 (from_table, from_id)。from_id: factors 存 xname，其余存 integer id 字符串。
 
 VALID_EDGE_TYPES = {
@@ -357,7 +357,6 @@ NODE_PK = {
     "ideas": "id",
     "factors": "xname",        # TEXT 主键
     "lessons": "id",
-    "observe_outputs": "id",
 }
 
 _GRAPH_CONSTANTS = None
@@ -375,7 +374,7 @@ def graph_constants() -> dict:
 
 
 def _ensure_graph_tables(conn: sqlite3.Connection) -> None:
-    """建 axioms/graph_edges/observe_outputs 表(幂等)。migrations v2 graph_core 的表部分。
+    """建 axioms/graph_edges 表(幂等)。migrations v2 graph_core 的表部分。
     新库由 schema.sql 直建；此函数给老库在线补齐。"""
     conn.executescript(
         """
@@ -399,13 +398,6 @@ def _ensure_graph_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_edges_from ON graph_edges(from_table, from_id);
         CREATE INDEX IF NOT EXISTS idx_edges_to   ON graph_edges(to_table, to_id);
         CREATE INDEX IF NOT EXISTS idx_edges_type ON graph_edges(edge_type);
-        CREATE TABLE IF NOT EXISTS observe_outputs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, script TEXT NOT NULL,
-            axiom_code TEXT NOT NULL, violation TEXT NOT NULL, summary TEXT,
-            evidence TEXT, symbol TEXT,
-            detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS idx_observe_axiom ON observe_outputs(axiom_code);
         """
     )
 
@@ -527,29 +519,6 @@ def add_graph_edge(
     return int(cur.lastrowid) if cur.lastrowid else None
 
 
-def add_observe_output(
-    conn: sqlite3.Connection,
-    script: str,
-    axiom_code: str,
-    violation: str,
-    summary: str | None = None,
-    evidence: dict | None = None,
-    symbol: str | None = None,
-) -> int:
-    cur = conn.execute(
-        """
-        INSERT INTO observe_outputs (script, axiom_code, violation, summary, evidence, symbol)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            script, axiom_code, violation, summary,
-            json.dumps(evidence, ensure_ascii=False) if evidence else None,
-            symbol,
-        ),
-    )
-    return int(cur.lastrowid)
-
-
 def _node_row(conn: sqlite3.Connection, table: str, node_id) -> sqlite3.Row | None:
     """取节点完整行（按表主键）。"""
     pk = NODE_PK.get(table)
@@ -575,10 +544,8 @@ def query_contradictions(
     rows = conn.execute(
         f"""
         SELECT ge.id AS edge_id, ge.weight, ge.properties,
-               oo.id AS ev_id, oo.script, oo.summary, oo.evidence AS ev_json, oo.violation,
                a.id AS axiom_id, a.code AS axiom_code, a.statement, a.formal_form, a.expected_signature
         FROM graph_edges ge
-        LEFT JOIN observe_outputs oo ON oo.id = ge.from_id AND ge.from_table='observe_outputs'
         JOIN axioms a ON a.id = ge.to_id AND ge.to_table='axioms'
         WHERE {where}
         ORDER BY COALESCE(ge.weight, 0) DESC LIMIT ?
@@ -589,8 +556,7 @@ def query_contradictions(
     for r in rows:
         out.append({
             "edge_id": r["edge_id"], "weight": r["weight"], "properties": r["properties"],
-            "evidence": {"id": r["ev_id"], "script": r["script"], "summary": r["summary"],
-                         "violation": r["violation"], "evidence": r["ev_json"]} if r["ev_id"] else None,
+            "evidence": None,
             "axiom": {"id": r["axiom_id"], "code": r["axiom_code"], "statement": r["statement"],
                       "formal_form": r["formal_form"], "expected_signature": r["expected_signature"]},
         })
@@ -749,7 +715,6 @@ def graph_stats(conn: sqlite3.Connection) -> dict:
         "refutation_lessons": count(
             "SELECT COUNT(*) FROM lessons WHERE type='dead_end' AND deprecated_at IS NULL"
         ),
-        "observe_outputs": count("SELECT COUNT(*) FROM observe_outputs"),
         "edges_by_type": {
             r[0]: r[1] for r in conn.execute(
                 "SELECT edge_type, COUNT(*) FROM graph_edges GROUP BY edge_type"

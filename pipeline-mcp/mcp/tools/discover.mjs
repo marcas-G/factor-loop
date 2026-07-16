@@ -4,7 +4,6 @@
 // open_iterations 复用现有 iteration_list_open(iterations 模块),不在此重复。
 //
 // 这两个 + iteration_list_open 是 top-down 扫库源(理论驱动)。
-// 与 bottom-up 观测工具(observe_*,Python)互补,组成扫库源的两种源。
 
 import * as factorDb from "../../lib/factor-db.mjs";
 
