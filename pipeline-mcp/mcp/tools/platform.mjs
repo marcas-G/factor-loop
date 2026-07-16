@@ -171,9 +171,9 @@ function _mockCheckResult(xname, checkOutput, { done = true } = {}) {
       summary: `[MOCK] ${xname} 检查通过`,
       evidence: {
         reason: "mock",
-        seven_dim_summary: {
+        eval_metrics: {
           factor_level: { n_pairs: 10, keep: 5, watch: 3, reject: 2, best_score: 0.85, best_pair: "X1-Y1" },
-          seven_dim_best: { screening: { ic_mean: 0.038, icir: 2.1 } },
+          core_metrics: { screening: { ic_mean: 0.038, icir: 2.1 } },
           deep_best: { conditional_sharpe: 1.8, monthly_icir: 2.5, rank_ic_max: 0.05 },
           failure_reasons: {},
         },

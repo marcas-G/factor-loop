@@ -57,7 +57,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -526,8 +526,8 @@ export async function generateEmbedding(xname) {
 // ============ factor_evals ============
 
 // metrics: { ic_mean, icir, sharpe, rank_ic }
-// opts: { sevenDim, conditionalReturns, significant, mode, status }
-//   sevenDim            — 7 维评估的 JSON 对象，存到 factor_evals.seven_dim
+// opts: { evalMetrics, conditionalReturns, significant, mode, status }
+//   evalMetrics            — 7 维评估的 JSON 对象，存到 factor_evals.eval_metrics
 //   conditionalReturns  — deep 分析的条件收益 JSON，存到 factor_evals.conditional_returns
 //   significant         — 0/1，外部根据 verdict 决定（不再内部用 ICIR 阈值判断）
 //   mode                — eval_mode 字段，默认 full
@@ -537,18 +537,18 @@ export function addEval(xname, ts, metrics, ideaId = null, rawPath = null, opts 
   const conn = db();
   const mode = opts.mode || "full";
   const significant = opts.significant != null ? Number(opts.significant) : 0;
-  const sevenDimJson = opts.sevenDim ? JSON.stringify(opts.sevenDim) : null;
+  const evalMetricsJson = opts.evalMetrics ? JSON.stringify(opts.evalMetrics) : null;
   const condRetJson = opts.conditionalReturns ? JSON.stringify(opts.conditionalReturns) : null;
 
   conn.prepare(
     `INSERT INTO factor_evals
        (factor_xname, idea_id, ts, symbol, freq, ic_mean, icir, sharpe, rank_ic,
-        seven_dim, conditional_returns, eval_mode, significant, raw_path)
+        eval_metrics, conditional_returns, eval_mode, significant, raw_path)
      VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     xname, ideaId, ts,
     m.ic_mean ?? null, m.icir ?? null, m.sharpe ?? null, m.rank_ic ?? null,
-    sevenDimJson, condRetJson,
+    evalMetricsJson, condRetJson,
     mode,
     significant,
     rawPath

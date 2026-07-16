@@ -4,11 +4,11 @@
 // 策略：
 //   verdict=pass:
 //     - factors 表（status=evaluated）
-//     - factor_evals 表（含 seven_dim / conditional_returns / significant=1）
+//     - factor_evals 表（含 eval_metrics / conditional_returns / significant=1）
 //     - lessons 表（type=success_pattern）
 //   verdict=fail:
 //     - factors 表（status=dead_end）
-//     - factor_evals 表（含 seven_dim / significant=0，更新 latest_ic/icir）
+//     - factor_evals 表（含 eval_metrics / significant=0，更新 latest_ic/icir）
 //     - lessons 表（type=dead_end，含 LLM 给的 suggested_iteration）
 //
 // 失败因子（submit_failed / platform_* / check_failed）→ 不调本函数，靠 state.json 留痕
@@ -20,18 +20,18 @@
 
 import * as factorDb from "../lib/factor-db.mjs";
 
-// 从 seven_dim_summary 提取 metrics，适配三种历史结构：
-//   1. 嵌套（期望）：{seven_dim_best: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
+// 从 eval_metrics 提取 metrics，适配三种历史结构：
+//   1. 嵌套（期望）：{core_metrics: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
 //   2. factor 1 扁平：{1_ic, 2_icir, 3_hit_rate, 4_train_test_consistency, ...}
 //   3. factor 2 扁平：{ic_mean, icir, hit_rate, t_stat, ..., bucket_annualized_sharpe, ic_decay}
-function extractMetrics(sevenDimSummary) {
-  if (!sevenDimSummary) return { ic_mean: null, icir: null, sharpe: null, rank_ic: null };
-  const fromScreening = sevenDimSummary.seven_dim_best?.screening || {};
-  const fromDeep = sevenDimSummary.deep_best || {};
+function extractMetrics(evalMetrics) {
+  if (!evalMetrics) return { ic_mean: null, icir: null, sharpe: null, rank_ic: null };
+  const fromScreening = evalMetrics.core_metrics?.screening || {};
+  const fromDeep = evalMetrics.deep_best || {};
   return {
-    ic_mean: fromScreening.ic_mean ?? sevenDimSummary.ic_mean ?? sevenDimSummary["1_ic"] ?? null,
-    icir: fromScreening.icir ?? sevenDimSummary.icir ?? sevenDimSummary["2_icir"] ?? null,
-    sharpe: fromDeep.conditional_sharpe ?? sevenDimSummary.bucket_annualized_sharpe?.["@1s"] ?? null,
+    ic_mean: fromScreening.ic_mean ?? evalMetrics.ic_mean ?? evalMetrics["1_ic"] ?? null,
+    icir: fromScreening.icir ?? evalMetrics.icir ?? evalMetrics["2_icir"] ?? null,
+    sharpe: fromDeep.conditional_sharpe ?? evalMetrics.bucket_annualized_sharpe?.["@1s"] ?? null,
     rank_ic: fromDeep.rank_ic_max ?? null,
   };
 }
@@ -51,8 +51,8 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     }
     const xname = featureKey;
     const ts = new Date().toISOString();
-    const sevenDimSummary = checkResult.evidence?.seven_dim_summary || null;
-    const metrics = extractMetrics(sevenDimSummary);
+    const evalMetrics = checkResult.evidence?.eval_metrics || null;
+    const metrics = extractMetrics(evalMetrics);
     const isPass = verdict.verdict === "pass";
 
     if (isPass) {
@@ -62,8 +62,8 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
       }
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
-        sevenDim: sevenDimSummary,
-        conditionalReturns: sevenDimSummary?.deep_best || null,
+        evalMetrics: evalMetrics,
+        conditionalReturns: evalMetrics?.deep_best || null,
         significant: 1,
         mode: "full",
         status: "evaluated",
@@ -78,7 +78,7 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
       // success_pattern lesson
-      const lessonText = buildSuccessLessonText(factor, verdict, sevenDimSummary);
+      const lessonText = buildSuccessLessonText(factor, verdict, evalMetrics);
       const lessonId = factorDb.addLesson("success_pattern", lessonText, {
         xname: written,
         ideaId,
@@ -87,8 +87,8 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
           icir: metrics.icir,
           ic_mean: metrics.ic_mean,
           sharpe: metrics.sharpe,
-          decision_breakdown: sevenDimSummary?.factor_level,
-          deep_best: sevenDimSummary?.deep_best,
+          decision_breakdown: evalMetrics?.factor_level,
+          deep_best: evalMetrics?.deep_best,
           strengths: verdict.key_strengths || [],
         },
       });
@@ -123,8 +123,8 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
       }
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
-        sevenDim: sevenDimSummary,
-        conditionalReturns: sevenDimSummary?.deep_best || null,
+        evalMetrics: evalMetrics,
+        conditionalReturns: evalMetrics?.deep_best || null,
         significant: 0,
         mode: "full",
         status: "dead_end",
@@ -138,7 +138,7 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
       console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
-      const lessonText = buildDeadEndLessonText(factor, verdict, sevenDimSummary);
+      const lessonText = buildDeadEndLessonText(factor, verdict, evalMetrics);
       const lessonId = factorDb.addLesson("dead_end", lessonText, {
         xname: written,
         ideaId,
@@ -146,7 +146,7 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
           xname: written,
           icir: metrics.icir,
           ic_mean: metrics.ic_mean,
-          decision_breakdown: sevenDimSummary?.factor_level,
+          decision_breakdown: evalMetrics?.factor_level,
           weaknesses: verdict.key_weaknesses || [],
           suggested_iteration: verdict.suggested_iteration || null,
         },
@@ -167,9 +167,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
   }
 }
 
-function buildSuccessLessonText(factor, verdict, sevenDimSummary) {
-  const f = sevenDimSummary?.factor_level || {};
-  const deep = sevenDimSummary?.deep_best || {};
+function buildSuccessLessonText(factor, verdict, evalMetrics) {
+  const f = evalMetrics?.factor_level || {};
+  const deep = evalMetrics?.deep_best || {};
   const strengths = (verdict.key_strengths || []).join("; ");
   return [
     `[success_pattern] ${factor.name}`,
@@ -181,10 +181,10 @@ function buildSuccessLessonText(factor, verdict, sevenDimSummary) {
   ].join("\n");
 }
 
-function buildDeadEndLessonText(factor, verdict, sevenDimSummary) {
-  const f = sevenDimSummary?.factor_level || {};
-  const deep = sevenDimSummary?.deep_best || {};
-  const reasons = sevenDimSummary?.failure_reasons || {};
+function buildDeadEndLessonText(factor, verdict, evalMetrics) {
+  const f = evalMetrics?.factor_level || {};
+  const deep = evalMetrics?.deep_best || {};
+  const reasons = evalMetrics?.failure_reasons || {};
   const topReasons = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k}(${v})`).join(", ");
   const weaknesses = (verdict.key_weaknesses || []).join("; ");
   return [

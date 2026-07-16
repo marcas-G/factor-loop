@@ -253,7 +253,7 @@ function _transient(checkOutput, dailyIcPath, dailyIcExists, dailyIcSize, result
 function _success(checkOutput, dailyIcPath, dailyIcSize, result, featureKey) {
   const icContent = fs.readFileSync(dailyIcPath, "utf8");
   const icPreview = icContent.split("\n").slice(0, 30).join("\n");
-  const sevenDimSummary = extractMetricsFromCheckOutput(checkOutput, featureKey);
+  const evalMetrics = extractMetricsFromCheckOutput(checkOutput, featureKey);
   return {
     ok: true,
     failureLayer: "check_done",
@@ -264,7 +264,7 @@ function _success(checkOutput, dailyIcPath, dailyIcSize, result, featureKey) {
     evidence: {
       reason: "check_done",
       daily_ic_preview: icPreview,
-      seven_dim_summary: sevenDimSummary,
+      eval_metrics: evalMetrics,
       stdout_tail: result.stdout.slice(-500),
     },
   };

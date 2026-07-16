@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS factor_evals (
     icir                REAL,
     sharpe              REAL,
     rank_ic             REAL,
-    seven_dim           TEXT,
+    eval_metrics           TEXT,
     conditional_returns TEXT,
     eval_mode           TEXT CHECK (eval_mode IN ('full','pearson','deep')),
     significant         INTEGER DEFAULT 0,

@@ -8,6 +8,7 @@
   v2 graph_core   知识图表(axioms/graph_edges/observe_outputs) + ideas 必然假设字段
   v3 graph_bounds graph_edges.edge_type CHECK 加 BOUNDS(重建表,幂等)
   v4 angle        信息角度元层 angle_ontology + factors.angle_code
+  v5 rename_eval_metrics  factor_evals.seven_dim → eval_metrics(消七维命名残留)
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -27,7 +28,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -52,12 +53,22 @@ def _angle(conn: sqlite3.Connection) -> None:
     db.ensure_angle_schema(conn)
 
 
+def _rename_eval_metrics(conn: sqlite3.Connection) -> None:
+    """v5 factor_evals.seven_dim → eval_metrics(消除七维命名残留)。
+    seven_dim 是早期 factor_check 7 维设计的字段名,内容已非 7 维(8+ key)。
+    SQLite 3.25+ ALTER TABLE RENAME COLUMN;幂等(已是 eval_metrics 则跳过)。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factor_evals)")}
+    if "seven_dim" in cols and "eval_metrics" not in cols:
+        conn.execute("ALTER TABLE factor_evals RENAME COLUMN seven_dim TO eval_metrics")
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
     (2, "graph_core",   _graph_core),
     (3, "graph_bounds", _graph_bounds),
     (4, "angle",        _angle),
+    (5, "rename_eval_metrics", _rename_eval_metrics),
 ]
 
 

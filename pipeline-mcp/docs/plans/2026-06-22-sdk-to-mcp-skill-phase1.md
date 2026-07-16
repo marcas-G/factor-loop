@@ -1175,9 +1175,9 @@ export async function checkFactorHandler({ xname, submitRef, checkOutput }) {
       summary: `[MOCK] ${xname} 检查通过`,
       evidence: {
         reason: "mock",
-        seven_dim_summary: {
+        eval_metrics: {
           factor_level: { n_pairs: 10, keep: 5, watch: 3, reject: 2, best_score: 0.85, best_pair: "X1-Y1" },
-          seven_dim_best: { screening: { ic_mean: 0.038, icir: 2.1 } },
+          core_metrics: { screening: { ic_mean: 0.038, icir: 2.1 } },
           deep_best: { conditional_sharpe: 1.8, monthly_icir: 2.5, rank_ic_max: 0.05 },
           failure_reasons: {},
         },
@@ -1389,7 +1389,7 @@ placeholders:
   - "{{IDEA}}": 本次研究 idea
   - "{{FACTOR_NAME}}": 当前因子类名
   - "{{HYPOTHESIS}}": 因子设计假设（brainstorm 阶段的 intuition+diff_check+coord_usage）
-  - "{{SEVEN_DIM_JSON}}": 7 维评估数据 JSON 字符串
+  - "{{EVAL_METRICS_JSON}}": 7 维评估数据 JSON 字符串
 ---
 
 你是量化因子研究员，基于 7 维评估数据对单个因子做"结果评估"。
@@ -1401,11 +1401,11 @@ placeholders:
 {{HYPOTHESIS}}
 
 [因子的 7 维评估数据]（代码从平台产物聚合，**不是 LLM 自评**）
-{{SEVEN_DIM_JSON}}
+{{EVAL_METRICS_JSON}}
 
 [评估维度参考]
 - factor_level: 平台对 N 个 X-Y 对的 decision 分布（KEEP/WATCH/REJECT）+ 最佳 score
-- seven_dim_best: 每个维度的最佳 X-Y 对指标
+- core_metrics: 每个维度的最佳 X-Y 对指标
   - screening: IC/ICIR/Spearman/sign_match_rate
   - session_ic: 各交易时段 IC + std（std 越小越稳）
   - vol_regime: 波动率 5 分位 IC + sign_consistent
@@ -1533,7 +1533,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
    - `{{IDEA}}`：state.idea
    - `{{FACTOR_NAME}}`：factors[i].name
    - `{{HYPOTHESIS}}`：factors[i].hypothesis
-   - `{{SEVEN_DIM_JSON}}`：JSON.stringify(factors[i].evidence.seven_dim_summary, null, 2)
+   - `{{EVAL_METRICS_JSON}}`：JSON.stringify(factors[i].evidence.eval_metrics, null, 2)
 4. 让 Claude 按 prompt 推理，产出 verdict JSON：`{xname, verdict, key_strengths, key_weaknesses, suggested_iteration}`
 5. 调 MCP `persist_factor`：
    ```
@@ -1567,7 +1567,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 |---|---|
 | MCP 工具连续失败 3 次 | `run_save {status: "paused"}`，向用户报告，停止 |
 | Task 子代理超时/崩溃 | 标 `failure_layer: "agent_crashed"`，继续其它 factor |
-| evaluate 失败（如 seven_dim 缺失） | verdict=fail，key_weaknesses 写"seven_dim 缺失"，继续下一个 |
+| evaluate 失败（如 eval_metrics 缺失） | verdict=fail，key_weaknesses 写"eval_metrics 缺失"，继续下一个 |
 | 断点续传时发现 factor `.h` 已存在但 status 非 done | 子代理先删除该 `.h` 文件再从 write 步重开 |
 
 ## 不要做的事
@@ -1696,7 +1696,7 @@ while True:
   "xname": "<factor.name>",
   "success": true | false,
   "failure_layer": "check_done" | "submit_failed" | "give_up" | "agent_crashed",
-  "evidence": <check_factor 返回的 evidence 字段，含 seven_dim_summary> | null,
+  "evidence": <check_factor 返回的 evidence 字段，含 eval_metrics> | null,
   "retry_trace": [<每次跳转的 {from, jump, reason}>],
   "last_rewrite": {fixed: bool, changes: string} | null,
   "factor_file": "<.h 绝对路径>"
@@ -1862,7 +1862,7 @@ cat ~/.quant-runs/<run_id>/state.json | jq '.idea, .factors[0].name'
 - [ ] Step 2：Claude 在一个消息里发 1 个 Task tool call 调起 run-factor-agent
 - [ ] run-factor-agent 调 Skill write-factor 写出 `.h` 文件
 - [ ] run-factor-agent 调 `submit_factor`（mock 返回 ok=true）
-- [ ] run-factor-agent 调 `check_factor`（mock 返回 check_done + evidence.seven_dim_summary）
+- [ ] run-factor-agent 调 `check_factor`（mock 返回 check_done + evidence.eval_metrics）
 - [ ] run-factor-agent 返回 `{failure_layer: "check_done", evidence: {...}}`
 - [ ] Claude 调 `run_save` 写 factors[0].failure_layer
 - [ ] Step 3：Claude 加载 evaluate.md，推理出 verdict（pass/fail）

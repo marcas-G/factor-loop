@@ -172,14 +172,14 @@ def add_eval(
         """
         INSERT INTO factor_evals
             (factor_xname, idea_id, ts, symbol, freq, ic_mean, icir, sharpe, rank_ic,
-             seven_dim, conditional_returns, eval_mode, significant, raw_path)
+             eval_metrics, conditional_returns, eval_mode, significant, raw_path)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             factor_xname, idea_id, ts, symbol, freq,
             metrics.get("ic_mean"), metrics.get("icir"),
             metrics.get("sharpe"), metrics.get("rank_ic"),
-            json.dumps(metrics.get("seven_dim"), ensure_ascii=False) if metrics.get("seven_dim") else None,
+            json.dumps(metrics.get("eval_metrics"), ensure_ascii=False) if metrics.get("eval_metrics") else None,
             json.dumps(metrics.get("conditional_returns"), ensure_ascii=False) if metrics.get("conditional_returns") else None,
             mode, int(bool(metrics.get("significant", False))), raw_path,
         ),
