@@ -20,6 +20,7 @@ DEFAULT_DB = Path(__file__).resolve().parent.parent / "factors.db"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import migrations  # noqa: E402  同目录;init 后调 migrate 记录版本链
+import seed_axioms  # noqa: E402  新库建后预填 23 条 axiom
 
 
 def load_sqlite_vec(conn: sqlite3.Connection) -> None:
@@ -50,6 +51,7 @@ def init_db(db_path: Path = DEFAULT_DB) -> None:
     finally:
         conn.close()
 
+    seed_axioms.seed(db_path)  # 新库建后预填 axiom(23 条理论公理,可复现)
     print(f"[OK] 初始化完成: {db_path}")
     print(f"     schema: {SCHEMA_PATH}")
     print(f"     schema_version: {migrations.CURRENT_VERSION}")
