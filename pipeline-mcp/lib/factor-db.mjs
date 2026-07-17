@@ -25,6 +25,29 @@ const VALID_STATUS = ["draft", "submitted", "evaluated", "failed", "dead_end"];
 const VALID_LESSON_TYPE = ["dead_end", "success_pattern"];
 const VALID_LESSON_SCOPE = ["factor"];
 
+// angle_code 自动推断(从 formula/tags/xname 关键词 → angle_ontology code)。与 db.py infer_angle_code 双端一致。
+const _ANGLE_KEYWORDS = [
+  ["book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]],
+  ["add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]],
+  ["add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]],
+  ["depth_shape",          ["depth_shape", "entropy", "skew", "hhi", "conc"]],
+  ["depth_slope",          ["depth_slope", "book_slope", "slope"]],
+  ["spread_structure",     ["spread", "bid_ask_spread"]],
+  ["trade_imbalance",      ["trade_imb", "volume_imb", "tvi"]],
+  ["trade_rhythm",         ["hawkes", "burst", "rhythm", "cluster"]],
+  ["intensity_level",      ["intensity", "turnover", "active"]],
+  ["volatility_regime",    ["vol_regime", "volatility", "vol_gate", "volregime", "vol burst", "vol regime"]],
+  ["price_microstructure", ["microstructure", "roll", "autocorr"]],
+  ["oi_anomaly",           ["oi_", "oi ", "open_interest", "oipersist", "oiresist", "oispike", "oiintensity"]],
+];
+function inferAngleCode(formula, tags, xname) {
+  const text = [formula, ...(tags || []), xname].filter(Boolean).join(" ").toLowerCase();
+  for (const [code, keywords] of _ANGLE_KEYWORDS) {
+    if (keywords.some((kw) => text.includes(kw))) return code;
+  }
+  return null;
+}
+
 let _CONSTANTS = null;
 function graphConstants() {
   // db.py 与 factor-db.mjs 共读 factor_db/graph_constants.json → 判据一处,防双端漂移
@@ -446,9 +469,7 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     conn.prepare(
       `INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)`
     ).run(ideaId, xname);
-    // angle_code 回灌: idea 的角度在 graph_edges DERIVES_FROM 边 properties.angle
-    // (explore_uncovered_angle 产 idea 时标)。落因子时回灌到 factors.angle_code,
-    // 让 angle_coverage 地图正确反映饱和度,驱动 explore 换角度(防主题扎堆)。
+    // angle_code 回灌(优先 idea 的 properties.angle):
     const a = conn.prepare(
       `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
        WHERE from_id=? AND edge_type='DERIVES_FROM'
@@ -456,6 +477,14 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     ).get(String(ideaId));
     if (a && a.angle) {
       conn.prepare(`UPDATE factors SET angle_code=? WHERE xname=?`).run(a.angle, xname);
+    }
+  }
+  // angle_code 自动推断(解耦 explore):idea 无 angle 或无 idea 时,从 formula/tags/xname 推断
+  const curAngle = conn.prepare("SELECT angle_code FROM factors WHERE xname=?").get(xname);
+  if (!curAngle || !curAngle.angle_code) {
+    const inferred = inferAngleCode(meta.formula, meta.tags, xname);
+    if (inferred) {
+      conn.prepare(`UPDATE factors SET angle_code=? WHERE xname=?`).run(inferred, xname);
     }
   }
   return xname;
@@ -1453,73 +1482,95 @@ export function queryAngleCoverage() {
   });
 }
 
-// ============ 操作选择(动态优先级打分,与 db.py select_graph_operation 双端一致) ============
-// 替代 graph-engine G1 固定优先级表。饱和时 explore 升权 / 聚簇在饱和角度 generalize 降权 / 操作历史防垄断。
+// ============ 操作选择(3 操作数据驱动打分,与 db.py select_graph_operation 双端一致) ============
+// 操作层只 3 个: generalize(归纳) / fill(维护) / explore(拓展)
+// 方法论(反例/成功/正交/对比)是 graph-reasoner 推理时自选,不在此打分。
+// score = trigger × diversity,无魔数 if-else。
+const _CLUSTER_SCALE = 10.0;
+const _GAP_SCALE = 5.0;
+const _DIV_PENALTY = 0.7;
+const _OP_MAP = {
+  "generalize_from_refutation": "generalize", "generalize_from_success": "generalize",
+  "refutation_correction": "generalize", "orthogonal_branch": "generalize",
+  "fill_chain_gap": "fill", "explore_uncovered_angle": "explore",
+  "resolve_contradiction": "generalize", "trace_verification": "generalize",
+};
+
 export function queryRecentOperations(n = 10) {
   return _db.prepare(
     `SELECT json_extract(properties,'$.via') AS via FROM graph_edges
      WHERE edge_type='DERIVES_FROM' AND json_extract(properties,'$.via') IS NOT NULL
      ORDER BY id DESC LIMIT ?`
-  ).all(n).map((r) => r.via).filter(Boolean);
+  ).all(n).map((r) => _OP_MAP[r.via] || r.via).filter(Boolean);
+}
+
+function _countFillGaps() {
+  const axcodes = new Set(_db.prepare("SELECT code FROM axioms").all().map((r) => r.code));
+  const ideaIds = new Set(_db.prepare("SELECT CAST(id AS TEXT) AS id FROM ideas").all().map((r) => r.id));
+  let n = 0;
+  for (const row of _db.prepare(
+    "SELECT id, argument_chain FROM ideas WHERE node_layer='DERIVED' AND argument_chain IS NOT NULL"
+  ).all()) {
+    const ch = JSON.parse(row.argument_chain);
+    for (const a of (ch.background_axioms || [])) {
+      if (!axcodes.has(a) && !ideaIds.has(a)) n++;
+    }
+    const comp = ch.competing_explanations || [];
+    if (comp.length < 2) n++;
+  }
+  return n;
+}
+
+function _maxAngleCluster() {
+  const row = _db.prepare(
+    `SELECT MAX(n) as mx FROM (SELECT COUNT(*) n FROM factors
+     WHERE status='dead_end' AND deprecated_at IS NULL AND angle_code IS NOT NULL
+     GROUP BY angle_code)`
+  ).get();
+  return row && row.mx ? Number(row.mx) : 0;
 }
 
 export function selectGraphOperation() {
-  const stats = graphStats();
   const coverage = queryAngleCoverage();
   const recent = queryRecentOperations(10);
-  const saturated = coverage.filter((a) => a.saturation === "saturated");
-  const fresh = coverage.filter((a) => a.saturation === "unexplored" || a.saturation === "thin");
-  const satCodes = new Set(saturated.map((a) => a.code));
-  const recentGen = recent.filter((o) => o === "generalize_from_refutation").length;
-  const recentDeep = recent.filter((o) => o && o !== "explore_uncovered_angle").length;
-  const scores = {}, reasons = {};
+  const nFresh = coverage.filter((a) => a.saturation === "unexplored" || a.saturation === "thin").length;
+  const nSaturated = coverage.filter((a) => a.saturation === "saturated").length;
+  const total = Math.max(coverage.length, 1);
 
-  if (stats.unresolved_contradictions > 0) {
-    scores.resolve_contradiction = 0.9;
-    reasons.resolve_contradiction = `${stats.unresolved_contradictions} 未解矛盾(强燃料)`;
-  } else scores.resolve_contradiction = 0;
-
+  // trigger strength(连续)
   const clusters = findRefutationClusters({ min_size: 3, limit: 5 });
-  if (clusters.length) {
-    let base = 0.7; const parts = ["有 size≥3 聚簇 0.7"];
-    let clusterInSat = false;
-    for (const cl of clusters) {
-      const a = _db.prepare(
-        `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
-         WHERE from_id=? AND edge_type='DERIVES_FROM'
-           AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
-      ).get(String(cl.target_id));
-      if (a && a.angle && satCodes.has(a.angle)) clusterInSat = true;
-    }
-    if (clusterInSat) { base *= 0.3; parts.push("聚簇在 saturated 角度 ×0.3"); }
-    if (recentGen >= 3) { base *= 0.5; parts.push(`连续 ${recentGen} 次 generalize ×0.5(防垄断)`); }
-    scores.generalize_from_refutation = base;
-    reasons.generalize_from_refutation = parts.join("; ");
-  } else scores.generalize_from_refutation = 0;
+  const maxIdeaCluster = clusters.length ? Math.max(...clusters.map((c) => c.size)) : 0;
+  const maxAngleCluster = _maxAngleCluster();
+  const maxCluster = Math.max(maxIdeaCluster, maxAngleCluster);
+  const nGaps = _countFillGaps();
 
-  scores.fill_chain_gap = 0;
-  scores.orthogonal_branch = 0;
+  const trigger = {
+    generalize: Math.min(1.0, maxCluster / _CLUSTER_SCALE),
+    fill: Math.min(1.0, nGaps / _GAP_SCALE),
+    explore: (nFresh / total) * (nSaturated / total),
+  };
 
-  let e = 0.3; const eparts = [];
-  if (saturated.length && fresh.length) {
-    e = 0.85; eparts.push(`${saturated.length} saturated + ${fresh.length} fresh → 该换 0.85`);
-  } else eparts.push("无饱和或无 fresh 0.3");
-  if (recentDeep >= 3) {
-    e = Math.min(0.95, e + 0.1);
-    eparts.push(`连续 ${recentDeep} 次深挖 → diversity +0.1`);
+  // diversity bonus + score
+  const r2 = (v) => Math.round(v * 1000) / 1000;
+  const scores = {};
+  for (const op of Object.keys(trigger)) {
+    const ratio = recent.length ? recent.filter((o) => o === op).length / recent.length : 0;
+    const diversity = 1.0 - ratio * _DIV_PENALTY;
+    scores[op] = r2(trigger[op] * diversity);
   }
-  scores.explore_uncovered_angle = e;
-  reasons.explore_uncovered_angle = eparts.join("; ");
 
   const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
-  const r2 = (v) => Math.round(v * 1000) / 1000;
   return {
     recommended: best,
-    score: r2(scores[best]),
-    scores: Object.fromEntries(Object.entries(scores).map(([k, v]) => [k, r2(v)])),
-    reason: reasons[best] || "",
-    saturated_angles: saturated.map((a) => a.code).sort(),
-    fresh_angles: fresh.map((a) => a.code).sort(),
+    score: scores[best],
+    scores,
+    trigger: Object.fromEntries(Object.entries(trigger).map(([k, v]) => [k, r2(v)])),
+    max_cluster: maxCluster,
+    n_gaps: nGaps,
+    n_fresh: nFresh,
+    n_saturated: nSaturated,
     recent_operations: recent,
+    fresh_angles: coverage.filter((a) => a.saturation === "unexplored" || a.saturation === "thin").map((a) => a.code).sort(),
+    saturated_angles: coverage.filter((a) => a.saturation === "saturated").map((a) => a.code).sort(),
   };
 }

@@ -48,6 +48,40 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
 
 VALID_STATUS = {"draft", "submitted", "evaluated", "failed", "dead_end"}
 
+# angle_code 自动推断(从 formula/tags 关键词 → angle_ontology code)
+# 解耦 angle 标注与 explore:所有因子落盘时自动标,不依赖 explore 产 idea 才标
+_ANGLE_KEYWORDS = [
+    ("book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]),
+    ("add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]),
+    ("add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]),
+    ("depth_shape",          ["depth_shape", "entropy", "skew", "hhi", "conc"]),
+    ("depth_slope",          ["depth_slope", "book_slope", "slope"]),
+    ("spread_structure",     ["spread", "bid_ask_spread"]),
+    ("trade_imbalance",      ["trade_imb", "volume_imb", "tvi"]),
+    ("trade_rhythm",         ["hawkes", "burst", "rhythm", "cluster"]),
+    ("intensity_level",      ["intensity", "turnover", "active"]),
+    ("volatility_regime",    ["vol_regime", "volatility", "vol_gate", "volregime", "vol burst", "vol regime"]),
+    ("price_microstructure", ["microstructure", "roll", "autocorr"]),
+    ("oi_anomaly",           ["oi_", "oi ", "open_interest", "oipersist", "oiresist", "oispike", "oiintensity"]),
+]
+
+
+def infer_angle_code(formula_text: str | None, tags: Iterable[str] | None,
+                     xname: str | None = None) -> str | None:
+    """从 formula/tags/xname 推断 angle_code。不依赖 explore 标注。
+
+    与 factor-db.mjs inferAngleCode 双端一致。
+    """
+    text = " ".join(filter(None, [
+        (formula_text or "").lower(),
+        " ".join(tags or []).lower(),
+        (xname or "").lower(),
+    ]))
+    for code, keywords in _ANGLE_KEYWORDS:
+        if any(kw in text for kw in keywords):
+            return code
+    return None
+
 
 def add_factor(
     conn: sqlite3.Connection,
@@ -92,9 +126,7 @@ def add_factor(
             "INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)",
             (idea_id, xname),
         )
-        # angle_code 回灌: idea 的角度在 graph_edges DERIVES_FROM 边 properties.angle
-        # (explore_uncovered_angle 产 idea 时标)。回灌让 angle_coverage 地图反映饱和度,
-        # 驱动 explore 换角度(防主题扎堆)。与 factor-db.mjs addFactorFromHFile 双端一致。
+        # angle_code 回灌(优先 idea 的 properties.angle):
         a = conn.execute(
             """SELECT json_extract(properties,'$.angle') FROM graph_edges
                WHERE from_id=? AND edge_type='DERIVES_FROM'
@@ -104,6 +136,16 @@ def add_factor(
         if a and a[0]:
             conn.execute(
                 "UPDATE factors SET angle_code=? WHERE xname=?", (a[0], xname)
+            )
+    # angle_code 自动推断(解耦 explore):idea 无 angle 或无 idea 时,从 formula/xname 推断
+    cur_angle = conn.execute(
+        "SELECT angle_code FROM factors WHERE xname=?", (xname,)
+    ).fetchone()
+    if not (cur_angle and cur_angle[0]):
+        inferred = infer_angle_code(formula_text, None, xname)
+        if inferred:
+            conn.execute(
+                "UPDATE factors SET angle_code=? WHERE xname=?", (inferred, xname)
             )
     return True
 
@@ -873,98 +915,124 @@ def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-# ============ 操作选择（动态优先级打分）============
-# 替代 graph-engine G1 的固定优先级表(resolve>generalize>...>explore)。
-# 固定表让 generalize 总赢 explore → 深度优先陷阱(卡在饱和角度扎堆)。
-# 动态打分:角度饱和时 explore 升权 / 聚簇在饱和角度时 generalize 降权 / 操作历史防垄断。
+# ============ 操作选择（3 操作数据驱动打分）============
+# 操作层只 3 个: generalize(归纳) / fill(维护) / explore(拓展)
+# orthogonal/generalize_refutation/success 是方法论层(graph-reasoner 推理时自选)
+# 打分 = trigger_strength(从图状态连续计算) × diversity_bonus(防垄断)
+# 无魔数 if-else,纯数据驱动。
+
+# normalize 分母(scale 参数,非魔数):聚簇 10 个/空节 5 个 = trigger 满分
+_CLUSTER_SCALE = 10.0
+_GAP_SCALE = 5.0
+# diversity 惩罚系数:最近占比 100% → 降权 70%
+_DIV_PENALTY = 0.7
+
 
 def query_recent_operations(conn: sqlite3.Connection, n: int = 10) -> list[str]:
-    """最近 N 个 idea 的产生操作(DERIVES_FROM 边 properties.via)。操作历史,diversity 判据。"""
+    """最近 N 个 idea 的产生操作(DERIVES_FROM 边 properties.via)→ 操作层归类。
+    方法论级 via(generalize_from_refutation 等)归一到操作级(generalize)。"""
+    OP_MAP = {
+        "generalize_from_refutation": "generalize",
+        "generalize_from_success": "generalize",
+        "refutation_correction": "generalize",
+        "orthogonal_branch": "generalize",
+        "fill_chain_gap": "fill",
+        "explore_uncovered_angle": "explore",
+        "resolve_contradiction": "generalize",
+        "trace_verification": "generalize",
+    }
     rows = conn.execute(
         """SELECT json_extract(properties,'$.via') AS via FROM graph_edges
            WHERE edge_type='DERIVES_FROM' AND json_extract(properties,'$.via') IS NOT NULL
            ORDER BY id DESC LIMIT ?""", (n,)
     ).fetchall()
-    return [r[0] for r in rows if r[0]]
+    return [OP_MAP.get(r[0], r[0]) for r in rows if r[0]]
+
+
+def _count_fill_gaps(conn: sqlite3.Connection) -> int:
+    """客观空节数:background_axioms 引用不存在 axiom + competing<2。SQL 可查。"""
+    import json as _json
+    axcodes = {r[0] for r in conn.execute("SELECT code FROM axioms")}
+    idea_ids = {str(r[0]) for r in conn.execute("SELECT id FROM ideas")}
+    n = 0
+    for r in conn.execute(
+        "SELECT id, argument_chain FROM ideas WHERE node_layer='DERIVED' AND argument_chain IS NOT NULL"
+    ).fetchall():
+        ch = _json.loads(r[1])
+        for a in (ch.get("background_axioms") or []):
+            if a not in axcodes and a not in idea_ids:
+                n += 1
+        comp = ch.get("competing_explanations") or []
+        if len(comp) < 2:
+            n += 1
+    return n
+
+
+def _max_angle_cluster(conn: sqlite3.Connection) -> int:
+    """同 angle_code 的 dead_end 因子最大数(angle 聚簇大小)。"""
+    row = conn.execute(
+        """SELECT MAX(n) FROM (
+              SELECT COUNT(*) n FROM factors
+              WHERE status='dead_end' AND deprecated_at IS NULL AND angle_code IS NOT NULL
+              GROUP BY angle_code
+           )"""
+    ).fetchone()
+    return int(row[0]) if row and row[0] else 0
 
 
 def select_graph_operation(conn: sqlite3.Connection) -> dict:
-    """动态优先级打分:根据图状态给 5 操作打分,返回推荐 + 分数 + 理由。
+    """3 操作数据驱动打分:score = trigger × diversity,无魔数 if-else。
 
-    打分因子:角度饱和度 / 聚簇所在角度 / 操作历史 diversity / 触发点强度。
-    核心:角度 saturated 时 explore 升到 0.85 > generalize(聚簇在饱和角度 ×0.3)→ 换角度。
+    操作层(3 个):
+      generalize(归纳): 从图里案例(反例/成功/混合)归纳新假设
+      fill(维护):       补已有论证链客观空节
+      explore(拓展):    往未探索角度产种子
+
+    方法论层(graph-reasoner 推理时自选,不在此打分):
+      全dead_end→反例归纳 / 有pass→成功归纳或正交展开 / 混合→对比归纳
     """
-    stats = graph_stats(conn)
     coverage = query_angle_coverage(conn)
     recent = query_recent_operations(conn, 10)
 
-    saturated = [a for a in coverage if a["saturation"] == "saturated"]
-    fresh = [a for a in coverage if a["saturation"] in ("unexplored", "thin")]
-    sat_codes = {a["code"] for a in saturated}
-    recent_gen = sum(1 for o in recent if o == "generalize_from_refutation")
-    recent_deep = sum(1 for o in recent if o and o != "explore_uncovered_angle")
+    n_fresh = sum(1 for a in coverage if a["saturation"] in ("unexplored", "thin"))
+    n_saturated = sum(1 for a in coverage if a["saturation"] == "saturated")
+    total = max(len(coverage), 1)
 
-    scores: dict[str, float] = {}
-    reasons: dict[str, str] = {}
+    # ===== trigger strength(连续,从图状态算) =====
+    # generalize: max(idea 聚簇, angle 聚簇) / scale
+    idea_clusters = find_refutation_clusters(conn, min_size=3, limit=5)
+    max_idea_cluster = max((cl["size"] for cl in idea_clusters), default=0)
+    max_angle_cluster = _max_angle_cluster(conn)
+    max_cluster = max(max_idea_cluster, max_angle_cluster)
 
-    # resolve: 未解矛盾=强燃料,优先
-    if stats["unresolved_contradictions"] > 0:
-        scores["resolve_contradiction"] = 0.9
-        reasons["resolve_contradiction"] = f"{stats['unresolved_contradictions']} 未解矛盾(强燃料)"
-    else:
-        scores["resolve_contradiction"] = 0.0
+    n_gaps = _count_fill_gaps(conn)
 
-    # generalize: 聚簇在 fresh 角度才高分;在 saturated 角度深挖无价值
-    clusters = find_refutation_clusters(conn, min_size=3, limit=5)
-    if clusters:
-        base, parts = 0.7, ["有 size≥3 聚簇 0.7"]
-        cluster_in_sat = False
-        for cl in clusters:
-            a = conn.execute(
-                """SELECT json_extract(properties,'$.angle') FROM graph_edges
-                   WHERE from_id=? AND edge_type='DERIVES_FROM'
-                     AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
-                (cl["target_id"],),
-            ).fetchone()
-            if a and a[0] in sat_codes:
-                cluster_in_sat = True
-        if cluster_in_sat:
-            base *= 0.3
-            parts.append("聚簇在 saturated 角度 ×0.3")
-        if recent_gen >= 3:
-            base *= 0.5
-            parts.append(f"连续 {recent_gen} 次 generalize ×0.5(防垄断)")
-        scores["generalize_from_refutation"] = base
-        reasons["generalize_from_refutation"] = "; ".join(parts)
-    else:
-        scores["generalize_from_refutation"] = 0.0
+    trigger = {
+        "generalize": min(1.0, max_cluster / _CLUSTER_SCALE),
+        "fill":       min(1.0, n_gaps / _GAP_SCALE),
+        "explore":    (n_fresh / total) * (n_saturated / total),
+    }
 
-    # fill/orthogonal: 精修型,触发少,有触发点 0.5(主矛盾在 generalize vs explore,先简化)
-    scores["fill_chain_gap"] = 0.0
-    scores["orthogonal_branch"] = 0.0
-
-    # explore: saturated + fresh 才高分(该换);连续深挖 +diversity
-    e, parts = 0.3, []
-    if saturated and fresh:
-        e = 0.85
-        parts.append(f"{len(saturated)} saturated + {len(fresh)} fresh → 该换 0.85")
-    else:
-        parts.append("无饱和或无 fresh 0.3")
-    if recent_deep >= 3:
-        e = min(0.95, e + 0.1)
-        parts.append(f"连续 {recent_deep} 次深挖 → diversity +0.1")
-    scores["explore_uncovered_angle"] = e
-    reasons["explore_uncovered_angle"] = "; ".join(parts)
+    # ===== diversity bonus(连续,防垄断) =====
+    scores = {}
+    for op in trigger:
+        ratio = recent.count(op) / max(len(recent), 1) if recent else 0
+        diversity = 1.0 - ratio * _DIV_PENALTY
+        scores[op] = round(trigger[op] * diversity, 3)
 
     best = max(scores, key=scores.get)
     return {
         "recommended": best,
-        "score": round(scores[best], 3),
-        "scores": {k: round(v, 3) for k, v in scores.items()},
-        "reason": reasons.get(best, ""),
-        "saturated_angles": sorted(sat_codes),
-        "fresh_angles": sorted(a["code"] for a in fresh),
+        "score": scores[best],
+        "scores": scores,
+        "trigger": {k: round(v, 3) for k, v in trigger.items()},
+        "max_cluster": max_cluster,
+        "n_gaps": n_gaps,
+        "n_fresh": n_fresh,
+        "n_saturated": n_saturated,
         "recent_operations": recent,
+        "fresh_angles": sorted(a["code"] for a in coverage if a["saturation"] in ("unexplored", "thin")),
+        "saturated_angles": sorted(a["code"] for a in coverage if a["saturation"] == "saturated"),
     }
 
 
