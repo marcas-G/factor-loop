@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS factors (
     last_updated_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deprecated_at    TIMESTAMP,
     emb_generated_at TIMESTAMP,
-    angle_code       TEXT          -- 信息角度元层标注(见 angle_ontology)
+    angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
+    quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
+    quality_grade    TEXT          -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);
@@ -101,7 +103,7 @@ CREATE TABLE IF NOT EXISTS factor_evals (
     icir                REAL,
     sharpe              REAL,
     rank_ic             REAL,
-    seven_dim           TEXT,
+    eval_metrics           TEXT,
     conditional_returns TEXT,
     eval_mode           TEXT CHECK (eval_mode IN ('full','pearson','deep')),
     significant         INTEGER DEFAULT 0,
@@ -350,9 +352,9 @@ CREATE INDEX IF NOT EXISTS idx_axioms_category ON axioms(category);
 
 -- ============ graph_edges（知识图 · 跨表语义关系边）============
 -- 统一存跨表语义关系。from/to 用 (table, id) 软引用现有表行，不在本表存节点内容（单一真相源）。
--- id 类型: factors 存 xname(TEXT)，axioms/ideas/lessons/observe_outputs 存 integer id 字符串。
+-- id 类型: factors 存 xname(TEXT)，axioms/ideas/lessons 存 integer id 字符串。
 -- 边类型:
---   CONTRADICTS    矛盾（推理燃料: observe 实测 vs axiom 理论预期；resolve_contradiction 触发）
+--   CONTRADICTS    矛盾（推理燃料；resolve_contradiction 触发）
 --   DERIVES_FROM   推导来源（idea 从 axiom/derived 推出）
 --   INSTANTIATES   实例化（factor 是 idea 的可测实现）
 --   SPECIALIZES    特化（idea 是另一 idea 的更窄形式 / factor 演化）
@@ -361,7 +363,7 @@ CREATE INDEX IF NOT EXISTS idx_axioms_category ON axioms(category);
 --   REFUTES        反驳（refutation 击破 idea）
 CREATE TABLE IF NOT EXISTS graph_edges (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_table  TEXT NOT NULL,                     -- 'axioms'/'ideas'/'factors'/'lessons'/'observe_outputs'
+    from_table  TEXT NOT NULL,                     -- 'axioms'/'ideas'/'factors'/'lessons'
     from_id     TEXT NOT NULL,                     -- factors 存 xname；其余存 integer id 字符串
     to_table    TEXT NOT NULL,
     to_id       TEXT NOT NULL,
@@ -369,7 +371,7 @@ CREATE TABLE IF NOT EXISTS graph_edges (
                 ('CONTRADICTS','DERIVES_FROM','INSTANTIATES','SPECIALIZES',
                  'ORTHOGONAL_TO','SUPPORTS','REFUTES','BOUNDS')),
     weight      REAL,                              -- CONTRADICTS=矛盾显著性/SUPPORTS=IC强度/REFUTES=反驳强度/SPECIALIZES=|icir_delta|
-    properties  TEXT,                              -- JSON: {"observe_script":..,"resolved_by":idea_id,"role":..,"via":..}
+    properties  TEXT,                              -- JSON: {"resolved_by":idea_id,"role":..,"via":..}
     created_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(from_table, from_id, to_table, to_id, edge_type)   -- 幂等：同四元组+类型不重复
 );
@@ -377,23 +379,6 @@ CREATE INDEX IF NOT EXISTS idx_edges_from      ON graph_edges(from_table, from_i
 CREATE INDEX IF NOT EXISTS idx_edges_to        ON graph_edges(to_table, to_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type      ON graph_edges(edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_type_from ON graph_edges(edge_type, from_table, from_id);
-
--- ============ observe_outputs（知识图 · EVIDENCE 层：理论违反型观测）============
--- observe 脚本产出的"理论预期 vs 实测"矛盾证据。CONTRADICTS 边的 from 端载体。
--- 独立于 lessons（lessons 只装因子实验 dead_end/success，factor_xname NOT NULL；observe 无具体因子）。
--- 每个 observe 输出匹配一个 axiom_code：违反理论预期 → CONTRADICTS 边 (observe_outputs.id → axioms.id)。
-CREATE TABLE IF NOT EXISTS observe_outputs (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    script       TEXT NOT NULL,                    -- 'observe_autocorrelation'/'observe_microstructure'...
-    axiom_code   TEXT NOT NULL,                    -- 对应公理 code（软引用 axioms.code，不加外键）
-    violation    TEXT NOT NULL,                    -- 违反字段/类型: 'roll_bounce_signature=False'
-    summary      TEXT,                             -- 一句话总结
-    evidence     TEXT,                             -- 完整 observe 输出 JSON
-    symbol       TEXT,                             -- 品种（如 SHFE-AG）
-    detected_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_observe_axiom ON observe_outputs(axiom_code);
-CREATE INDEX IF NOT EXISTS idx_observe_script ON observe_outputs(script);
 
 -- ============ angle_ontology（信息角度元层：数据→提取角度字典）============
 -- 让 graph-engine 感知"哪些信息角度被探索/饱和/未探索",自动换角度(不靠人喂)。

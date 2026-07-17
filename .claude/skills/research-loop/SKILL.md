@@ -111,7 +111,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 |---|---|
 | MCP 工具连续失败 3 次 | `run_save {status: "paused"}`，向用户报告，停止 |
 | Task 子代理超时/崩溃 | 标 `failure_layer: "agent_crashed"`，继续其它 factor |
-| assess 失败（如 seven_dim 缺失） | verdict=fail，key_weaknesses 写"seven_dim 缺失"，继续下一个 |
+| assess 失败（如 eval_metrics 缺失） | verdict=fail，key_weaknesses 写"eval_metrics 缺失"，继续下一个 |
 | 断点续传时发现 factor `.h` 已存在但 status 非 done | 子代理先删除该 `.h` 文件再从 write 步重开 |
 
 **status 枚举**：

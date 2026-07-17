@@ -155,7 +155,7 @@
 对每个 check_done 因子：
   - 从 state.json 读 `factors[i].evidence`（不重新调 check_factor）
   - 读 prompts/evaluate.md
-  - 执行（输入 evidence.seven_dim_summary + hypothesis + idea）
+  - 执行（输入 evidence.eval_metrics + hypothesis + idea）
   - 产出 verdict
   - MCP persist_factor {factor, verdict, checkResult, retryInfo, ideaId}
   - MCP run_save {patch: {factors[i].verdict, factors[i].persisted}}

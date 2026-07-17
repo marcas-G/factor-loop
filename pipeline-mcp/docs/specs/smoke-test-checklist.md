@@ -50,7 +50,7 @@ cat ~/.quant-runs/<run_id>/state.json | jq '.idea, .idea_id, .factors'
 - [ ] Step 2：Claude 在一个消息里发 1 个 Task tool call 调起 run-factor-agent
 - [ ] run-factor-agent 调 Skill write-factor 写出 `.h` 文件
 - [ ] run-factor-agent 调 `mcp__quant-mcp__submit_factor`（mock 返回 ok=true）
-- [ ] run-factor-agent 调 `mcp__quant-mcp__check_factor`（mock 返回 check_done + evidence.seven_dim_summary）
+- [ ] run-factor-agent 调 `mcp__quant-mcp__check_factor`（mock 返回 check_done + evidence.eval_metrics）
 - [ ] run-factor-agent 返回 `{failure_layer: "check_done", evidence: {...}}`
 - [ ] Claude 调 `run_save` 写 factors[0].failure_layer + last_rewrite
 - [ ] Step 3：Claude 加载 evaluate.md，推理出 verdict（pass/fail）

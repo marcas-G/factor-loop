@@ -1,8 +1,8 @@
-"""同步 run state 里 check_done 因子的 seven_dim 评估 → factors.db 评估字段。
+"""同步 run state 里 check_done 因子的 eval_metrics 评估 → factors.db 评估字段。
 
 填: latest_ic / latest_icir / latest_sharpe / latest_rank_ic / status
-来源: state.factors[i].evidence.seven_dim_summary
-  - latest_ic/icir ← seven_dim_best.screening(ic_mean / icir)
+来源: state.factors[i].evidence.eval_metrics
+  - latest_ic/icir ← core_metrics.screening(ic_mean / icir)
   - latest_sharpe  ← deepbest.conditional_sharpe
   - latest_rank_ic ← deepbest.daily_rank_ic(daily 分桶,优先);旧 run 回退 rank_ic_max(pooled)
   - status         ← factor_level.keep > 0 ? 'evaluated' : 'dead_end'
@@ -28,8 +28,8 @@ def sync_one(conn, fac) -> dict:
     if fac.get("failure_layer") != "check_done":
         return {"xname": xname, "skipped": fac.get("failure_layer") or "no-check_done"}
     ev = fac.get("evidence") or {}
-    sd = ev.get("seven_dim_summary") or {}
-    screening = (sd.get("seven_dim_best") or {}).get("screening") or {}
+    sd = ev.get("eval_metrics") or {}
+    screening = (sd.get("core_metrics") or {}).get("screening") or {}
     deep = sd.get("deep_best") or sd.get("deepbest") or {}
     fl = sd.get("factor_level") or {}
 

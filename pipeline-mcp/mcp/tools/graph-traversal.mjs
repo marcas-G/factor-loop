@@ -1,6 +1,6 @@
 // 组 7: 知识图遍历/读写工具（graph-engine 推理引擎用）。
 //
-// 分层知识图：AXIOM(axioms) → DERIVED/HYPOTHESIS(ideas) → EVIDENCE/REFUTATION(lessons/factors/observe_outputs)。
+// 分层知识图：AXIOM(axioms) → DERIVED/HYPOTHESIS(ideas) → EVIDENCE/REFUTATION(lessons/factors)。
 // graph_edges 跨表软引用。本组工具供 graph-engine skill / graph-reasoner-agent 读写图。
 //
 // 读类：graph_query_contradictions(解矛盾输入) / graph_get_subgraph(填链输入) / graph_neighborhood(正交输入)
@@ -12,12 +12,12 @@ import * as factorDb from "../../lib/factor-db.mjs";
 const EDGE_TYPES = [
   "CONTRADICTS", "DERIVES_FROM", "INSTANTIATES", "SPECIALIZES", "ORTHOGONAL_TO", "SUPPORTS", "REFUTES", "BOUNDS",
 ];
-const NODE_TABLES = ["axioms", "ideas", "factors", "lessons", "observe_outputs"];
+const NODE_TABLES = ["axioms", "ideas", "factors", "lessons"];
 
 export const queryContradictionsSchema = {
   name: "graph_query_contradictions",
   description:
-    "查 CONTRADICTS 边（推理燃料）。resolved=false（默认）返回未解矛盾：observe 实测 vs axiom 理论预期。resolve_contradiction 操作的输入。",
+    "查 CONTRADICTS 边（推理燃料）。resolved=false（默认）返回未解矛盾。resolve_contradiction 操作的输入。",
   inputSchema: {
     type: "object",
     properties: {

@@ -17,41 +17,44 @@ G1→G2→G3→G4→G5,每个 G 完成后**必须立即在同一回合**发起�
 
 汇报中间状态时,文字与下一 tool call 放同一回合(文字在前,call 紧随)。
 
-## G1 · 动态优先级选操作
+## G1 · 数据驱动选操作(3 操作)
 
-调 `mcp__quant-mcp__graph_select_operation`——按图状态(角度饱和度 / 聚簇所在角度 / 操作历史 diversity)动态打分,返回推荐操作 + 分数 + 理由。
+调 `mcp__quant-mcp__graph_select_operation`——从图状态连续计算分数(trigger × diversity),无魔数 if-else。返回 3 操作的打分:
 
-**替代旧的固定优先级表**(resolve>generalize>...>explore)——固定表让 generalize 总赢 explore,导致深度优先扎堆(卡在饱和角度反复深挖)。动态打分:角度 saturated 时 explore 升到 0.85 > generalize(聚簇在饱和角度 ×0.3)→ 换角度;连续多次深挖时 +diversity。
+```
+generalize(归纳): trigger = max聚簇大小/10,从反例/成功/混合聚簇归纳
+fill(维护):       trigger = 空节数/5,补已有论证链客观空节
+explore(拓展):    trigger = fresh比例×饱和比例,往未探索角度产种子
+```
 
-返回 `{recommended, score, scores, reason, saturated_angles, fresh_angles}`。按 `recommended` 操作取触发点 ref:
+**操作层只这 3 个**(方法论层由 graph-reasoner 自选——反例归纳/成功归纳/正交展开/对比归纳)。
+
+返回 `{recommended, scores, trigger, max_cluster, n_gaps, fresh_angles, saturated_angles}`。按 `recommended` 取触发点:
 
 | 操作 | 取触发点 |
 |---|---|
-| resolve_contradiction | `graph_query_contradictions {resolved:false,limit:1}` → edge_id + axiom + evidence |
-| generalize_from_refutation | `graph_find_refutation_clusters {min_size:3,limit:1}` → target + members |
-| fill_chain_gap | `graph_get_subgraph {table:"ideas",node_id:<id>}` 定位断点 |
-| orthogonal_branch | `graph_neighborhood {table:"ideas",node_id:<id>,edge_types:["INSTANTIATES"]}` |
-| explore_uncovered_angle | 返回的 `fresh_angles` 里选 unexplored 优先,次 thin |
+| **generalize** | `graph_find_refutation_clusters {min_size:3,limit:1}` → target + members;若有 pass 实现则也查 SUPPORTS 聚簇 |
+| **fill** | 查 background_axioms 引用不存在 axiom 的 DERIVED idea,`graph_get_subgraph` 定位断点 |
+| **explore** | `fresh_angles` 里选 unexplored 优先,次 thin |
 
-**→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent。
+**→ 衔接**:选定操作+触发点后,立即同回合 Task 派 graph-reasoner-agent,prompt 里标注 operation(归纳/维护/拓展)+ 触发点概要。graph-reasoner 自选方法论(看触发点是全 dead_end/有 pass/混合)。
 
-**无 fallback**:推荐 explore 但 `fresh_angles` 空(全角度 saturated,无新角度可挖)→ 图推理产不出新假设 → G5 返回 `{no_hypothesis: true}`(如实报告,不硬凑)。
+**卡住处理**:推荐 explore 但 `fresh_angles` 空,或所有操作 trigger=0 → G5 返回 `{no_hypothesis: true}`(如实报告,不硬凑)。
 
-## G2 · 派 graph-reasoner-agent 执行扩展操作
+## G2 · 派 graph-reasoner-agent 执行操作
 
 ```
 Task({
   subagent_type: "graph-reasoner-agent",
-  prompt: "operation: <op>\ntrigger: <触发点 ref + axiom/evidence/cluster 概要>\n拉取完整输入后按你的操作框架(S1-S4+三道门槛)推理,返回 {new_nodes,new_edges,confidence,reasoning_summary}。"
+  prompt: "operation: <generalize|fill|explore>\ntrigger: <触发点 ref + 概要>\n按操作框架推理,generalize 时根据触发点性质自选方法论(全dead_end→反例归纳/有pass→成功归纳或正交展开/混合→对比归纳)。返回 {new_nodes,new_edges,methodology,confidence,reasoning_summary}。"
 })
 ```
 
 → 收返回 JSON。
 
-**→ 衔接**:返回后,三分支:
+**→ 衔接**:返回后:
 - `new_nodes` 含 ideas 节点且 confidence≥0.3 → 立即 G3 派 reviewer。
-- `new_edges` 含 BOUNDS 边且无 ideas 节点(`verdict_hint="bounded"`,axiom 证伪)→ 跳过 G3,直接进 G4 的 BOUNDS 落盘段。
-- 真·空手(无 BOUNDS 无 ideas / 数据不足)→ 回 G1 选下一触发点(无下一触发点则 fallback)。
+- 真·空手(无 ideas / 数据不足)→ 回 G1 选下一触发点(无下一触发点则卡住处理)。
 
 ## G3 · 派 reviewer-agent 对抗审稿(模式一·假设审稿)
 

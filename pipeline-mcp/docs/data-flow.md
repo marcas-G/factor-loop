@@ -51,7 +51,7 @@
    │            ★ 内部 run_save{ factors.i.failure_layer, factors.i.evidence } (不经agent手,保真)
    │            │
    │            │  evidence 按 failureLayer:
-   │            │   check_done          → { reason, daily_ic_preview, seven_dim_summary, stdout_tail }
+   │            │   check_done          → { reason, daily_ic_preview, eval_metrics, stdout_tail }
    │            │   check_output_too_small→ { reason, daily_ic_size, stdout_tail, stderr_tail, dir_listing,
    │            │                          airflow_*, diagnosis:{ nature, root_cause_candidates[], fix_hint } }
    │            │   check_failed         → { reason, exit_code, stdout_tail, stderr_tail,
@@ -72,14 +72,14 @@
               │
               ▼
 【Step 3】evaluate skill  (仅筛选 failure_layer==check_done 的, 串行)
-   run_load 读 factors.i.evidence.seven_dim_summary
+   run_load 读 factors.i.evidence.eval_metrics
    LLM 推理 → verdict { xname, verdict:"pass|fail", key_strengths[], key_weaknesses[], suggested_iteration }
    persist_factor{ run_id, factor_index, verdict }            ★3参数,内部组装
        │  内部 runLoad → { factor, factorFile, checkResult:evidence, retryInfo:last_rewrite, ideaId }
        ▼
        persistVerdict:
         ├─ verdict=pass → addFactorFromHFile(status=evaluated)
-        │                 addEval{ ic_mean, icir, sharpe, rank_ic, seven_dim, conditional_returns, significant:1 }
+        │                 addEval{ ic_mean, icir, sharpe, rank_ic, eval_metrics, conditional_returns, significant:1 }
         │                 addLesson(type=success_pattern, evidence)
         │                 (retry改码成功 → addIteration from→to)
         │   return { xname, status:"evaluated", metrics:{ic_mean,icir,sharpe,rank_ic}, lessonId }
@@ -101,7 +101,7 @@
           │  (idea_id, factor_xname)
           ▼
   factors ─────────┬─ factor_evals (factor_xname FK, idea_id, ts, ic_mean, icir, sharpe,
- (xname,           │                 rank_ic, seven_dim JSON, conditional_returns JSON,
+ (xname,           │                 rank_ic, eval_metrics JSON, conditional_returns JSON,
   class_name,      │                 eval_mode, significant, raw_path)
   file_path,       ├─ lessons (id, type:dead_end|success_pattern, scope:factor, text,
   formula_text,    │          evidence JSON, idea_id, factor_xname FK, created_ts)

@@ -5,7 +5,7 @@
 // 输出结构（喂给 LLM 做因子级评估）：
 // {
 //   factor_level: { n_pairs, keep, watch, reject, best_score, best_pair },
-//   seven_dim_best: {
+//   core_metrics: {
 //     screening:   { ic_mean, icir, spearman, sign_match_rate, decay_robust, decay_severe, pair },
 //     session_ic:  { morning, midday, afternoon, night, std, pair },
 //     vol_regime:  { q1..q5, sign_consistent, pair },
@@ -103,7 +103,7 @@ function stripQuotes(v) {
 export function extractMetricsFromCheckOutput(checkOutput, xname) {
   const result = {
     factor_level: { n_pairs: 0, keep: 0, watch: 0, reject: 0, best_score: null, best_pair: null },
-    seven_dim_best: {},
+    core_metrics: {},
     deep_best: {},
     top_pairs: [],
     failure_reasons: {},
@@ -154,7 +154,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
     if (screening && screening.length) {
       const best = pickBestAbs(screening, "ic_mean", null);
       if (best) {
-        result.seven_dim_best.screening = {
+        result.core_metrics.screening = {
           ic_mean: best.value,
           icir: num(best.row.ic_ir),
           spearman: num(best.row.spearman_r),
@@ -173,7 +173,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
         .sort((a, b) => a.std - b.std);
       if (sorted.length) {
         const b = sorted[0].row;
-        result.seven_dim_best.session_ic = {
+        result.core_metrics.session_ic = {
           morning: num(b.morning_ic),
           midday: num(b.midday_ic),
           afternoon: num(b.afternoon_ic),
@@ -198,7 +198,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
       });
       if (sorted.length) {
         const b = sorted[0].row;
-        result.seven_dim_best.vol_regime = {
+        result.core_metrics.vol_regime = {
           q1: num(b.q1_ic), q2: num(b.q2_ic), q3: num(b.q3_ic), q4: num(b.q4_ic), q5: num(b.q5_ic),
           sign_consistent: sorted[0].allSameSign,
           pair: pairLabel(b),
@@ -210,7 +210,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
     if (zero && zero.length) {
       const best = pickBestAbs(zero, "t_stat", null);
       if (best) {
-        result.seven_dim_best.zero = {
+        result.core_metrics.zero = {
           t_stat: best.value,
           p_value: num(best.row.p_value),
           y_mean_x0: num(best.row.y_mean_x0),
@@ -226,7 +226,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
       const candidates = (sameSignRows.length ? sameSignRows : tt);
       const best = pickBestAbs(candidates, "test_ic", null);
       if (best) {
-        result.seven_dim_best.train_test = {
+        result.core_metrics.train_test = {
           train_ic: num(best.row.train_ic),
           test_ic: num(best.row.test_ic),
           decay: num(best.row.ic_decay),
@@ -247,7 +247,7 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
       .sort((a, b) => Math.abs(b.s) - Math.abs(a.s));
     if (best.length) {
       const b = best[0].row;
-      result.seven_dim_best.tradability = {
+      result.core_metrics.tradability = {
         avg_turnover_per_day: num(b.avg_turnover_per_day),
         sharpe_net_8bps: num(b.sharpe_net_8bps),
         sharpe_net_16bps: num(b.sharpe_net_16bps),

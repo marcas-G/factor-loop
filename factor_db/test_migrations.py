@@ -71,7 +71,7 @@ def test_prehistoric_db_migrated_to_current():
         migrations.migrate(conn)
         assert db.current_schema_version(conn) == migrations.CURRENT_VERSION
         names = set(_table_names(conn))
-        for t in ["axioms", "graph_edges", "observe_outputs",
+        for t in ["axioms", "graph_edges",
                   "angle_ontology", "schema_version"]:
             assert t in names, f"migrate 后缺表 {t}"
     Path(tmp).unlink()

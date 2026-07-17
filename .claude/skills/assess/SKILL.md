@@ -17,7 +17,7 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 - `state.idea` — 本次研究 idea
 - `state.factors[i].name` — 因子类名
 - `state.factors[i].hypothesis` — 因子设计假设(brainstorm 阶段由 intuition + diff_check + coord_usage 拼接而成)
-- `state.factors[i].evidence.seven_dim_summary` — 评估数据 JSON(字段名历史命名,风是三维度各指标的数据载体)
+- `state.factors[i].evidence.eval_metrics` — 评估数据 JSON(字段名历史命名,风是三维度各指标的数据载体)
 - `state.factors[i].factor_file` — .h 文件绝对路径
 - `state.factors[i].last_rewrite` — retry 信息(可能为 null)
 - `state.idea_id` — 关联的 idea id
@@ -121,9 +121,9 @@ Task({
 - **failure_reasons**:平台标的失败原因(low_icir / weak_beta / vol_regime_unstable / no_zero_diff / bad_bucket_shape / weak_train_test / weak_ic)
 - **top_pairs**:按 score 排序前 3 个 X-Y 对
 - **deep_best 其他**:conditional_sharpe / daily_ic_tstat / daily_rank_ic / daily_icir / signal_instability_pct(daily IC 已 per-horizon 尾盘截断防未来函数;旧字段 rank_ic_max 仅旧 run 兼容)
-- **新增两指标**(来自 factor_check 深度分析 `[6/7][7/7]`,经 metrics.mjs 聚合进 `evidence.seven_dim_summary`):
-  - **平稳性+差分**:`evidence.seven_dim_summary.stationarity`({adf_pvalue, need_differential_rate, orig_ic, diff_ic, diff_improvement})
-  - **变换族预测力**:`evidence.seven_dim_summary.transform_family`({orig_ic, delta_ic, impulse_ic, asym_impulse_pos_ic, asym_impulse_neg_ic, ridge_residual_ic})
+- **新增两指标**(来自 factor_check 深度分析 `[6/7][7/7]`,经 metrics.mjs 聚合进 `evidence.eval_metrics`):
+  - **平稳性+差分**:`evidence.eval_metrics.stationarity`({adf_pvalue, need_differential_rate, orig_ic, diff_ic, diff_improvement})
+  - **变换族预测力**:`evidence.eval_metrics.transform_family`({orig_ic, delta_ic, impulse_ic, asym_impulse_pos_ic, asym_impulse_neg_ic, ridge_residual_ic})
 
 ### 当前缺口(待 factor_check 补)
 
