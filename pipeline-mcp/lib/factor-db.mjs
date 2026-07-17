@@ -80,7 +80,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -115,10 +115,10 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateIdeasSchema();
   migrateCoverageView();
   migrateFactorIcDaily();
-  migratePatternCards();
   migrateGraphSchema();
   migrateSchemaVersion();
   migrateQualitySchema();
+  migrateIntuitionSchema();
   return _db;
 }
 
@@ -313,88 +313,6 @@ function migrateFactorIcDaily() {
   `);
 }
 
-// 归纳引擎地基:模式卡实体 + 七维受控词表 + 模式空间覆盖地图。
-// pattern_cards = 统计扫描发现的异常模式(7 维坐标 + 证据 + 生命周期 raw→audited→archived→explained/absorbed)。
-// pattern_dims  = 七维(F/T/C/S/Y/R)受控词表,预填盘口域化取值。
-// pattern_coverage = 模式空间覆盖地图 C[f,s,y,h],任务生成器看它决定扫哪(与因子层 coverage_map VIEW 并存)。
-// factors 表不存在则跳过(空库)。
-function migratePatternCards() {
-  const cols = _db.prepare("PRAGMA table_info(factors)").all();
-  if (cols.length === 0) return; // 空库,schema.sql 尚未跑,跳过
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS pattern_cards (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      f_feature       TEXT NOT NULL,
-      t_transform     TEXT NOT NULL,
-      c_condition     TEXT,
-      s_structure     TEXT NOT NULL,
-      y_target        TEXT NOT NULL,
-      h_horizon       INTEGER NOT NULL,
-      r_reference     TEXT,
-      strength        REAL,
-      significance    REAL,
-      n_samples       INTEGER,
-      stability       REAL,
-      evidence        TEXT,
-      status          TEXT NOT NULL CHECK (status IN ('raw','audited','archived','explained','absorbed','deprecated')),
-      detected_by     TEXT,
-      detected_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      audit_result    TEXT,
-      idea_id         INTEGER,
-      absorbed_by_model TEXT,
-      priority        REAL,
-      mutated_from    INTEGER,
-      FOREIGN KEY (idea_id) REFERENCES ideas(id),
-      FOREIGN KEY (mutated_from) REFERENCES pattern_cards(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_pc_status ON pattern_cards(status);
-    CREATE INDEX IF NOT EXISTS idx_pc_scene  ON pattern_cards(s_structure, y_target, h_horizon);
-    CREATE INDEX IF NOT EXISTS idx_pc_feed   ON pattern_cards(status, priority) WHERE status='archived';
-
-    CREATE TABLE IF NOT EXISTS pattern_dims (
-      dim         TEXT NOT NULL,
-      value       TEXT NOT NULL,
-      description TEXT,
-      PRIMARY KEY (dim, value)
-    );
-
-    CREATE TABLE IF NOT EXISTS pattern_coverage (
-      f_feature         TEXT NOT NULL,
-      s_structure       TEXT NOT NULL,
-      y_target          TEXT NOT NULL,
-      h_horizon         INTEGER NOT NULL,
-      searched_count    INTEGER DEFAULT 0,
-      archived_count    INTEGER DEFAULT 0,
-      explained_count   INTEGER DEFAULT 0,
-      avg_strength      REAL,
-      last_searched_at  TIMESTAMP,
-      PRIMARY KEY (f_feature, s_structure, y_target, h_horizon)
-    );
-  `);
-  // 预填七维盘口域化受控词表(H 是整数,不入)。幂等。
-  const dims = [
-    ["F","ofi","订单流不平衡"],["F","imb","订单簿不平衡 bid/ask"],["F","depth_slope","深度斜率"],
-    ["F","curvature","曲率"],["F","pressure","买卖压力"],["F","cancel_asym","撤单不对称"],
-    ["F","add_asym","挂单不对称"],["F","concentration","集中度"],["F","spoof_imbalance","假单不平衡"],
-    ["F","trade_imbalance","成交不平衡"],
-    ["T","level","原值"],["T","ts_quantile","自身历史分位"],["T","cross_contract_rank","跨合约排名"],
-    ["T","delta","变化"],["T","accel","加速度"],["T","duration","持续时间"],
-    ["T","path_shape","路径形态"],["T","dist_struct","分布结构(偏度/峰度/熵)"],
-    ["C","vol_regime","波动率 regime"],["C","session","时段(开盘/连续/收盘)"],
-    ["C","direction","方向(涨/跌态)"],["C","activity","成交活跃度"],["C","basis_state","基差(升水/贴水)"],
-    ["S","monotonic","单调"],["S","upper_tail","上尾异常"],["S","lower_tail","下尾异常"],
-    ["S","threshold_break","阈值断裂"],["S","u_shape","U 型"],["S","inv_u_shape","倒 U 型"],
-    ["S","sign_flip","符号反转"],["S","cond_amplify","条件增强"],["S","post_event_path","事件后路径"],
-    ["S","regime_transition","状态转移"],["S","cross_horizon_nonmonotonic","跨 horizon 非单调"],
-    ["S","residual_anomaly","残差异常"],
-    ["Y","raw_return","原始收益"],["Y","max_upside","最大上涨"],["Y","max_drawdown","最大回撤"],
-    ["Y","up_prob","上涨概率"],["Y","model_residual","模型残差(残差驱动接入点)"],
-    ["R","self_history","自身历史"],["R","cross_contract","主力↔次月"],["R","model_prediction","相对已有模型(=残差)"],
-  ];
-  const ins = _db.prepare("INSERT OR IGNORE INTO pattern_dims (dim, value, description) VALUES (?, ?, ?)");
-  for (const [d, v, desc] of dims) ins.run(d, v, desc);
-}
-
 function db() {
   if (!_db) init();
   return _db;
@@ -449,9 +367,10 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     return xname;
   }
 
+  const intuition = meta.intuition || opts.intuition || null;
   conn.prepare(
-    `INSERT INTO factors (xname, class_name, file_path, formula_text, params, status, created_ts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO factors (xname, class_name, file_path, formula_text, params, status, created_ts, intuition)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     xname,
     meta.class_name || null,
@@ -459,7 +378,8 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     meta.formula || null,
     meta.params ? JSON.stringify(meta.params) : null,
     status,
-    meta.created_ts || new Date().toISOString().slice(0, 10)
+    meta.created_ts || new Date().toISOString().slice(0, 10),
+    intuition
   );
 
   if (Array.isArray(meta.tags)) {
@@ -1213,26 +1133,6 @@ export async function residualIcStrength(targetFactor, opts = {}) {
   }
 }
 
-// 衔接①(归纳→演绎):拉 archived 高优先 + 未解释的模式卡,供 hypothesis-generator 解释。
-export function feedPatternQueue(topN = 3) {
-  return db().prepare(
-    `SELECT id,f_feature,t_transform,c_condition,s_structure,y_target,h_horizon,r_reference,strength,priority
-     FROM pattern_cards WHERE status='archived' AND idea_id IS NULL ORDER BY RANDOM() LIMIT ?`
-  ).all(topN);
-}
-
-// 衔接①回写:hypothesis-generator 解释模式卡产 idea 后,回写 idea_id + status='explained'。
-export function linkPatternIdea(patternCardId, ideaId) {
-  const d = db();
-  const row = d.prepare("SELECT status FROM pattern_cards WHERE id = ?").get(patternCardId);
-  if (!row) throw new Error(`pattern_card id 不存在: ${patternCardId}`);
-  if (row.status !== "archived") {
-    return { ok: false, error: `pattern_card ${patternCardId} 状态=${row.status},非 archived 不可回写` };
-  }
-  d.prepare("UPDATE pattern_cards SET idea_id = ?, status = 'explained' WHERE id = ?").run(ideaId, patternCardId);
-  return { ok: true };
-}
-
 // ============ 知识图（axioms / graph_edges）============
 // 分层知识图。graph_edges 跨表软引用 (from_table, from_id)，from_id: factors 存 xname，其余存 integer id 字符串。
 // 与 db.py 对齐。graph-engine 推理引擎经 MCP 工具读写此图。
@@ -1451,6 +1351,14 @@ function migrateQualitySchema() {
   }
   if (fcols.length > 0 && !fcols.includes("quality_grade")) {
     _db.exec("ALTER TABLE factors ADD COLUMN quality_grade TEXT");
+  }
+}
+
+// factors.intuition(语义意图描述,embedding 主原料 v7)
+function migrateIntuitionSchema() {
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (fcols.length > 0 && !fcols.includes("intuition")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN intuition TEXT");
   }
 }
 

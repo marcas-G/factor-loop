@@ -73,7 +73,6 @@
 | `persist_*` | idea / factor / candidates / argument_chain |
 | `hypothesis_*` | get |
 | `iteration_*` | open / realize / reopen / list_open |
-| `pattern_*` | feed / link_idea |
 | `coverage_*` | gaps / map |
 | `discover_*` | failed_hypotheses / recent_dead_ends |
 | `platform_*` | submit_factor / check_factor |
@@ -85,7 +84,7 @@
 
 SQLite + sqlite-vec(向量) + FTS5(全文)。
 - **schema 版本化**:`schema_version` 表 + `factor_db/migrations.py` 迁移链(当前 v4:baseline / graph_core / graph_bounds / angle)。新库 schema.sql 直建到最新并标版本;老库 `migrate()` 幂等补齐。双端版本同步(test 断言)。
-- **分层知识图表**:axioms(AXIOM) / ideas(DERIVED+HYPOTHESIS) / graph_edges(跨表语义边) / lessons / factors / factor_evals / iterations / pattern_cards / angle_ontology 等。
+- **分层知识图表**:axioms(AXIOM) / ideas(DERIVED+HYPOTHESIS) / graph_edges(跨表语义边) / lessons / factors / factor_evals / iterations / angle_ontology 等。
 
 ### 方法论层(`hypothesis-framework.md`)
 
