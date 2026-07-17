@@ -56,6 +56,7 @@ export async function persistFactorHandler({ run_id, factor_index, verdict }) {
     name: f.name,
     formula: f.formula,
     hypothesis: f.hypothesis,
+    intuition: f.intuition || null,
     categories: f.categories || [],
     tags: f.tags || [],
   };

@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS factors (
     emb_generated_at TIMESTAMP,
     angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
     quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
-    quality_grade    TEXT          -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
+    quality_grade    TEXT,         -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
+    intuition        TEXT          -- 语义意图描述(机制/利润来源/信息源/预测),embedding 主原料
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);
@@ -272,66 +273,6 @@ CREATE TABLE IF NOT EXISTS factor_ic_daily (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ic_daily_scene ON factor_ic_daily(symbol, freq, y_horizon, date);
-
--- ============ pattern_cards（归纳引擎：模式卡实体）============
--- 统计扫描发现的异常模式。7 维坐标(F/T/C/S/Y/H/R)+ 统计证据 + 生命周期。
--- 生命周期：raw(扫描产)→audited(过审计)→archived(入库)→explained(→idea)/absorbed(→模型)/deprecated。
--- 层级：模式卡 →(hypothesis-generator 解释)→ idea →(brainstorm 实现)→ 因子。模式卡是 idea 的上游。
--- archived 高优先卡自动喂 hypothesis-generator(衔接①出);因子→模型→残差→重扫(衔接②入)。
-CREATE TABLE IF NOT EXISTS pattern_cards (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    f_feature         TEXT NOT NULL,          -- F 特征:ofi/imb/depth_slope/...
-    t_transform       TEXT NOT NULL,          -- T 变换:level/ts_quantile/delta/...
-    c_condition       TEXT,                   -- C 条件:类型化 JSON {"vol_regime":"high"},null=无条件
-    s_structure       TEXT NOT NULL,          -- S 模式结构:upper_tail/threshold_break/...  ★覆盖地图 p 维
-    y_target          TEXT NOT NULL,          -- Y 目标:raw_return/model_residual/...
-    h_horizon         INTEGER NOT NULL,       -- H 预测周期秒:1/5/10/60/300
-    r_reference       TEXT,                   -- R 基准:self_history/cross_contract/model_prediction
-    strength          REAL,
-    significance      REAL,
-    n_samples         INTEGER,
-    stability         REAL,
-    evidence          TEXT,                   -- 完整证据 JSON(分位轮廓/路径/条件切片)
-    status            TEXT NOT NULL CHECK (status IN
-                      ('raw','audited','archived','explained','absorbed','deprecated')),
-    detected_by       TEXT,
-    detected_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    audit_result      TEXT,                   -- 审计详情 JSON(多重检验校正/泄漏检查)
-    idea_id           INTEGER,               -- explained → 指向 ideas.id
-    absorbed_by_model TEXT,
-    priority          REAL,                   -- archived 时算:strength×significance×novelty×residual_coverage
-    mutated_from      INTEGER,               -- 变异树父 pattern_cards.id
-    FOREIGN KEY (idea_id)      REFERENCES ideas(id),
-    FOREIGN KEY (mutated_from) REFERENCES pattern_cards(id)
-);
-CREATE INDEX IF NOT EXISTS idx_pc_status ON pattern_cards(status);
-CREATE INDEX IF NOT EXISTS idx_pc_scene  ON pattern_cards(s_structure, y_target, h_horizon);
-CREATE INDEX IF NOT EXISTS idx_pc_feed   ON pattern_cards(status, priority) WHERE status='archived';
-
--- ============ pattern_dims（七维受控词表）============
--- 模式空间领土的经纬度。F/T/C/S/Y/R 受控取值(H 是整数不限)。预填盘口域化值。
-CREATE TABLE IF NOT EXISTS pattern_dims (
-    dim         TEXT NOT NULL,                -- 'F'/'T'/'C'/'S'/'Y'/'R'
-    value       TEXT NOT NULL,
-    description TEXT,
-    PRIMARY KEY (dim, value)
-);
-
--- ============ pattern_coverage（模式空间覆盖地图 C[f,s,y,h]）============
--- 归纳引擎主覆盖地图(模式空间领土探索记录)。任务生成器看它决定扫哪。
--- 与因子层 coverage_map VIEW 并存——两层语义不同(模式卡 vs 因子)。
-CREATE TABLE IF NOT EXISTS pattern_coverage (
-    f_feature         TEXT NOT NULL,
-    s_structure       TEXT NOT NULL,
-    y_target          TEXT NOT NULL,
-    h_horizon         INTEGER NOT NULL,
-    searched_count    INTEGER DEFAULT 0,      -- raw+audited+archived 总试过
-    archived_count    INTEGER DEFAULT 0,      -- 过审计入库
-    explained_count   INTEGER DEFAULT 0,      -- 已成 idea
-    avg_strength      REAL,
-    last_searched_at  TIMESTAMP,
-    PRIMARY KEY (f_feature, s_structure, y_target, h_horizon)
-);
 
 -- ============ axioms（知识图 · AXIOM 层：理论公理/利润来源）============
 -- 分层知识图的根节点，DERIVES_FROM 推理链的起点。可被攻击的经验命题（非定义）。

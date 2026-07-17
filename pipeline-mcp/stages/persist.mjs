@@ -57,7 +57,7 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
 
     if (isPass) {
       // 写 factors + factor_evals + success_pattern lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated" });
+      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
       if (!written) {
         return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
       }
@@ -118,7 +118,7 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     } else {
       // verdict=fail：lesson.factor_xname 有 FK → 必须先写 factors（status=dead_end）
       // 同时写 factor_evals（带 status="dead_end" 触发 latest_ic/icir 更新）+ dead_end lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end" });
+      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end", intuition: factor.intuition || null });
       if (!written) {
         return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
       }

@@ -350,8 +350,10 @@ def search_lessons(
 
 def update_embedding(conn: sqlite3.Connection, xname: str, embedding: list[float]) -> None:
     blob = struct.pack(f"{len(embedding)}f", *embedding)
+    # vec0 虚拟表不支持 INSERT OR REPLACE(撞主键报 UNIQUE 而非替换),先 DELETE 再 INSERT
+    conn.execute("DELETE FROM factors_vec WHERE xname = ?", (xname,))
     conn.execute(
-        "INSERT OR REPLACE INTO factors_vec (xname, embedding) VALUES (?, ?)",
+        "INSERT INTO factors_vec (xname, embedding) VALUES (?, ?)",
         (xname, blob),
     )
     conn.execute(
@@ -1081,6 +1083,13 @@ def ensure_quality_fields(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE factors ADD COLUMN quality_score REAL")
     if "quality_grade" not in cols:
         conn.execute("ALTER TABLE factors ADD COLUMN quality_grade TEXT")
+
+
+def ensure_intuition_field(conn: sqlite3.Connection) -> None:
+    """补 factors.intuition 列(语义意图描述,embedding 主原料)。v7 intuition_field。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "intuition" not in cols:
+        conn.execute("ALTER TABLE factors ADD COLUMN intuition TEXT")
 
 
 def _map_monthly_icir(x: float | None) -> float:

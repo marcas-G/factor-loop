@@ -275,38 +275,6 @@ export async function residualIcStrengthHandler({ target, symbol, freq, y_horizo
   });
 }
 
-export const patternFeedSchema = {
-  name: "pattern_feed",
-  description:
-    "衔接①(归纳→演绎):拉 archived 高优先 + 未解释的模式卡,供 hypothesis-generator 解释机制。"
-    + "归纳引擎的自动喂队列。hypothesis-generator 先调它,有模式卡则解释(产 idea 后 pattern_link_idea 回写),无则走 lens 自主发现反常。",
-  inputSchema: {
-    type: "object",
-    properties: { top_n: { type: "number", default: 3 } },
-  },
-};
-export async function patternFeedHandler({ top_n }) {
-  return factorDb.feedPatternQueue(top_n);
-}
-
-export const linkPatternIdeaSchema = {
-  name: "pattern_link_idea",
-  description:
-    "衔接①回写:hypothesis-generator 解释模式卡产 idea 后,回写 pattern_cards.idea_id + status='explained'。"
-    + "pattern_card 必须 archived。闭合归纳→演绎衔接。",
-  inputSchema: {
-    type: "object",
-    required: ["pattern_card_id", "idea_id"],
-    properties: {
-      pattern_card_id: { type: "number", description: "pattern_cards.id" },
-      idea_id: { type: "number", description: "解释产出的 ideas.id" },
-    },
-  },
-};
-export async function linkPatternIdeaHandler({ pattern_card_id, idea_id }) {
-  return factorDb.linkPatternIdea(pattern_card_id, idea_id);
-}
-
 export const ALL_FACTOR_DB_SCHEMAS = [
   factorSearchSchema,
   factorRecentLessonsSchema,
@@ -324,8 +292,6 @@ export const ALL_FACTOR_DB_SCHEMAS = [
   coverageMapSchema,
   coverageGapsSchema,
   residualIcStrengthSchema,
-  patternFeedSchema,
-  linkPatternIdeaSchema,
 ];
 
 export const ALL_FACTOR_DB_HANDLERS = {
@@ -345,6 +311,4 @@ export const ALL_FACTOR_DB_HANDLERS = {
   coverage_map: coverageMapHandler,
   coverage_gaps: coverageGapsHandler,
   factor_residual_ic_strength: residualIcStrengthHandler,
-  pattern_feed: patternFeedHandler,
-  pattern_link_idea: linkPatternIdeaHandler,
 };

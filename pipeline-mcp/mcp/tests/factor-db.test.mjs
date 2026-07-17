@@ -66,7 +66,7 @@ test("factor_similar 对不存在的 xname 抛错", async () => {
   );
 });
 
-test("所有 18 个 schema 名称正确", () => {
+test("所有 16 个 schema 名称正确", () => {
   const names = tools.ALL_FACTOR_DB_SCHEMAS.map(s => s.name);
   assert.deepEqual(names.sort(), [
     "coverage_gaps",
@@ -80,10 +80,8 @@ test("所有 18 个 schema 名称正确", () => {
     "factor_search",
     "factor_semantic_search",
     "factor_similar",
-    "pattern_link_idea",
     "iteration_list_open",
     "iteration_open",
-    "pattern_feed",
     "iteration_realize",
     "iteration_reopen",
     "factor_residual_ic_strength",
