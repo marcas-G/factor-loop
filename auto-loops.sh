@@ -8,6 +8,11 @@
 #       tail -f logs/loops/auto.out        # 驱动日志
 #       tmux attach -t rloop1               # 看当前 session(Ctrl-b d 退出)
 #
+#   跑固定轮数(跑完 N 轮自停;不设 ROUNDS 则无限循环):
+#       ROUNDS=10 bash auto-loops.sh 1                                          # 前台,跑 10 轮后脚本退出
+#       nohup env ROUNDS=10 bash auto-loops.sh 1 > logs/loops/auto.out 2>&1 &   # 后台,跑 10 轮
+#   ROUNDS=0(默认)= 无限循环;ROUNDS=N = 跑 N 轮自停(每轮一个全新 claude session)。
+#
 #   优雅关闭(跑完当前轮再停,不中断正在跑的研究):
 #       bash auto-loops.sh stop
 #
