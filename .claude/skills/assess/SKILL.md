@@ -114,6 +114,11 @@ Task({
 1. **样本外秩 IC 符号反转**:与样本内完全相反(zero / sign_match 可查)
 2. **推进式回测失败**:滚动训练-预测,连续多月亏或后期断崖(train_test 可近似)
 3. **成本翻倍夏普转负**(16bps):`tradability.veto3_cost_double`(成本翻倍 Sharpe 转负 → fail)
+4. **预测力下限**:主场景 `|screening.icir| < 0.5`(预测力极弱,正负皆然——稳定反向信号 |ICIR| 高不否决,只卡绝对值太低)且无救场 → fail
+   - 救场(命中任一则**不否决**,进综合判断):变换族某变换 `|IC| ≥ 0.05`(transform_family.*,某形态有可用水准预测力),或某 horizon 实际 `|IC| ≥ 0.03`(长 horizon 有可用水准预测力)
+   - 数据:`screening.icir` + `transform_family` + `factor_ic_daily`(按 horizon 的 IC);某项缺失则对应救场分支不计(不可得 = 不构成救场)
+   - 注意:`factor_residual_ic_strength` 是新颖度(预测力不被库内线性解释的比例)**不是预测力绝对值**,不单独作救场——弱信号即使新颖也仍弱,该挂还挂
+   - 说明:补这条是因为原 3 条否决没覆盖"预测力本身太弱"——防止 |ICIR| 极低(如 0.12)但忠实度/正交尚可的因子蒙混 pass。阈值 0.5 是"基本无信号"线(evaluated 强信号阈 1.5,1.0 有信号,0.5 以下噪声主导)
 
 ### 综合参考
 
