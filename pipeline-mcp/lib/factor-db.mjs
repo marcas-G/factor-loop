@@ -80,7 +80,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -119,6 +119,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateSchemaVersion();
   migrateQualitySchema();
   migrateIntuitionSchema();
+  migrateAnchorTextSchema();
   return _db;
 }
 
@@ -456,6 +457,21 @@ export async function generateEmbedding(xname) {
   if (!xname) return { ok: false, error: "xname 为空" };
   const { runPy } = await import("../infra/run-py.mjs");
   const script = path.join(CWD, "factor_db", "gen_embeddings.py");
+  const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    stdout_tail: (result.stdout || "").slice(-300),
+    stderr_head: (result.stderr || "").slice(0, 200),
+  };
+}
+
+// 生成 anchor_text(固定四要素模板,embedding 锚定文本):spawn ai_generate_anchor.py --xname。
+// 必须在 generateEmbedding 前调(emb 的 build_text 读 anchor_text)。失败降级不抛,后续可补。
+export async function generateAnchorText(xname) {
+  if (!xname) return { ok: false, error: "xname 为空" };
+  const { runPy } = await import("../infra/run-py.mjs");
+  const script = path.join(CWD, "factor_db", "ai_generate_anchor.py");
   const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
   return {
     ok: result.exitCode === 0,
@@ -1354,11 +1370,19 @@ function migrateQualitySchema() {
   }
 }
 
-// factors.intuition(语义意图描述,embedding 主原料 v7)
+// factors.intuition(语义意图描述,研究用 v7)
 function migrateIntuitionSchema() {
   const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
   if (fcols.length > 0 && !fcols.includes("intuition")) {
     _db.exec("ALTER TABLE factors ADD COLUMN intuition TEXT");
+  }
+}
+
+// factors.anchor_text(embedding 锚定文本,固定四要素模板生成 v8)
+function migrateAnchorTextSchema() {
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (fcols.length > 0 && !fcols.includes("anchor_text")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN anchor_text TEXT");
   }
 }
 

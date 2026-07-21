@@ -51,43 +51,11 @@ def get_embedder(model_name: str):
     return SentenceTransformer(model_name, device="cpu")
 
 
-def _extract_chinese(formula_text: str) -> str:
-    """从 formula 提取中文注释行(// 或 # 后的中文),作 intuition 缺失时的语义降级。
-    纯英文代码/符号丢弃——那是形式不是语义。"""
-    if not formula_text:
-        return ""
-    out = []
-    for line in formula_text.splitlines():
-        comment = line
-        for marker in ("//", "#"):
-            if marker in comment:
-                comment = comment.split(marker, 1)[1]
-                break
-        cn = "".join(ch for ch in comment if "一" <= ch <= "鿿" or ch in "，。、：；（）")
-        cn = cn.strip()
-        if len(cn) >= 4:  # 至少 4 个汉字才算语义,过滤变量名拼音碎片
-            out.append(cn)
-    return " ".join(out)
-
-
-def build_text(row, angle_map: dict) -> str:
-    """构造 emb 输入:纯语义。
-
-    主体 = intuition(语义意图描述);缺失则降级 formula 中文注释。
-    后缀 = angle 信息源(结构化维度,让同信息源因子适度聚合)。
-    formula 代码 / tags / class_name 不进 embedding——形式相似 ≠ 语义相似。
-    """
-    sem = (row["intuition"] or "").strip() or _extract_chinese(row["formula_text"])
-    parts = []
-    if sem:
-        parts.append(sem)
-    ac = row["angle_code"]
-    if ac and ac in angle_map:
-        a = angle_map[ac]
-        desc = " ".join(x for x in (a["name"], a["signal_target"]) if x)
-        if desc:
-            parts.append(f"信息源:{desc}")
-    return "\n".join(parts).strip()
+def build_text(row) -> str:
+    """锚定文本 = factors.anchor_text(固定四要素模板生成,统一风格,检索稳定)。
+    由 ai_generate_anchor.py 按固定 prompt 生成(机制/利润来源/信息源/预测),
+    所有因子风格一致——这是 embedding 检索稳定的根基。"""
+    return (row["anchor_text"] or "").strip()
 
 
 def main() -> None:
@@ -104,7 +72,7 @@ def main() -> None:
     with db.get_conn(args.db) as conn:
         # 取 factors + 串接 tag（聚合到一行）
         sql = """
-            SELECT f.xname, f.class_name, f.formula_text, f.intuition, f.angle_code
+            SELECT f.xname, f.anchor_text
             FROM factors f
         """
         where = []
@@ -121,14 +89,12 @@ def main() -> None:
             sql += f" LIMIT {int(args.limit)}"
 
         rows = conn.execute(sql, params).fetchall()
-        angle_map = {r["code"]: {"name": r["name"], "signal_target": r["signal_target"] or ""}
-                     for r in conn.execute("SELECT code, name, signal_target FROM angle_ontology")}
-        print(f"[INFO] 待 embed: {len(rows)} 个因子，model={args.model}，angle 本体 {len(angle_map)} 个")
+        print(f"[INFO] 待 embed: {len(rows)} 个因子，model={args.model}")
 
         ok = 0
         for i, r in enumerate(rows, 1):
             xname = r["xname"]
-            text = build_text(r, angle_map)
+            text = build_text(r)
             try:
                 emb = embedder.encode(text, normalize_embeddings=True).tolist()
             except Exception as e:

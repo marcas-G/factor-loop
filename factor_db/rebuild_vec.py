@@ -18,12 +18,8 @@ from factor_db.db import get_conn
 model = get_embedder("BAAI/bge-small-zh-v1.5")
 
 with get_conn("factors.db") as c:
-    angle_map = {r["code"]: {"name": r["name"], "signal_target": r["signal_target"] or ""}
-                 for r in c.execute("SELECT code, name, signal_target FROM angle_ontology")}
-    rows = c.execute(
-        "SELECT xname, class_name, formula_text, intuition, angle_code FROM factors"
-    ).fetchall()
-    texts = [build_text(r, angle_map) for r in rows]
+    rows = c.execute("SELECT xname, anchor_text FROM factors").fetchall()
+    texts = [build_text(r) for r in rows]
     print(f"[INFO] {len(rows)} 个因子,batch encode...", flush=True)
 
     embs = model.encode(texts, normalize_embeddings=True, batch_size=32, show_progress_bar=False)

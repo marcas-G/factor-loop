@@ -1086,10 +1086,17 @@ def ensure_quality_fields(conn: sqlite3.Connection) -> None:
 
 
 def ensure_intuition_field(conn: sqlite3.Connection) -> None:
-    """补 factors.intuition 列(语义意图描述,embedding 主原料)。v7 intuition_field。"""
+    """补 factors.intuition 列(语义意图描述,研究用)。v7 intuition_field。"""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
     if "intuition" not in cols:
         conn.execute("ALTER TABLE factors ADD COLUMN intuition TEXT")
+
+
+def ensure_anchor_text_field(conn: sqlite3.Connection) -> None:
+    """补 factors.anchor_text 列(embedding 锚定文本,固定四要素模板生成)。v8 anchor_text。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "anchor_text" not in cols:
+        conn.execute("ALTER TABLE factors ADD COLUMN anchor_text TEXT")
 
 
 def _map_monthly_icir(x: float | None) -> float:

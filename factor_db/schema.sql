@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS factors (
     angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
     quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
     quality_grade    TEXT,         -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
-    intuition        TEXT          -- 语义意图描述(机制/利润来源/信息源/预测),embedding 主原料
+    intuition        TEXT,         -- 语义意图描述(研究用,带 idea#/上下文;人看)
+    anchor_text      TEXT          -- embedding 锚定文本(固定四要素模板生成,检索专用)
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);

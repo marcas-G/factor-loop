@@ -72,6 +72,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
 
       // 三件套兜底：.h 无 frontmatter 时从 state 补 formula_text/tags；再补 emb（新因子入库补全）
       factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      let anchorOk = false;
+      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
       let embOk = false;
       try { embOk = (await factorDb.generateEmbedding(written)).ok; }
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
@@ -133,6 +136,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
 
       // 三件套兜底 + emb（dead_end 因子也入库，补全以便检索/避雷）
       factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      let anchorOk = false;
+      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
       let embOk = false;
       try { embOk = (await factorDb.generateEmbedding(written)).ok; }
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
