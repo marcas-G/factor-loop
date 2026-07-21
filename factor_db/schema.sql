@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS iterations (
     outcome     TEXT CHECK (outcome IN ('improved','declined','neutral')),
     icir_delta  REAL,
     ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status      TEXT NOT NULL DEFAULT 'realized',
+    iterable    INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (from_xname) REFERENCES factors(xname),
     FOREIGN KEY (to_xname)   REFERENCES factors(xname),
     FOREIGN KEY (idea_id)    REFERENCES ideas(id)
