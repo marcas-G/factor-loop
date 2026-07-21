@@ -1174,6 +1174,8 @@ export function addAxiom({ code, category, statement, formal_form = null, expect
 // 图边：幂等（UNIQUE 四元组+类型）。返回 edge id。
 export function addGraphEdge({ from_table, from_id, to_table, to_id, edge_type, weight = null, properties = null }) {
   const d = db();
+  if (!NODE_PK[from_table]) throw new Error(`from_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${from_table}`);
+  if (!NODE_PK[to_table]) throw new Error(`to_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${to_table}`);
   const fid = String(from_id), tid = String(to_id);
   const exist = d.prepare(
     `SELECT id FROM graph_edges WHERE from_table=? AND from_id=? AND to_table=? AND to_id=? AND edge_type=?`

@@ -75,7 +75,7 @@ export const neighborhoodSchema = {
   },
 };
 export async function neighborhoodHandler(args = {}) {
-  return factorDb.graph_neighborhood({
+  return factorDb.neighborhood({
     table: args.table, node_id: args.node_id, edge_types: args.edge_types ?? null,
     direction: args.direction ?? "both", limit: args.limit ?? 10,
   });

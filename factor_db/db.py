@@ -94,6 +94,7 @@ def add_factor(
     idea_id: int | None = None,
     created_ts: str | None = None,
     skip_if_exists: bool = True,
+    tags: Iterable[str] | None = None,
 ) -> bool:
     """新增因子。返回 True 表示新增，False 表示已存在跳过。"""
     if status not in VALID_STATUS:
@@ -142,7 +143,7 @@ def add_factor(
         "SELECT angle_code FROM factors WHERE xname=?", (xname,)
     ).fetchone()
     if not (cur_angle and cur_angle[0]):
-        inferred = infer_angle_code(formula_text, None, xname)
+        inferred = infer_angle_code(formula_text, tags, xname)
         if inferred:
             conn.execute(
                 "UPDATE factors SET angle_code=? WHERE xname=?", (inferred, xname)
@@ -542,6 +543,11 @@ def add_graph_edge(
     """写一条图边。幂等（UNIQUE 约束，重复返回已有 id）。from_id/to_id 接受 str/int。"""
     if edge_type not in VALID_EDGE_TYPES:
         raise ValueError(f"edge_type must be {VALID_EDGE_TYPES}, got {edge_type!r}")
+    _NODE_PK = ("axioms", "ideas", "factors", "lessons")
+    if from_table not in _NODE_PK:
+        raise ValueError(f"from_table must be in {_NODE_PK}, got {from_table!r}")
+    if to_table not in _NODE_PK:
+        raise ValueError(f"to_table must be in {_NODE_PK}, got {to_table!r}")
     props = json.dumps(properties, ensure_ascii=False) if properties else None
     existing = conn.execute(
         """
@@ -779,7 +785,10 @@ def mark_contradiction_resolved(
     row = conn.execute(
         "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
     ).fetchone()
-    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    try:
+        props = json.loads(row["properties"]) if row and row["properties"] else {}
+    except Exception:
+        props = {}
     props["resolved_by"] = idea_id
     conn.execute(
         "UPDATE graph_edges SET properties = ? WHERE id = ?",
@@ -797,7 +806,10 @@ def mark_contradiction_bounded(
     row = conn.execute(
         "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
     ).fetchone()
-    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    try:
+        props = json.loads(row["properties"]) if row and row["properties"] else {}
+    except Exception:
+        props = {}
     props["resolution"] = "bounded"
     props["regime"] = regime
     props["reason"] = reason

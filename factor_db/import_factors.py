@@ -79,6 +79,7 @@ def import_one(conn, file_path: Path, dry_run: bool = False) -> dict:
                 params=params,
                 status=status,
                 created_ts=created_ts,
+                tags=tags,
             )
             info["action"] = "inserted" if inserted else "skipped"
             if inserted and tags:
