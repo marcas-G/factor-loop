@@ -38,7 +38,7 @@ test("每组 schema.name 唯一(无重复注册)", () => {
   }
 });
 
-test("MCP 工具总数 = 40(7 组;health 另 +1 = 41)", () => {
+test("MCP 工具总数 = 44(7 组;health 另 +1 = 45)", () => {
   const sum = GROUPS.reduce((a, [, s]) => a + s.length, 0);
-  assert.equal(sum, 40, `7 组应 40(graph11+factor-db16+persist3+hypothesis2+discover2+platform2+state4),实际 ${sum}`);
+  assert.equal(sum, 44, `7 组应 44(graph15+factor-db16+persist3+hypothesis2+discover2+platform2+state4),实际 ${sum}`);
 });

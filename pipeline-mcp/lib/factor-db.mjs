@@ -80,7 +80,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -120,6 +120,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateQualitySchema();
   migrateIntuitionSchema();
   migrateAnchorTextSchema();
+  migrateAngleCandidatesSchema();
   return _db;
 }
 
@@ -1393,9 +1394,45 @@ function migrateAnchorTextSchema() {
   }
 }
 
+// angle_candidates(angle 自发现候选记录,防归纳循环 v9)
+function migrateAngleCandidatesSchema() {
+  const exists = _db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='angle_candidates'").get();
+  if (!exists) {
+    _db.exec(`CREATE TABLE IF NOT EXISTS angle_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL,
+      field_family TEXT, extraction TEXT, signal_target TEXT, theory_axiom TEXT,
+      description TEXT, novelty_argument TEXT, trigger_angle TEXT,
+      status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+      reject_reason TEXT, nearest_existing TEXT,
+      tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)");
+  }
+}
+
 export function addAngle({ code, name, field_family, extraction, signal_target = null, theory_axiom = null, description = null }) {
   _db.prepare(`INSERT OR IGNORE INTO angle_ontology (code,name,field_family,extraction,signal_target,theory_axiom,description) VALUES (?,?,?,?,?,?,?)`)
     .run(code, name, field_family, extraction, signal_target, theory_axiom, description);
+}
+
+// angle_candidates CRUD(angle 自发现候选记录,防归纳循环)
+export function addAngleCandidate({ code, field_family = null, extraction = null, signal_target = null,
+  theory_axiom = null, description = null, novelty_argument = null, trigger_angle = null, status = "proposed" }) {
+  return Number(_db.prepare(
+    `INSERT INTO angle_candidates (code,field_family,extraction,signal_target,theory_axiom,description,novelty_argument,trigger_angle,status)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(code, field_family, extraction, signal_target, theory_axiom, description, novelty_argument, trigger_angle, status).lastInsertRowid);
+}
+
+export function updateAngleCandidate(id, { status, reject_reason = null, nearest_existing = null }) {
+  _db.prepare(`UPDATE angle_candidates SET status=?, reject_reason=?, nearest_existing=? WHERE id=?`)
+    .run(status, reject_reason, nearest_existing, id);
+}
+
+export function listAngleCandidates({ status = null } = {}) {
+  const d = db();
+  return status
+    ? d.prepare("SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC").all(status)
+    : d.prepare("SELECT * FROM angle_candidates ORDER BY tried_at DESC").all();
 }
 
 export function tagFactorAngle({ xname, angle_code }) {

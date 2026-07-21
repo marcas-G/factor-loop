@@ -221,6 +221,52 @@ export async function selectGraphOperationHandler() {
   return factorDb.selectGraphOperation();
 }
 
+// angle_candidate CRUD(angle 自发现候选记录,防归纳循环)
+export const addAngleCandidateSchema = {
+  name: "angle_candidate_add",
+  description: "写 angle 自发现候选(proposed)。hypothesize angle_discovery 分支:meta-angle-discoverer 产出后调。",
+  inputSchema: { type: "object", required: ["code"], properties: {
+    code: { type: "string" }, field_family: { type: "string" }, extraction: { type: "string" },
+    signal_target: { type: "string" }, theory_axiom: { type: "string" }, description: { type: "string" },
+    novelty_argument: { type: "string" }, trigger_angle: { type: "string" }, status: { type: "string", default: "proposed" } } },
+};
+export async function addAngleCandidateHandler(args) {
+  return { id: factorDb.addAngleCandidate(args) };
+}
+
+export const updateAngleCandidateSchema = {
+  name: "angle_candidate_update",
+  description: "更新候选状态:reviewer accept→accepted(并 addAngle);reject→rejected+reason。",
+  inputSchema: { type: "object", required: ["candidate_id", "status"], properties: {
+    candidate_id: { type: "number" }, status: { type: "string", enum: ["accepted", "rejected"] },
+    reject_reason: { type: "string" }, nearest_existing: { type: "string" } } },
+};
+export async function updateAngleCandidateHandler({ candidate_id, status, reject_reason, nearest_existing }) {
+  factorDb.updateAngleCandidate(candidate_id, { status, reject_reason, nearest_existing });
+  return { ok: true };
+}
+
+export const listAngleCandidatesSchema = {
+  name: "angle_candidate_list",
+  description: "列 angle 候选(可按 status)。meta-angle-discoverer 查 rejected 防循环用。",
+  inputSchema: { type: "object", properties: { status: { type: "string", enum: ["proposed", "accepted", "rejected"] } } },
+};
+export async function listAngleCandidatesHandler({ status } = {}) {
+  return factorDb.listAngleCandidates({ status });
+}
+
+export const addAngleSchema = {
+  name: "angle_add",
+  description: "写 angle_ontology(新角度入库,explore 能选)。hypothesize angle_discovery accept 后调。",
+  inputSchema: { type: "object", required: ["code", "name", "field_family", "extraction"], properties: {
+    code: { type: "string" }, name: { type: "string" }, field_family: { type: "string" }, extraction: { type: "string" },
+    signal_target: { type: "string" }, theory_axiom: { type: "string" }, description: { type: "string" } } },
+};
+export async function addAngleHandler(args) {
+  factorDb.addAngle(args);
+  return { ok: true };
+}
+
 export const ALL_GRAPH_TRAVERSAL_SCHEMAS = [
   queryContradictionsSchema, getSubgraphSchema, neighborhoodSchema,
   findRefutationClustersSchema, graphStatsSchema,
@@ -228,6 +274,10 @@ export const ALL_GRAPH_TRAVERSAL_SCHEMAS = [
   markContradictionResolvedSchema, markContradictionBoundedSchema,
   angleCoverageSchema,
   selectGraphOperationSchema,
+  addAngleCandidateSchema,
+  updateAngleCandidateSchema,
+  listAngleCandidatesSchema,
+  addAngleSchema,
 ];
 export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   graph_query_contradictions: queryContradictionsHandler,
@@ -241,4 +291,8 @@ export const ALL_GRAPH_TRAVERSAL_HANDLERS = {
   graph_mark_contradiction_bounded: markContradictionBoundedHandler,
   graph_angle_coverage: angleCoverageHandler,
   graph_select_operation: selectGraphOperationHandler,
+  angle_candidate_add: addAngleCandidateHandler,
+  angle_candidate_update: updateAngleCandidateHandler,
+  angle_candidate_list: listAngleCandidatesHandler,
+  angle_add: addAngleHandler,
 };

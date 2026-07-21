@@ -125,7 +125,7 @@ Task({
 })
 ```
 
-→ 收候选角度 JSON。
+→ 收候选角度 JSON。**先落 angle_candidates(proposed)**:`angle_candidate_add {code, field_family, extraction, signal_target, theory_axiom, description, novelty_argument, trigger_angle:<触发角度>, status:"proposed"}` → 拿 candidate_id(G4 用)。记候选防循环(下次 meta-angle-discoverer 查 rejected/已试避重)。
 
 **衔接**:返回后立即 G3 派 reviewer 模式三审。真·空手(无候选/数据不足)→ G5 返回 `{no_hypothesis: true, reason: "angle_discovery 产不出新维度"}`。
 
@@ -142,10 +142,10 @@ Task({
 
 **衔接**:verdict 返回后立即 G4。
 
-### G4-angle · accept 落库 / reject 回 G1
+### G4-angle · accept/reject 落 angle_candidates + (accept) addAngle
 
-- **accept**(真新维度):`mcp__quant-mcp__addAngle`(经 MCP;若工具层无,用 persist 或直接 lib)写 angle_ontology(code/name/field_family/extraction/signal_target/theory_axiom/description)。新角度入库后 `query_angle_coverage` 自动算它 unexplored(0 因子)→ explore 下轮能选它产种子。
-- **reject**(换皮/无支撑/不落地):回 G1 选下个 saturated 角度重试(最多试 2-3 个 saturated 角度),全 reject → G5 `{no_hypothesis: true}`。
+- **accept**(真新维度):`angle_candidate_update {candidate_id:<G2 的 id>, status:"accepted"}` 记候选接受 → `angle_add {code,name,field_family,extraction,signal_target,theory_axiom,description}` 写 angle_ontology。新角度入库后 `query_angle_coverage` 自动算它 unexplored(0 因子)→ explore 下轮能选它产种子。
+- **reject**(换皮/无支撑/不落地):`angle_candidate_update {candidate_id:<G2 的 id>, status:"rejected", reject_reason:<reviewer novelty/field_groundable>, nearest_existing:<nearest_existing_angle>}` 记候选被拒(防循环:下次 meta-angle-discoverer 查 rejected 避重产相似)→ 回 G1 选下个 saturated 角度重试(最多试 2-3 个),全 reject → G5 `{no_hypothesis: true}`。
 
 ### G5-angle · 返回
 

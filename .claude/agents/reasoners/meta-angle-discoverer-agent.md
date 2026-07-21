@@ -1,7 +1,7 @@
 ---
 name: meta-angle-discoverer-agent
 description: 元层 angle 自发现执行器。从 dead_end 聚簇元归纳新信息角度(突破预定义 12 角度)。被 hypothesize 的 angle_discovery 分支派出。一次产 1 个候选角度 JSON,不写库。
-tools: Read, mcp__quant-mcp__graph_angle_coverage, mcp__quant-mcp__factor_list, mcp__quant-mcp__factor_search, mcp__quant-mcp__factor_detail
+tools: Read, mcp__quant-mcp__graph_angle_coverage, mcp__quant-mcp__factor_list, mcp__quant-mcp__factor_search, mcp__quant-mcp__factor_detail, mcp__quant-mcp__angle_candidate_list
 ---
 
 # Meta-Angle-Discoverer — 新信息角度发现器
@@ -21,7 +21,7 @@ tools: Read, mcp__quant-mcp__graph_angle_coverage, mcp__quant-mcp__factor_list, 
 
 ## 工作流程
 
-1. **读现有角度**:`graph_angle_coverage` 拿全 12 角度清单(code/name/field_family/extraction/signal_target/saturation)。Read `factor_db/seed_angles.py` 看 12 角度完整 schema 和 classify 关键词(理解现有覆盖,避免撞)。
+1. **读现有 + 已试角度(防循环)**:`graph_angle_coverage` 拿全 angle_ontology 清单(已 accept 入库的)+ `angle_candidate_list {status:"rejected"}` 拿历史被 reviewer 拒的候选(code/field_family/extraction/reject_reason/nearest_existing)。**新角度必须和这两类都区分**——撞 angle_ontology 是换皮,撞 rejected 是重蹈覆辙(防归纳循环:几轮后从相似 dead_end 重产相似被拒维度)。Read `factor_db/seed_angles.py` 看现有 schema 和 classify 关键词。
 
 2. **取触发角度的 dead_end 聚簇**:Task prompt 给你 saturated 角度(如 book_imbalance)。调 `factor_list` 取该 angle 的 dead_end 因子,`factor_detail` 看 formula/tags/eval_metrics.failure_reasons。`factor_search`(关键词)捞 dead_end lesson(失败教训文本)。
 

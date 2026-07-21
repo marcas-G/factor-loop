@@ -1117,6 +1117,56 @@ def ensure_anchor_text_field(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE factors ADD COLUMN anchor_text TEXT")
 
 
+def ensure_angle_candidates_table(conn: sqlite3.Connection) -> None:
+    """建 angle_candidates 表(angle 自发现候选记录,防归纳循环)。v9 angle_candidates。"""
+    tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "angle_candidates" not in tabs:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS angle_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL,
+                field_family TEXT, extraction TEXT, signal_target TEXT, theory_axiom TEXT,
+                description TEXT, novelty_argument TEXT, trigger_angle TEXT,
+                status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+                reject_reason TEXT, nearest_existing TEXT,
+                tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)")
+
+
+def add_angle_candidate(conn, *, code, field_family=None, extraction=None, signal_target=None,
+                        theory_axiom=None, description=None, novelty_argument=None,
+                        trigger_angle=None, status="proposed") -> int:
+    """写一条 angle 自发现候选(proposed),返回 id。"""
+    cur = conn.execute(
+        """INSERT INTO angle_candidates
+           (code, field_family, extraction, signal_target, theory_axiom, description,
+            novelty_argument, trigger_angle, status)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (code, field_family, extraction, signal_target, theory_axiom, description,
+         novelty_argument, trigger_angle, status),
+    )
+    return int(cur.lastrowid)
+
+
+def update_angle_candidate(conn, candidate_id: int, *, status: str,
+                           reject_reason: str | None = None,
+                           nearest_existing: str | None = None) -> None:
+    """更新候选状态(accept→accepted / reject→rejected + reason)。"""
+    conn.execute(
+        """UPDATE angle_candidates SET status=?, reject_reason=?, nearest_existing=? WHERE id=?""",
+        (status, reject_reason, nearest_existing, candidate_id),
+    )
+
+
+def list_angle_candidates(conn, status: str | None = None) -> list[sqlite3.Row]:
+    """列候选(可按 status 过滤)。meta-angle-discoverer 查 rejected 防循环用。"""
+    if status:
+        return conn.execute(
+            "SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC", (status,)
+        ).fetchall()
+    return conn.execute("SELECT * FROM angle_candidates ORDER BY tried_at DESC").fetchall()
+
+
 def _map_monthly_icir(x: float | None) -> float:
     """monthly_icir 固定阈值归一(不依赖库)。≥2→1, ≥1→0.7, ≥0.5→0.4, ≥0.2→0.2, 否则0。"""
     if x is None:

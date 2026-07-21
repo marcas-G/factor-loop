@@ -339,6 +339,26 @@ CREATE TABLE IF NOT EXISTS angle_ontology (
 );
 CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family);
 
+-- ============ angle_candidates（angle 自发现候选记录,防归纳循环）============
+-- meta-angle-discoverer 产候选 → proposed;reviewer accept → accepted(并 addAngle 入 angle_ontology);
+-- reject → rejected(reject_reason)。下次 meta-angle-discoverer 查 rejected 已试维度,避免重产相似。
+CREATE TABLE IF NOT EXISTS angle_candidates (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    code              TEXT NOT NULL,
+    field_family      TEXT,
+    extraction        TEXT,
+    signal_target     TEXT,
+    theory_axiom      TEXT,
+    description       TEXT,
+    novelty_argument  TEXT,
+    trigger_angle     TEXT,                -- 从哪个 saturated 角度归纳(book_imbalance 等)
+    status            TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+    reject_reason     TEXT,                -- reviewer reject reason(reskin/weak_support/ungrounded)
+    nearest_existing  TEXT,                -- reviewer 说最像的现有角度
+    tried_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status);
+
 -- ============ schema_version（schema 版本追踪）============
 -- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。
 -- 新库由 schema.sql 直建到最新结构 → init_db 直接标 CURRENT_VERSION。
