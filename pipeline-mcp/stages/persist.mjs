@@ -32,7 +32,7 @@ function extractMetrics(evalMetrics) {
     ic_mean: fromScreening.ic_mean ?? evalMetrics.ic_mean ?? evalMetrics["1_ic"] ?? null,
     icir: fromScreening.icir ?? evalMetrics.icir ?? evalMetrics["2_icir"] ?? null,
     sharpe: fromDeep.conditional_sharpe ?? evalMetrics.bucket_annualized_sharpe?.["@1s"] ?? null,
-    rank_ic: fromDeep.rank_ic_max ?? null,
+    rank_ic: fromScreening.spearman ?? fromDeep.rank_ic_max ?? null,
   };
 }
 

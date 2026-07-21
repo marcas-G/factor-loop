@@ -63,7 +63,7 @@ Task({
 
 | 指标 | 判断标准 | 数据来源 |
 |---|---|---|
-| **秩 IC 的 ICIR/t 值**(首要) | 均值不降 + std 降 + ICIR 升 | screening(Spearman / ICIR / sign_match_rate) |
+| **秩 IC 的 ICIR/t 值**(首要) | 看 \|ICIR\|≥1.5 达标——**负 ICIR = 反向信号,反着用即有效,\|ICIR\| 大算强不算失败**(勿因负值判弱);t 值显著 + std 低 | screening(Spearman / ICIR / sign_match_rate) |
 | **平稳性 + 差分**(新增) | ADF p<0.05 已平稳 → 无需差分;非平稳且 diff_improvement>0 → 该差分 | stationarity(adf_pvalue / need_differential / orig_ic / diff_ic / diff_improvement) |
 | 显著性 | Welch t + p_value | zero |
 | 分组单调性 | 5 组收益平滑严格单调 | 待补 |
