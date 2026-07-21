@@ -36,11 +36,11 @@ EOF
 
 [ "$STATUS" != "running" ] && exit 0
 if [ "${PENDING:-0}" -gt 0 ]; then
-  cat <<EOF
+  cat <<EOF >&2
 research-loop 衔接硬规则:run status=running 且 ${PENDING} 个 factor 仍 pending/submitting。
 按 SKILL 衔接规则,立即继续当前 Step 的下一个 tool call(禁止纯文字回合断流)。
 若确需停(平台卡死/人工干预),手动改 state.json status=paused 后我再放行。
 EOF
-  exit 2  # block:claude 继续,本 stdout 作 reason 喂回
+  exit 2  # block:claude 继续,stderr 作 reason 喂回
 fi
 exit 0

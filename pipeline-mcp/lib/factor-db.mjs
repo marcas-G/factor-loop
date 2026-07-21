@@ -1487,6 +1487,8 @@ export function selectGraphOperation() {
     generalize: Math.min(1.0, maxCluster / _CLUSTER_SCALE),
     fill: Math.min(1.0, nGaps / _GAP_SCALE),
     explore: (nFresh / total) * (nSaturated / total),
+    // angle_discovery:explore 卡(nFresh==0)+ 饱和多 → 该发现新角度,突破预定义语言边界
+    angle_discovery: nFresh === 0 ? (nSaturated / total) : 0,
   };
 
   // diversity bonus + score
