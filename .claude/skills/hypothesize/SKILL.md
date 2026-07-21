@@ -75,7 +75,7 @@ Task({
 ## G4 · 落盘 + fail 分诊
 
 **verdict = pass**(s2 且 s4 都 pass):
-1. `mcp__quant-mcp__graph_add_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>}}` → 拿 `idea_id`
+1. `mcp__quant-mcp__graph_add_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>, angle_code:<G1 explore 触发角度,仅 explore 操作加>}}` → 拿 `idea_id`。**explore 必带 angle_code**(因子 angle_code 血缘靠它,漏带 → 标错)
 2. 把 new_edges 里所有 `<NEW>` 替换为 `idea_id`
 3. `mcp__quant-mcp__graph_add_edges {edges: <替换后的 new_edges>}`
 4. 若操作=resolve_contradiction:`mcp__quant-mcp__graph_mark_contradiction_resolved {edge_id:<触发边id>, idea_id}`

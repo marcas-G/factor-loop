@@ -31,7 +31,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 9
+CURRENT_VERSION = 10
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -85,6 +85,11 @@ def _add_angle_candidates(conn: sqlite3.Connection) -> None:
     db.ensure_angle_candidates_table(conn)
 
 
+def _add_ideas_angle_code(conn: sqlite3.Connection) -> None:
+    """v10 ideas.angle_code(信息角度血缘,因子回灌从这继承)。"""
+    db.ensure_ideas_angle_code(conn)
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -96,6 +101,7 @@ MIGRATIONS = [
     (7, "intuition_field", _add_intuition_field),
     (8, "anchor_text",     _add_anchor_text),
     (9, "angle_candidates", _add_angle_candidates),
+    (10, "ideas_angle_code", _add_ideas_angle_code),
 ]
 
 

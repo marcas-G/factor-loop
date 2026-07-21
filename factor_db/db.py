@@ -128,13 +128,17 @@ def add_factor(
             "INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)",
             (idea_id, xname),
         )
-        # angle_code 回灌(优先 idea 的 properties.angle):
+        # angle_code 回灌(优先 idea.angle_code 血缘,次 DERIVES_FROM properties.angle 兜底):
         a = conn.execute(
-            """SELECT json_extract(properties,'$.angle') FROM graph_edges
-               WHERE from_id=? AND edge_type='DERIVES_FROM'
-                 AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
-            (str(idea_id),),
+            "SELECT angle_code FROM ideas WHERE id=?", (idea_id,)
         ).fetchone()
+        if not (a and a[0]):
+            a = conn.execute(
+                """SELECT json_extract(properties,'$.angle') FROM graph_edges
+                   WHERE from_id=? AND edge_type='DERIVES_FROM'
+                     AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
+                (str(idea_id),),
+            ).fetchone()
         if a and a[0]:
             conn.execute(
                 "UPDATE factors SET angle_code=? WHERE xname=?", (a[0], xname)
@@ -1166,6 +1170,13 @@ def list_angle_candidates(conn, status: str | None = None) -> list[sqlite3.Row]:
             "SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC", (status,)
         ).fetchall()
     return conn.execute("SELECT * FROM angle_candidates ORDER BY tried_at DESC").fetchall()
+
+
+def ensure_ideas_angle_code(conn: sqlite3.Connection) -> None:
+    """补 ideas.angle_code 列(信息角度血缘)。v10。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ideas)")}
+    if "angle_code" not in cols:
+        conn.execute("ALTER TABLE ideas ADD COLUMN angle_code TEXT")
 
 
 def _map_monthly_icir(x: float | None) -> float:

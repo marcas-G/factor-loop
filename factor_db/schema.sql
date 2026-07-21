@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS ideas (
     support_score_computed_at TIMESTAMP,
     necessity_grade           TEXT,      -- 必然性分级: necessary|identification|conditional|draft（区分硬必然与可识别但非唯一）
     node_layer                TEXT DEFAULT 'HYPOTHESIS',  -- 知识图层: DERIVED(机制推导)|HYPOTHESIS(可算假设)；AXIOM 在 axioms 表
+    angle_code                TEXT,        -- 信息角度(explore 产时标;因子 angle_code 从这继承血缘,不靠关键词)
     FOREIGN KEY (parent_idea_id) REFERENCES ideas(id)
 );
 

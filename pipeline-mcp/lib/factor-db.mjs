@@ -81,7 +81,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -122,6 +122,7 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateIntuitionSchema();
   migrateAnchorTextSchema();
   migrateAngleCandidatesSchema();
+  migrateIdeasAngleSchema();
   return _db;
 }
 
@@ -392,12 +393,15 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     conn.prepare(
       `INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)`
     ).run(ideaId, xname);
-    // angle_code 回灌(优先 idea 的 properties.angle):
-    const a = conn.prepare(
-      `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
-       WHERE from_id=? AND edge_type='DERIVES_FROM'
-         AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
-    ).get(String(ideaId));
+    // angle_code 回灌(优先 idea.angle_code 血缘,次 DERIVES_FROM properties.angle 兜底):
+    let a = conn.prepare(`SELECT angle_code AS angle FROM ideas WHERE id=?`).get(ideaId);
+    if (!a || !a.angle) {
+      a = conn.prepare(
+        `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
+         WHERE from_id=? AND edge_type='DERIVES_FROM'
+           AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
+      ).get(String(ideaId));
+    }
     if (a && a.angle) {
       conn.prepare(`UPDATE factors SET angle_code=? WHERE xname=?`).run(a.angle, xname);
     }
@@ -1348,9 +1352,9 @@ export function addGraphNode({ table, data }) {
       ? (typeof data.argument_chain === "string" ? data.argument_chain : JSON.stringify(data.argument_chain))
       : null;
     const info = db().prepare(
-      `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer)
-       VALUES (?,?,'open',?,?,?)`
-    ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS");
+      `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer,angle_code)
+       VALUES (?,?,'open',?,?,?,?,?)`
+    ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS", data.angle_code ?? null);
     return Number(info.lastInsertRowid);
   }
   throw new Error(`addGraphNode 不支持表: ${table}`);
@@ -1407,6 +1411,14 @@ function migrateAngleCandidatesSchema() {
       reject_reason TEXT, nearest_existing TEXT,
       tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
     _db.exec("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)");
+  }
+}
+
+// ideas.angle_code(信息角度血缘 v10)
+function migrateIdeasAngleSchema() {
+  const cols = _db.prepare("PRAGMA table_info(ideas)").all().map((c) => c.name);
+  if (cols.length > 0 && !cols.includes("angle_code")) {
+    _db.exec("ALTER TABLE ideas ADD COLUMN angle_code TEXT");
   }
 }
 
