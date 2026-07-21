@@ -157,6 +157,9 @@ function setByPath(obj, dottedPath, value) {
     const nextKey = parts[i+1];
     const isNextNumeric = /^\d+$/.test(nextKey);
     if (cur[k] == null) cur[k] = isNextNumeric ? [] : {};
+    if (typeof cur[k] !== "object" || cur[k] === null) {
+      throw new Error(`路径 ${parts.slice(0, i + 1).join(".")} 已是 ${typeof cur[k]},不能下钻`);
+    }
     cur = cur[k];
   }
   cur[parts[parts.length - 1]] = value;

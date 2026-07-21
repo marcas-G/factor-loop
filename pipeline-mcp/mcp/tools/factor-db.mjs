@@ -3,6 +3,10 @@
 
 import * as factorDb from "../../lib/factor-db.mjs";
 
+// 输入校验(LLM 传浮点/负数 k 会 crash 或反直觉;空格 xname 含糊报错)
+const normK = (k, d) => Math.max(1, Math.floor(Number(k) || d));
+const normX = (x) => (typeof x === "string" ? x.trim() : x);
+
 export const factorSearchSchema = {
   name: "factor_search",
   description: "全文检索 lessons（trigram 分词，中文/英文混合 OK）。返回 type/scope/text 等字段。用于找历史经验。",
@@ -28,7 +32,7 @@ export const factorRecentLessonsSchema = {
   },
 };
 export async function factorRecentLessonsHandler({ k = 10 }) {
-  return factorDb.recentLessons(k);
+  return factorDb.recentLessons(normK(k, 10));
 }
 
 export const factorListSchema = {
@@ -40,7 +44,7 @@ export const factorListSchema = {
   },
 };
 export async function factorListHandler({ k = 20 }) {
-  return factorDb.recentFactors(k);
+  return factorDb.recentFactors(normK(k, 20));
 }
 
 export const factorDetailSchema = {
@@ -53,7 +57,7 @@ export const factorDetailSchema = {
   },
 };
 export async function factorDetailHandler({ xname }) {
-  return factorDb.getFactorDetail(xname);
+  return factorDb.getFactorDetail(normX(xname));
 }
 
 export const factorSimilarSchema = {

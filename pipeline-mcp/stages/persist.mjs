@@ -108,11 +108,13 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         const fromXname = factor.name;
         const toXname = written;
         if (fromXname !== toXname) {
+          // retry 路径 icir_delta 留空(原误传绝对 metrics.icir 当 delta 污染 iterations);
+          // 真演进 delta 由主路径 realizeIteration(B.icir - A.icir)算
           factorDb.addIteration(
             fromXname, toXname, ideaId,
             retryInfo.changes,
             "improved",
-            metrics.icir ?? null
+            null
           );
           console.log(`  [db] 迭代关系 ${fromXname} → ${toXname} (${retryInfo.changes?.slice(0, 60)})`);
         }

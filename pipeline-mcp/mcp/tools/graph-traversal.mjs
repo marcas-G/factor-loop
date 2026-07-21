@@ -130,6 +130,9 @@ export const addGraphNodeSchema = {
   },
 };
 export async function addGraphNodeHandler({ table, data }) {
+  if (!data || (table === "axioms" && !data.code) || (table === "ideas" && !data.text)) {
+    return { ok: false, error: "data 必填(axioms.code / ideas.text)" };
+  }
   return { id: factorDb.addGraphNode({ table, data }) };
 }
 
@@ -158,8 +161,11 @@ export const addGraphEdgesSchema = {
   },
 }
 export async function addGraphEdgesHandler({ edges }) {
+  if (!Array.isArray(edges) || edges.length === 0) {
+    return { ok: false, error: "edges 不能为空" };
+  }
   const ids = [];
-  for (const e of edges || []) ids.push(factorDb.addGraphEdge(e));
+  for (const e of edges) ids.push(factorDb.addGraphEdge(e));
   return { edge_ids: ids };
 }
 
