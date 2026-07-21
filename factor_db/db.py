@@ -51,6 +51,7 @@ VALID_STATUS = {"draft", "submitted", "evaluated", "failed", "dead_end"}
 # angle_code 自动推断(从 formula/tags 关键词 → angle_ontology code)
 # 解耦 angle 标注与 explore:所有因子落盘时自动标,不依赖 explore 产 idea 才标
 _ANGLE_KEYWORDS = [
+    ("imbalance_depth_profile", ["imbalancedepth"]),  # 新自发现角度:per-level imb 向量(优先于 book_imbalance 的宽泛 imbalance)
     ("book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]),
     ("add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]),
     ("add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]),

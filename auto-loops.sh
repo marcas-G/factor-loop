@@ -41,6 +41,7 @@ LOGROOT="$WORKDIR/logs/loops"
 PIDFILE="$LOGROOT/auto.pid"
 STOPFILE="$LOGROOT/STOP"
 MAXWAIT="${MAXWAIT:-2880}"                  # 单轮最多 2880*30s = 24h(平台排队不该放弃,给足兜底别误杀)
+RESUME_WAIT="${RESUME_WAIT:-1800}"          # 到量/异常(run 未 done+session 死)后等多久续传同 run,默认 1800s=30min
 ROUNDS="${ROUNDS:-0}"                       # 0=无限;ROUNDS=K 跑 K 轮自停
 
 mkdir -p "$LOGROOT"
@@ -116,19 +117,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 单车道循环:每轮一个全新 session,跑完销毁,开下一个
+# 单车道循环:每轮一个 session 跑 research-loop。
+# 到量/异常(run 未 done + session 死/超时)不丢弃不新开,等 RESUME_WAIT 后续传同 run
+# (research-loop 支持 run_id 续传),无限重试直到 done。
 run_lane() {
-  local lane="$1" sess="rloop$1" round=0 hit st before latest
+  local lane="$1" sess="rloop$1" round=0 hit st before latest resume=""
   # while 条件含 STOP 检查:收到 stop 后跑完当前轮回此处即退出,不开下一轮
   while [ ! -f "$STOPFILE" ] && { [ "$ROUNDS" -eq 0 ] || [ "$round" -lt "$ROUNDS" ]; }; do
     round=$((round+1))
-    echo "[$(date +%H:%M:%S)] 车道$lane === 第 $round 轮:开新 session ==="
+    if [ -n "$resume" ]; then
+      echo "[$(date +%H:%M:%S)] 车道$lane === 续传 run=$resume(到量恢复后)==="
+      before="$resume"
+    else
+      echo "[$(date +%H:%M:%S)] 车道$lane === 第 $round 轮:开新 session ==="
+      before=$(latest_run)
+    fi
     tmux kill-session -t "$sess" 2>/dev/null
     tmux new-session -d -s "$sess" -c "$WORKDIR" "claude --permission-mode bypassPermissions"
     sleep 5
-    before=$(latest_run)                       # 启动前最新 run(基准)
-    tmux send-keys -t "$sess" "/research-loop" Enter
-    # 轮询:等"比 before 新的 run"出现 且 status 变 done/paused
+    if [ -n "$resume" ]; then
+      tmux send-keys -t "$sess" "/research-loop $resume" Enter        # 续传同 run
+    else
+      tmux send-keys -t "$sess" "/research-loop" Enter                # 新 run
+    fi
+    # 轮询:等 run status 变 done/paused;或 session 死(到量退出)立即处理
     # 注意:此循环【不检查 STOP】——保证当前轮必跑完,这是 graceful 关闭的核心
     hit=0; st=""
     for ((t=0; t<MAXWAIT; t++)); do
@@ -140,11 +152,33 @@ run_lane() {
           done|paused) hit=1; echo "[$(date +%H:%M:%S)] 车道$lane 检测到 run=$latest status=$st"; break ;;
         esac
       fi
+      # session 死(claude 到量退出/崩溃)→ 立即处理,不等 MAXWAIT
+      if ! tmux has-session -t "$sess" 2>/dev/null; then
+        echo "[$(date +%H:%M:%S)] 车道$lane session 死(claude 异常,可能到量)"
+        break
+      fi
     done
     tmux kill-session -t "$sess" 2>/dev/null
-    echo "[$(date +%H:%M:%S)] 车道$lane 第 $round 轮结束($([ $hit = 1 ] && echo "完成 status=$st" || echo "超时兜底"))→ session 销毁"
+    # 判定:done/paused(正常完成)vs running(到量/异常 → 续传同 run,不丢弃)
+    if [ $hit = 1 ]; then
+      echo "[$(date +%H:%M:%S)] 车道$lane 第 $round 轮完成(status=$st)→ session 销毁"
+      resume=""
+    else
+      latest=$(latest_run)
+      st=$(get_status "$latest")
+      if [ "$st" = "running" ]; then
+        # 到量/异常:不丢弃,等 RESUME_WAIT 后续传同 run(无限重试到 done)
+        echo "[$(date +%H:%M:%S)] 车道$lane run=$latest status=running(到量/异常)→ 等 ${RESUME_WAIT}s 后续传同 run(不丢弃,无限重试)"
+        resume="$latest"
+        round=$((round-1))            # 续传同一轮,不计新轮
+        sleep "${RESUME_WAIT}"
+      else
+        echo "[$(date +%H:%M:%S)] 车道$lane 第 $round 轮超时兜底(status=$st)→ session 销毁"
+        resume=""
+      fi
+    fi
     [ -f "$STOPFILE" ] && { echo "[$(date +%H:%M:%S)] 车道$lane 检测到 STOP 标志,跑完本轮后退出"; break; }
-    sleep 6
+    [ -z "$resume" ] && sleep 6        # 正常下一轮间隔;续传已 sleep RESUME_WAIT 不再等
   done
   echo "[$(date +%H:%M:%S)] 车道$lane 退出(共 $round 轮)"
 }
