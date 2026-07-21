@@ -55,7 +55,18 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     const metrics = extractMetrics(evalMetrics);
     const isPass = verdict.verdict === "pass";
 
-    if (isPass) {
+    // 第4红线代码兜底:|screening.icir|<0.5 且无变换族救场 → 强制 fail(防 LLM 失稳放弱信号)
+    if (isPass && Math.abs(metrics.icir ?? 0) < 0.5) {
+      const tf = evalMetrics?.transform_family || {};
+      const hasRescue = Object.values(tf).some((v) => Math.abs(Number(v)) >= 0.05);
+      if (!hasRescue) {
+        verdict.verdict = "fail";
+        (verdict.key_weaknesses ||= []).push("代码兜底:|screening.icir|<0.5 且无变换族救场(某变换|IC|≥0.05),第4红线否决");
+        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(2)}<0.5,pass→fail`);
+      }
+    }
+
+    if (verdict.verdict === "pass") {
       // 写 factors + factor_evals + success_pattern lesson
       const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
       if (!written) {

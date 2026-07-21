@@ -548,6 +548,12 @@ def add_graph_edge(
         raise ValueError(f"from_table must be in {_NODE_PK}, got {from_table!r}")
     if to_table not in _NODE_PK:
         raise ValueError(f"to_table must be in {_NODE_PK}, got {to_table!r}")
+    # 节点存在性校验(防 LLM 写不存在的 xname/id,留孤儿边)
+    _PK = {"axioms": "id", "ideas": "id", "factors": "xname", "lessons": "id"}
+    if not conn.execute(f"SELECT 1 FROM {from_table} WHERE {_PK[from_table]}=?", (str(from_id),)).fetchone():
+        raise ValueError(f"from 节点 {from_table}:{from_id} 不存在")
+    if not conn.execute(f"SELECT 1 FROM {to_table} WHERE {_PK[to_table]}=?", (str(to_id),)).fetchone():
+        raise ValueError(f"to 节点 {to_table}:{to_id} 不存在")
     props = json.dumps(properties, ensure_ascii=False) if properties else None
     existing = conn.execute(
         """

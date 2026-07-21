@@ -1177,6 +1177,11 @@ export function addGraphEdge({ from_table, from_id, to_table, to_id, edge_type, 
   if (!NODE_PK[from_table]) throw new Error(`from_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${from_table}`);
   if (!NODE_PK[to_table]) throw new Error(`to_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${to_table}`);
   const fid = String(from_id), tid = String(to_id);
+  // 节点存在性校验(防 LLM 写不存在的 xname/id,留孤儿边)
+  if (!d.prepare(`SELECT 1 FROM ${from_table} WHERE ${NODE_PK[from_table]}=?`).get(fid))
+    throw new Error(`from 节点 ${from_table}:${fid} 不存在`);
+  if (!d.prepare(`SELECT 1 FROM ${to_table} WHERE ${NODE_PK[to_table]}=?`).get(tid))
+    throw new Error(`to 节点 ${to_table}:${tid} 不存在`);
   const exist = d.prepare(
     `SELECT id FROM graph_edges WHERE from_table=? AND from_id=? AND to_table=? AND to_id=? AND edge_type=?`
   ).get(from_table, fid, to_table, tid, edge_type);
