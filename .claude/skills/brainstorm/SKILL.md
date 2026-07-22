@@ -44,6 +44,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 | `factor_detail {xname}` | 单因子全貌：基本信息 + 最近 10 条 evals + 迭代链 + tags |
 | `factor_similar {xname, k}` | 给定 xname 找相似（要求因子已入库，brainstorm 一般用不上）|
 | `iteration_list_open {top_k, source_status?}` | **检索待接续的迭代建议**（open suggestions，按 priority 降序）。库内 pass 精进 / dead_end 重试的未兑现建议。有相关的就接续成候选，演进链往下长 |
+| `graph_angle_coverage {}` | **角度饱和度**(新>优核心):各信息角度的因子数/dead_end 数,标 unexplored/thin/partial/saturated。saturated=已挖透新候选大概率 IC 冗余;fresh=未探索更可能正交 |
 
 ## 全品种约束
 
@@ -56,6 +57,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - `factor_counts {}` — 看库规模
 - `factor_recent_lessons {k:10}` — 最近经验
 - `factor_list {k:20}` — 最近因子状态
+- `graph_angle_coverage {}` — **角度饱和度**(新>优核心输入):saturated 角度(已挖透,新候选大概率 IC 冗余)vs fresh(unexplored/thin,更可能正交)。候选方向据此
+- **冗余模式避雷**(D):从 recent_lessons 识别"冗余毙"的 dead_end(key_weaknesses 含"冗余"/"pearson"/"残差"),记"X 角度+Y 算子 → 已和 Z 因子 IC 冗余"模式——候选须避开(换算子/角度/信号源)
 
 ### 第 2 步 · 围绕 idea 检索
 
@@ -94,6 +97,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 4. `diff_check`：去掉关键 [维度] 后会退化成什么标准因子？本质差异在哪？
 5. `coord_usage`：本因子如何用 idea 中的研究要素（数据/算子/时间/关系/变换/状态）
 6. **接续优先**：若第 2 步检索到与 idea 相关的 open iteration 建议，至少 1 个候选应是接续候选（带 `iterates_from` + `suggestion_id`），并在 `coord_usage`/`diff_check` 里说明接续关系与差异点。没有相关 open 建议时，全部新造
+7. **角度新颖**(A·新>优):候选倾向 fresh/unexplored 角度(从 idea 的 angle 出发往未饱和子方向发散);落 saturated 角度的候选,`diff_check` 必须附"正交论证"——和同角度已有因子预期 IC 行为不同的具体依据(不同算子/不同 horizon/不同信号源)
+8. **冗余避雷**(D):候选须避开第1步捞到的"冗余模式"(X 角度+Y 算子→已和 Z 冗余),在 `db_research.found_redundancy` 记命中模式 + 说明本候选怎么避开(换算子/角度/信号源)
 
 ## 持久化（写完候选后必须做）
 
@@ -131,6 +136,7 @@ persist_candidates {
         "searched": ["检索词1", "检索词2"],
         "found_dead_ends": ["命中的 dead_end 教训或因子（如无写 [])"],
         "found_similar": ["命中的相似因子 xname（如无写 [])"],
+        "found_redundancy": ["命中的冗余模式(X 角度+Y 算子→冗余 vs Z)(如无写 [])"],
         "borrowed_from": "借鉴的具体因子/经验（一句话）"
       }
     }
