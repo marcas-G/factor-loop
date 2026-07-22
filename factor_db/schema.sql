@@ -268,7 +268,7 @@ GROUP BY m.symbol, m.y_horizon, f.status, i.necessity_grade;
 CREATE TABLE IF NOT EXISTS factor_ic_daily (
     factor_xname        TEXT NOT NULL,
     symbol              TEXT NOT NULL,
-    freq                TEXT NOT NULL,
+    freq                TEXT NOT NULL,   -- 参数化名(因子实例标识,非真频率);IC 对齐/冗余查询靠 (symbol, y_horizon, date) 跨 freq,不限 freq
     y_horizon           INTEGER NOT NULL,
     date                TEXT NOT NULL,
     ic                  REAL,
