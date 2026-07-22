@@ -22,8 +22,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - `factors` 表（每因子一行，xname 唯一）：xname, class_name, formula_text, params, status, latest_ic, latest_icir, latest_sharpe, latest_rank_ic, created_ts
   - status 枚举：
     - `draft` — 已写未评估
-    - `evaluated` — ICIR ≥ 1.5（强信号，算子可借鉴）
-    - `dead_end` — ICIR < 1.5（弱信号，方向避雷）
+    - `evaluated` — verdict=pass（正交新颖,通过判据,算子可借鉴演进；新>优:低 icir 弱信号只要不冗余也是 evaluated）
+    - `dead_end` — verdict=fail（冗余/纯噪声,方向避雷）
     - `failed` — 评估彻底失败（通常平台问题）
 - `factor_evals` 表（评估快照）：factor_xname, ts, ic_mean, icir, sharpe, rank_ic, eval_mode, raw_path
 - `iterations` 表（迭代链 from→to）：from_xname, to_xname, change_note, outcome, icir_delta
@@ -85,6 +85,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - `borrowed_from`：借鉴了哪个 success_pattern / evaluated 因子的算子
 
 ## 候选硬要求
+
+**🎯 新 > 优**:候选宁可预期指标低,也要在算子/角度上和 `found_similar` 实质差异——冗余在 assess/persist 硬卡(pearson≥0.6 / 残差<0.5),指标低(纯噪声<0.05 外)不否决。这里只做文本预筛,真正卡口在下游。
 
 1. 公式/伪代码必须可回测（写得出 .h 实现）
 2. `n_factors` 个候选必须差异化（算子/窗口/变换任一维度不同；品种**不作差异化维度**——每个候选都全品种适用）

@@ -20,6 +20,11 @@
 
 import * as factorDb from "../lib/factor-db.mjs";
 
+// 通过判据阈值(新 > 优:指标低可过,冗余必严)。集中常量,单一真相,便于调/test。
+const NOISE_ICIR_FLOOR = 0.05;        // 第4红线:|screening.icir|<此值(纯噪声,基本无任何水准信号)且无救场 → fail
+const REDUNDANCY_PEARSON_FAIL = 0.6;  // IC 行为冗余硬否决:max|pearson|>=此值 → fail
+const RESIDUAL_FAIL = 0.5;            // 残差 IC 强度硬否决:<此值(预测力多被库内线性解释=冗余) → fail
+
 // 从 eval_metrics 提取 metrics，适配三种历史结构：
 //   1. 嵌套（期望）：{core_metrics: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
 //   2. factor 1 扁平：{1_ic, 2_icir, 3_hit_rate, 4_train_test_consistency, ...}
@@ -56,14 +61,15 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     const isPass = verdict.verdict === "pass";
 
     // === 早期否决(不依赖入库数据,写库前判,省一次写) ===
-    // 第4红线:|screening.icir|<0.5 且无变换族救场 → fail(防 LLM 失稳放弱信号)
-    if (isPass && Math.abs(metrics.icir ?? 0) < 0.5) {
+    // 第4红线:|screening.icir|<NOISE_ICIR_FLOOR(纯噪声)且无变换族救场 → fail
+    // 新>优:弱信号(0.05–0.5)不否决,只毙纯噪声;指标低只要正交不冗余可过
+    if (isPass && Math.abs(metrics.icir ?? 0) < NOISE_ICIR_FLOOR) {
       const tf = evalMetrics?.transform_family || {};
       const hasRescue = Object.values(tf).some((v) => Math.abs(Number(v)) >= 0.05);
       if (!hasRescue) {
         verdict.verdict = "fail";
-        (verdict.key_weaknesses ||= []).push("代码兜底:|screening.icir|<0.5 且无变换族救场(某变换|IC|≥0.05),第4红线否决");
-        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(2)}<0.5,pass→fail`);
+        (verdict.key_weaknesses ||= []).push(`代码兜底:|screening.icir|<${NOISE_ICIR_FLOOR}(纯噪声)且无变换族救场,第4红线否决`);
+        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(3)}<${NOISE_ICIR_FLOOR},pass→fail`);
       }
     }
     // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
@@ -98,25 +104,25 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       // 入库后冗余/残差检查(依赖 IC 数据,因子已入库,icRefresh 先算 IC 向量使新因子可被检索)
       try { await factorDb.icRefreshFactor(written); }
       catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
-      // 冗余:max |pearson|>=0.7 → fail
+      // 冗余:max |pearson|>=REDUNDANCY_PEARSON_FAIL → fail(新>优:冗余必严)
       try {
-        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: 0.7 });
+        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: REDUNDANCY_PEARSON_FAIL });
         const topP = corr?.results?.[0];
-        if (topP && Math.abs(topP.pearson_approx ?? 0) >= 0.7) {
+        if (topP && Math.abs(topP.pearson_approx ?? 0) >= REDUNDANCY_PEARSON_FAIL) {
           verdict.verdict = "fail";
-          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=0.7,硬否决`);
+          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=${REDUNDANCY_PEARSON_FAIL},硬否决`);
           console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
         }
       } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
-      // 残差:<0.4 → fail(零新息)
+      // 残差:<RESIDUAL_FAIL → fail(预测力多被库内线性解释=冗余,零新息)
       try {
         const resid = await factorDb.residualIcStrength(written);
         const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
         if (strengths.length) {
           const minR = Math.min(...strengths);
-          if (minR < 0.4) {
+          if (minR < RESIDUAL_FAIL) {
             verdict.verdict = "fail";
-            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<0.4,零新息,硬否决`);
+            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<${RESIDUAL_FAIL},零新息,硬否决`);
             console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
           }
         }

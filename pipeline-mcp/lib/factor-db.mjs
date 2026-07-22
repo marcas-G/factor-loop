@@ -629,13 +629,13 @@ export function reopenIteration(iterId) {
 }
 
 // brainstorm 调:检索待接续建议,按 priority 排序。
-// priority = (evaluated?2.0:0.5) × max(icir,0.1) × exp(-age_days/14) —— pass 精进优先于 dead_end 重试,强因子优先,老建议降权。
+// priority = (evaluated?2.0:0.5) × exp(-age_days/14) —— pass 精进优先于 dead_end 重试,老建议降权。
+// 新>优:不按 icir 排序(去掉 max(icir,0.1) 乘子)——新颖弱信号(evaluated 但低 icir)与强信号同等可接续。
 export function listOpenIterations({ topK = 5, sourceStatus = null } = {}) {
   const d = db();
   const sql = `SELECT i.id AS suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id, i.iterable, i.ts,
             f.status AS from_status, f.latest_icir AS from_icir, f.formula_text AS from_formula,
             (CASE WHEN f.status = 'evaluated' THEN 2.0 ELSE 0.5 END)
-              * MAX(COALESCE(f.latest_icir, 0), 0.1)
               * EXP(-(julianday('now') - julianday(i.ts)) / 14.0) AS priority
      FROM iterations i
      JOIN factors f ON f.xname = i.from_xname
@@ -1103,7 +1103,7 @@ export async function semanticSearchFactors(queryText, k = 10) {
 // IC 行为冗余检索：找和 target 因子 IC 序列相似的库内因子（预测能力同涨同跌 = 真冗余）。
 // 比 formula 文本语义检索更贴近业务；evaluate 用它量化"与已有因子相关性"。
 export async function icCorrelateFactors(targetFactor, opts = {}) {
-  const { symbol, freq, yHorizon, k = 20, minAbsPearson = 0.5, top = 15 } = opts;
+  const { symbol, freq, yHorizon, k = 20, minAbsPearson = 0.6, top = 15 } = opts;
   const { runPy } = await import("../infra/run-py.mjs");
   const script = path.join(CWD, "factor_db", "ic_correlate.py");
   const args = [
