@@ -1630,7 +1630,9 @@ def run_analysis_batch(base_dir, mode, start_col, highlight_last_n,
                 bt = best_tf.get('best_transform')
                 bt_ic = best_tf.get('best_transform_ic')
                 orig_ic = best_tf.get('orig_ic')
-                print(f"{len(transform_rows)} 个因子 (最强变换={bt}, IC={bt_ic:.4f} vs 原始={orig_ic:.4f})")
+                bt_ic_s = f"{bt_ic:.4f}" if bt_ic is not None else "N/A"
+                orig_ic_s = f"{orig_ic:.4f}" if orig_ic is not None else "N/A"
+                print(f"{len(transform_rows)} 个因子 (最强变换={bt}, IC={bt_ic_s} vs 原始={orig_ic_s})")
                 all_summary_rows.extend([
                     {"factor": fname, "analysis": "Transform Family", "metric": "orig_ic", "value": best_tf.get('orig_ic')},
                     {"factor": fname, "analysis": "Transform Family", "metric": "delta_ic", "value": best_tf.get('delta_ic')},

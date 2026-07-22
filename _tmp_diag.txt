@@ -1,0 +1,37 @@
+=== df ===
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           126G  126G     0 100% /tmp
+/dev/nvme0n1p2  3.5T  1.5T  1.9T  44% /
+=== /tmp 大头 ===
+2.5G	/tmp/pf_echo.data
+1.8G	/tmp/research-run-2026-07-20-wtx44l
+1.8G	/tmp/research-run-2026-07-20-01l8ha
+1.8G	/tmp/research-run-2026-07-18-pn5r0x
+1.8G	/tmp/research-run-2026-07-17-whktnq
+1.8G	/tmp/research-run-2026-07-17-gwknkl
+1.7G	/tmp/research-run-2026-07-20-fp5s0i
+1.7G	/tmp/research-run-2026-07-18-x4x7ev
+1.7G	/tmp/research-run-2026-07-17-vdtmn6
+1.6G	/tmp/research-run-2026-07-20-4xlzfr
+1.6G	/tmp/research-run-2026-07-20-3t62v6
+1.6G	/tmp/research-run-2026-07-17-hpldut
+1.5G	/tmp/research-run-2026-07-21-uxmf8x
+1.5G	/tmp/research-run-2026-07-21-pqjoqi
+1.5G	/tmp/research-run-2026-07-21-nirv70
+=== research-run 旧目录 ===
+1.8G	/tmp/research-run-2026-07-20-wtx44l
+1.8G	/tmp/research-run-2026-07-20-01l8ha
+1.8G	/tmp/research-run-2026-07-18-pn5r0x
+1.8G	/tmp/research-run-2026-07-17-whktnq
+1.8G	/tmp/research-run-2026-07-17-gwknkl
+1.7G	/tmp/research-run-2026-07-20-fp5s0i
+1.7G	/tmp/research-run-2026-07-18-x4x7ev
+1.7G	/tmp/research-run-2026-07-17-vdtmn6
+1.6G	/tmp/research-run-2026-07-20-4xlzfr
+1.6G	/tmp/research-run-2026-07-20-3t62v6
+=== claude tasks ===
+0	/tmp/claude-1005
+0	/tmp/claude-1006
+0	/tmp/claude-1007
+4.4M	/tmp/claude-1008
+0	/tmp/claude-1009
