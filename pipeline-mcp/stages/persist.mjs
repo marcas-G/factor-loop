@@ -66,6 +66,43 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
     }
 
+    // 评估硬兜底:冗余/残差/数据缺(代码层校验,不靠 LLM 自觉)
+    if (verdict.verdict === "pass") {
+      try { await factorDb.icRefreshFactor(written); }
+      catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
+      // 冗余:max |pearson|>=0.7 → fail
+      try {
+        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: 0.7 });
+        const topP = corr?.results?.[0];
+        if (topP && Math.abs(topP.pearson_approx ?? 0) >= 0.7) {
+          verdict.verdict = "fail";
+          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=0.7,硬否决`);
+          console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
+        }
+      } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
+      // 残差:<0.4 → fail(零新息)
+      try {
+        const resid = await factorDb.residualIcStrength(written);
+        const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
+        if (strengths.length) {
+          const minR = Math.min(...strengths);
+          if (minR < 0.4) {
+            verdict.verdict = "fail";
+            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<0.4,零新息,硬否决`);
+            console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
+          }
+        }
+      } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
+      // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
+      const dbm = evalMetrics?.deep_best || {};
+      const deepOk = Object.values(dbm).some((v) => v != null);
+      if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
+        verdict.verdict = "fail";
+        (verdict.key_weaknesses ||= []).push("代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决");
+        console.log(`  [db] 评估不全硬否决: deepbest None + ICIR=${metrics.icir}<3`);
+      }
+    }
+
     if (verdict.verdict === "pass") {
       // 写 factors + factor_evals + success_pattern lesson
       const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });

@@ -215,7 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_ft_tag ON factor_tags(tag_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS factor_ic_vec USING vec0(
     factor_xname TEXT,
     symbol       TEXT,
-    freq         TEXT,
+    freq         TEXT,         -- 参数化名(因子实例标识,非真频率);IC 对齐跨 freq(同 symbol+horizon+date)
     y_horizon    INTEGER,
     embedding    FLOAT[250]
 );
