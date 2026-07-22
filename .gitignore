@@ -63,3 +63,4 @@ __pycache__/
 
 # ===== 日志 =====
 *.log
+_tmp_diag.txt
