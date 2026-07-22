@@ -34,7 +34,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -237,7 +237,7 @@ def clear_existing(conn, factor_xname: str | None) -> None:
 
 
 def write_vectors(conn, factor_xname: str, items: list[dict]) -> int:
-    now = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds") + "Z"
     written = 0
     for it in items:
         if it.get("vec") is None:

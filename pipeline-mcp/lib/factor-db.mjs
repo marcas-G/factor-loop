@@ -27,6 +27,7 @@ const VALID_LESSON_SCOPE = ["factor"];
 
 // angle_code 自动推断(从 formula/tags/xname 关键词 → angle_ontology code)。与 db.py infer_angle_code 双端一致。
 const _ANGLE_KEYWORDS = [
+  ["imbalance_depth_profile", ["imbalancedepth"]],  // 新自发现角度:per-level imb 向量(优先于 book_imbalance
   ["book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]],
   ["add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]],
   ["add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]],
@@ -80,7 +81,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 10;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -119,6 +120,9 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateSchemaVersion();
   migrateQualitySchema();
   migrateIntuitionSchema();
+  migrateAnchorTextSchema();
+  migrateAngleCandidatesSchema();
+  migrateIdeasAngleSchema();
   return _db;
 }
 
@@ -389,12 +393,15 @@ print(json.dumps(m, default=str, ensure_ascii=False))" "${hFilePath}"`,
     conn.prepare(
       `INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)`
     ).run(ideaId, xname);
-    // angle_code 回灌(优先 idea 的 properties.angle):
-    const a = conn.prepare(
-      `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
-       WHERE from_id=? AND edge_type='DERIVES_FROM'
-         AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
-    ).get(String(ideaId));
+    // angle_code 回灌(优先 idea.angle_code 血缘,次 DERIVES_FROM properties.angle 兜底):
+    let a = conn.prepare(`SELECT angle_code AS angle FROM ideas WHERE id=?`).get(ideaId);
+    if (!a || !a.angle) {
+      a = conn.prepare(
+        `SELECT json_extract(properties,'$.angle') AS angle FROM graph_edges
+         WHERE from_id=? AND edge_type='DERIVES_FROM'
+           AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1`
+      ).get(String(ideaId));
+    }
     if (a && a.angle) {
       conn.prepare(`UPDATE factors SET angle_code=? WHERE xname=?`).run(a.angle, xname);
     }
@@ -456,6 +463,21 @@ export async function generateEmbedding(xname) {
   if (!xname) return { ok: false, error: "xname 为空" };
   const { runPy } = await import("../infra/run-py.mjs");
   const script = path.join(CWD, "factor_db", "gen_embeddings.py");
+  const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    stdout_tail: (result.stdout || "").slice(-300),
+    stderr_head: (result.stderr || "").slice(0, 200),
+  };
+}
+
+// 生成 anchor_text(固定四要素模板,embedding 锚定文本):spawn ai_generate_anchor.py --xname。
+// 必须在 generateEmbedding 前调(emb 的 build_text 读 anchor_text)。失败降级不抛,后续可补。
+export async function generateAnchorText(xname) {
+  if (!xname) return { ok: false, error: "xname 为空" };
+  const { runPy } = await import("../infra/run-py.mjs");
+  const script = path.join(CWD, "factor_db", "ai_generate_anchor.py");
   const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
   return {
     ok: result.exitCode === 0,
@@ -1158,7 +1180,14 @@ export function addAxiom({ code, category, statement, formal_form = null, expect
 // 图边：幂等（UNIQUE 四元组+类型）。返回 edge id。
 export function addGraphEdge({ from_table, from_id, to_table, to_id, edge_type, weight = null, properties = null }) {
   const d = db();
+  if (!NODE_PK[from_table]) throw new Error(`from_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${from_table}`);
+  if (!NODE_PK[to_table]) throw new Error(`to_table 必须在白名单 ${Object.keys(NODE_PK)}, got ${to_table}`);
   const fid = String(from_id), tid = String(to_id);
+  // 节点存在性校验(防 LLM 写不存在的 xname/id,留孤儿边)
+  if (!d.prepare(`SELECT 1 FROM ${from_table} WHERE ${NODE_PK[from_table]}=?`).get(fid))
+    throw new Error(`from 节点 ${from_table}:${fid} 不存在`);
+  if (!d.prepare(`SELECT 1 FROM ${to_table} WHERE ${NODE_PK[to_table]}=?`).get(tid))
+    throw new Error(`to 节点 ${to_table}:${tid} 不存在`);
   const exist = d.prepare(
     `SELECT id FROM graph_edges WHERE from_table=? AND from_id=? AND to_table=? AND to_id=? AND edge_type=?`
   ).get(from_table, fid, to_table, tid, edge_type);
@@ -1323,9 +1352,9 @@ export function addGraphNode({ table, data }) {
       ? (typeof data.argument_chain === "string" ? data.argument_chain : JSON.stringify(data.argument_chain))
       : null;
     const info = db().prepare(
-      `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer)
-       VALUES (?,?,'open',?,?,?)`
-    ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS");
+      `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer,angle_code)
+       VALUES (?,?,'open',?,?,?,?,?)`
+    ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS", data.angle_code ?? null);
     return Number(info.lastInsertRowid);
   }
   throw new Error(`addGraphNode 不支持表: ${table}`);
@@ -1354,7 +1383,7 @@ function migrateQualitySchema() {
   }
 }
 
-// factors.intuition(语义意图描述,embedding 主原料 v7)
+// factors.intuition(语义意图描述,研究用 v7)
 function migrateIntuitionSchema() {
   const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
   if (fcols.length > 0 && !fcols.includes("intuition")) {
@@ -1362,9 +1391,61 @@ function migrateIntuitionSchema() {
   }
 }
 
+// factors.anchor_text(embedding 锚定文本,固定四要素模板生成 v8)
+function migrateAnchorTextSchema() {
+  const fcols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (fcols.length > 0 && !fcols.includes("anchor_text")) {
+    _db.exec("ALTER TABLE factors ADD COLUMN anchor_text TEXT");
+  }
+}
+
+// angle_candidates(angle 自发现候选记录,防归纳循环 v9)
+function migrateAngleCandidatesSchema() {
+  const exists = _db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='angle_candidates'").get();
+  if (!exists) {
+    _db.exec(`CREATE TABLE IF NOT EXISTS angle_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL,
+      field_family TEXT, extraction TEXT, signal_target TEXT, theory_axiom TEXT,
+      description TEXT, novelty_argument TEXT, trigger_angle TEXT,
+      status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+      reject_reason TEXT, nearest_existing TEXT,
+      tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)");
+  }
+}
+
+// ideas.angle_code(信息角度血缘 v10)
+function migrateIdeasAngleSchema() {
+  const cols = _db.prepare("PRAGMA table_info(ideas)").all().map((c) => c.name);
+  if (cols.length > 0 && !cols.includes("angle_code")) {
+    _db.exec("ALTER TABLE ideas ADD COLUMN angle_code TEXT");
+  }
+}
+
 export function addAngle({ code, name, field_family, extraction, signal_target = null, theory_axiom = null, description = null }) {
   _db.prepare(`INSERT OR IGNORE INTO angle_ontology (code,name,field_family,extraction,signal_target,theory_axiom,description) VALUES (?,?,?,?,?,?,?)`)
     .run(code, name, field_family, extraction, signal_target, theory_axiom, description);
+}
+
+// angle_candidates CRUD(angle 自发现候选记录,防归纳循环)
+export function addAngleCandidate({ code, field_family = null, extraction = null, signal_target = null,
+  theory_axiom = null, description = null, novelty_argument = null, trigger_angle = null, status = "proposed" }) {
+  return Number(_db.prepare(
+    `INSERT INTO angle_candidates (code,field_family,extraction,signal_target,theory_axiom,description,novelty_argument,trigger_angle,status)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(code, field_family, extraction, signal_target, theory_axiom, description, novelty_argument, trigger_angle, status).lastInsertRowid);
+}
+
+export function updateAngleCandidate(id, { status, reject_reason = null, nearest_existing = null }) {
+  _db.prepare(`UPDATE angle_candidates SET status=?, reject_reason=?, nearest_existing=? WHERE id=?`)
+    .run(status, reject_reason, nearest_existing, id);
+}
+
+export function listAngleCandidates({ status = null } = {}) {
+  const d = db();
+  return status
+    ? d.prepare("SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC").all(status)
+    : d.prepare("SELECT * FROM angle_candidates ORDER BY tried_at DESC").all();
 }
 
 export function tagFactorAngle({ xname, angle_code }) {
@@ -1456,6 +1537,8 @@ export function selectGraphOperation() {
     generalize: Math.min(1.0, maxCluster / _CLUSTER_SCALE),
     fill: Math.min(1.0, nGaps / _GAP_SCALE),
     explore: (nFresh / total) * (nSaturated / total),
+    // angle_discovery:explore 卡(nFresh==0)+ 饱和多 → 该发现新角度,突破预定义语言边界
+    angle_discovery: nFresh === 0 ? (nSaturated / total) : 0,
   };
 
   // diversity bonus + score

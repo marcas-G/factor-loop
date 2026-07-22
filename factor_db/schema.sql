@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS factors (
     angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
     quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
     quality_grade    TEXT,         -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
-    intuition        TEXT          -- 语义意图描述(机制/利润来源/信息源/预测),embedding 主原料
+    intuition        TEXT,         -- 语义意图描述(研究用,带 idea#/上下文;人看)
+    anchor_text      TEXT          -- embedding 锚定文本(固定四要素模板生成,检索专用)
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS ideas (
     support_score_computed_at TIMESTAMP,
     necessity_grade           TEXT,      -- 必然性分级: necessary|identification|conditional|draft（区分硬必然与可识别但非唯一）
     node_layer                TEXT DEFAULT 'HYPOTHESIS',  -- 知识图层: DERIVED(机制推导)|HYPOTHESIS(可算假设)；AXIOM 在 axioms 表
+    angle_code                TEXT,        -- 信息角度(explore 产时标;因子 angle_code 从这继承血缘,不靠关键词)
     FOREIGN KEY (parent_idea_id) REFERENCES ideas(id)
 );
 
@@ -142,6 +144,8 @@ CREATE TABLE IF NOT EXISTS iterations (
     outcome     TEXT CHECK (outcome IN ('improved','declined','neutral')),
     icir_delta  REAL,
     ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status      TEXT NOT NULL DEFAULT 'realized',
+    iterable    INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (from_xname) REFERENCES factors(xname),
     FOREIGN KEY (to_xname)   REFERENCES factors(xname),
     FOREIGN KEY (idea_id)    REFERENCES ideas(id)
@@ -211,7 +215,7 @@ CREATE INDEX IF NOT EXISTS idx_ft_tag ON factor_tags(tag_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS factor_ic_vec USING vec0(
     factor_xname TEXT,
     symbol       TEXT,
-    freq         TEXT,
+    freq         TEXT,         -- 参数化名(因子实例标识,非真频率);IC 对齐跨 freq(同 symbol+horizon+date)
     y_horizon    INTEGER,
     embedding    FLOAT[250]
 );
@@ -264,7 +268,7 @@ GROUP BY m.symbol, m.y_horizon, f.status, i.necessity_grade;
 CREATE TABLE IF NOT EXISTS factor_ic_daily (
     factor_xname        TEXT NOT NULL,
     symbol              TEXT NOT NULL,
-    freq                TEXT NOT NULL,
+    freq                TEXT NOT NULL,   -- 参数化名(因子实例标识,非真频率);IC 对齐/冗余查询靠 (symbol, y_horizon, date) 跨 freq,不限 freq
     y_horizon           INTEGER NOT NULL,
     date                TEXT NOT NULL,
     ic                  REAL,
@@ -335,6 +339,26 @@ CREATE TABLE IF NOT EXISTS angle_ontology (
     description   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family);
+
+-- ============ angle_candidates（angle 自发现候选记录,防归纳循环）============
+-- meta-angle-discoverer 产候选 → proposed;reviewer accept → accepted(并 addAngle 入 angle_ontology);
+-- reject → rejected(reject_reason)。下次 meta-angle-discoverer 查 rejected 已试维度,避免重产相似。
+CREATE TABLE IF NOT EXISTS angle_candidates (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    code              TEXT NOT NULL,
+    field_family      TEXT,
+    extraction        TEXT,
+    signal_target     TEXT,
+    theory_axiom      TEXT,
+    description       TEXT,
+    novelty_argument  TEXT,
+    trigger_angle     TEXT,                -- 从哪个 saturated 角度归纳(book_imbalance 等)
+    status            TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+    reject_reason     TEXT,                -- reviewer reject reason(reskin/weak_support/ungrounded)
+    nearest_existing  TEXT,                -- reviewer 说最像的现有角度
+    tried_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status);
 
 -- ============ schema_version（schema 版本追踪）============
 -- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。

@@ -32,7 +32,7 @@ function extractMetrics(evalMetrics) {
     ic_mean: fromScreening.ic_mean ?? evalMetrics.ic_mean ?? evalMetrics["1_ic"] ?? null,
     icir: fromScreening.icir ?? evalMetrics.icir ?? evalMetrics["2_icir"] ?? null,
     sharpe: fromDeep.conditional_sharpe ?? evalMetrics.bucket_annualized_sharpe?.["@1s"] ?? null,
-    rank_ic: fromDeep.rank_ic_max ?? null,
+    rank_ic: fromScreening.spearman ?? fromDeep.rank_ic_max ?? null,
   };
 }
 
@@ -55,7 +55,55 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     const metrics = extractMetrics(evalMetrics);
     const isPass = verdict.verdict === "pass";
 
-    if (isPass) {
+    // 第4红线代码兜底:|screening.icir|<0.5 且无变换族救场 → 强制 fail(防 LLM 失稳放弱信号)
+    if (isPass && Math.abs(metrics.icir ?? 0) < 0.5) {
+      const tf = evalMetrics?.transform_family || {};
+      const hasRescue = Object.values(tf).some((v) => Math.abs(Number(v)) >= 0.05);
+      if (!hasRescue) {
+        verdict.verdict = "fail";
+        (verdict.key_weaknesses ||= []).push("代码兜底:|screening.icir|<0.5 且无变换族救场(某变换|IC|≥0.05),第4红线否决");
+        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(2)}<0.5,pass→fail`);
+      }
+    }
+
+    // 评估硬兜底:冗余/残差/数据缺(代码层校验,不靠 LLM 自觉)
+    if (verdict.verdict === "pass") {
+      try { await factorDb.icRefreshFactor(written); }
+      catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
+      // 冗余:max |pearson|>=0.7 → fail
+      try {
+        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: 0.7 });
+        const topP = corr?.results?.[0];
+        if (topP && Math.abs(topP.pearson_approx ?? 0) >= 0.7) {
+          verdict.verdict = "fail";
+          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=0.7,硬否决`);
+          console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
+        }
+      } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
+      // 残差:<0.4 → fail(零新息)
+      try {
+        const resid = await factorDb.residualIcStrength(written);
+        const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
+        if (strengths.length) {
+          const minR = Math.min(...strengths);
+          if (minR < 0.4) {
+            verdict.verdict = "fail";
+            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<0.4,零新息,硬否决`);
+            console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
+          }
+        }
+      } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
+      // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
+      const dbm = evalMetrics?.deep_best || {};
+      const deepOk = Object.values(dbm).some((v) => v != null);
+      if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
+        verdict.verdict = "fail";
+        (verdict.key_weaknesses ||= []).push("代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决");
+        console.log(`  [db] 评估不全硬否决: deepbest None + ICIR=${metrics.icir}<3`);
+      }
+    }
+
+    if (verdict.verdict === "pass") {
       // 写 factors + factor_evals + success_pattern lesson
       const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
       if (!written) {
@@ -72,6 +120,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
 
       // 三件套兜底：.h 无 frontmatter 时从 state 补 formula_text/tags；再补 emb（新因子入库补全）
       factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      let anchorOk = false;
+      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
       let embOk = false;
       try { embOk = (await factorDb.generateEmbedding(written)).ok; }
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
@@ -105,11 +156,13 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         const fromXname = factor.name;
         const toXname = written;
         if (fromXname !== toXname) {
+          // retry 路径 icir_delta 留空(原误传绝对 metrics.icir 当 delta 污染 iterations);
+          // 真演进 delta 由主路径 realizeIteration(B.icir - A.icir)算
           factorDb.addIteration(
             fromXname, toXname, ideaId,
             retryInfo.changes,
             "improved",
-            metrics.icir ?? null
+            null
           );
           console.log(`  [db] 迭代关系 ${fromXname} → ${toXname} (${retryInfo.changes?.slice(0, 60)})`);
         }
@@ -133,6 +186,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
 
       // 三件套兜底 + emb（dead_end 因子也入库，补全以便检索/避雷）
       factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      let anchorOk = false;
+      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
       let embOk = false;
       try { embOk = (await factorDb.generateEmbedding(written)).ok; }
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }

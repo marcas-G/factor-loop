@@ -51,6 +51,7 @@ VALID_STATUS = {"draft", "submitted", "evaluated", "failed", "dead_end"}
 # angle_code 自动推断(从 formula/tags 关键词 → angle_ontology code)
 # 解耦 angle 标注与 explore:所有因子落盘时自动标,不依赖 explore 产 idea 才标
 _ANGLE_KEYWORDS = [
+    ("imbalance_depth_profile", ["imbalancedepth"]),  # 新自发现角度:per-level imb 向量(优先于 book_imbalance 的宽泛 imbalance)
     ("book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]),
     ("add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]),
     ("add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]),
@@ -94,6 +95,7 @@ def add_factor(
     idea_id: int | None = None,
     created_ts: str | None = None,
     skip_if_exists: bool = True,
+    tags: Iterable[str] | None = None,
 ) -> bool:
     """新增因子。返回 True 表示新增，False 表示已存在跳过。"""
     if status not in VALID_STATUS:
@@ -126,13 +128,17 @@ def add_factor(
             "INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)",
             (idea_id, xname),
         )
-        # angle_code 回灌(优先 idea 的 properties.angle):
+        # angle_code 回灌(优先 idea.angle_code 血缘,次 DERIVES_FROM properties.angle 兜底):
         a = conn.execute(
-            """SELECT json_extract(properties,'$.angle') FROM graph_edges
-               WHERE from_id=? AND edge_type='DERIVES_FROM'
-                 AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
-            (str(idea_id),),
+            "SELECT angle_code FROM ideas WHERE id=?", (idea_id,)
         ).fetchone()
+        if not (a and a[0]):
+            a = conn.execute(
+                """SELECT json_extract(properties,'$.angle') FROM graph_edges
+                   WHERE from_id=? AND edge_type='DERIVES_FROM'
+                     AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
+                (str(idea_id),),
+            ).fetchone()
         if a and a[0]:
             conn.execute(
                 "UPDATE factors SET angle_code=? WHERE xname=?", (a[0], xname)
@@ -142,7 +148,7 @@ def add_factor(
         "SELECT angle_code FROM factors WHERE xname=?", (xname,)
     ).fetchone()
     if not (cur_angle and cur_angle[0]):
-        inferred = infer_angle_code(formula_text, None, xname)
+        inferred = infer_angle_code(formula_text, tags, xname)
         if inferred:
             conn.execute(
                 "UPDATE factors SET angle_code=? WHERE xname=?", (inferred, xname)
@@ -542,6 +548,17 @@ def add_graph_edge(
     """写一条图边。幂等（UNIQUE 约束，重复返回已有 id）。from_id/to_id 接受 str/int。"""
     if edge_type not in VALID_EDGE_TYPES:
         raise ValueError(f"edge_type must be {VALID_EDGE_TYPES}, got {edge_type!r}")
+    _NODE_PK = ("axioms", "ideas", "factors", "lessons")
+    if from_table not in _NODE_PK:
+        raise ValueError(f"from_table must be in {_NODE_PK}, got {from_table!r}")
+    if to_table not in _NODE_PK:
+        raise ValueError(f"to_table must be in {_NODE_PK}, got {to_table!r}")
+    # 节点存在性校验(防 LLM 写不存在的 xname/id,留孤儿边)
+    _PK = {"axioms": "id", "ideas": "id", "factors": "xname", "lessons": "id"}
+    if not conn.execute(f"SELECT 1 FROM {from_table} WHERE {_PK[from_table]}=?", (str(from_id),)).fetchone():
+        raise ValueError(f"from 节点 {from_table}:{from_id} 不存在")
+    if not conn.execute(f"SELECT 1 FROM {to_table} WHERE {_PK[to_table]}=?", (str(to_id),)).fetchone():
+        raise ValueError(f"to 节点 {to_table}:{to_id} 不存在")
     props = json.dumps(properties, ensure_ascii=False) if properties else None
     existing = conn.execute(
         """
@@ -779,7 +796,10 @@ def mark_contradiction_resolved(
     row = conn.execute(
         "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
     ).fetchone()
-    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    try:
+        props = json.loads(row["properties"]) if row and row["properties"] else {}
+    except Exception:
+        props = {}
     props["resolved_by"] = idea_id
     conn.execute(
         "UPDATE graph_edges SET properties = ? WHERE id = ?",
@@ -797,7 +817,10 @@ def mark_contradiction_bounded(
     row = conn.execute(
         "SELECT properties FROM graph_edges WHERE id = ?", (edge_id,)
     ).fetchone()
-    props = json.loads(row["properties"]) if row and row["properties"] else {}
+    try:
+        props = json.loads(row["properties"]) if row and row["properties"] else {}
+    except Exception:
+        props = {}
     props["resolution"] = "bounded"
     props["regime"] = regime
     props["reason"] = reason
@@ -1086,10 +1109,74 @@ def ensure_quality_fields(conn: sqlite3.Connection) -> None:
 
 
 def ensure_intuition_field(conn: sqlite3.Connection) -> None:
-    """补 factors.intuition 列(语义意图描述,embedding 主原料)。v7 intuition_field。"""
+    """补 factors.intuition 列(语义意图描述,研究用)。v7 intuition_field。"""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
     if "intuition" not in cols:
         conn.execute("ALTER TABLE factors ADD COLUMN intuition TEXT")
+
+
+def ensure_anchor_text_field(conn: sqlite3.Connection) -> None:
+    """补 factors.anchor_text 列(embedding 锚定文本,固定四要素模板生成)。v8 anchor_text。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "anchor_text" not in cols:
+        conn.execute("ALTER TABLE factors ADD COLUMN anchor_text TEXT")
+
+
+def ensure_angle_candidates_table(conn: sqlite3.Connection) -> None:
+    """建 angle_candidates 表(angle 自发现候选记录,防归纳循环)。v9 angle_candidates。"""
+    tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "angle_candidates" not in tabs:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS angle_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL,
+                field_family TEXT, extraction TEXT, signal_target TEXT, theory_axiom TEXT,
+                description TEXT, novelty_argument TEXT, trigger_angle TEXT,
+                status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
+                reject_reason TEXT, nearest_existing TEXT,
+                tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)")
+
+
+def add_angle_candidate(conn, *, code, field_family=None, extraction=None, signal_target=None,
+                        theory_axiom=None, description=None, novelty_argument=None,
+                        trigger_angle=None, status="proposed") -> int:
+    """写一条 angle 自发现候选(proposed),返回 id。"""
+    cur = conn.execute(
+        """INSERT INTO angle_candidates
+           (code, field_family, extraction, signal_target, theory_axiom, description,
+            novelty_argument, trigger_angle, status)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (code, field_family, extraction, signal_target, theory_axiom, description,
+         novelty_argument, trigger_angle, status),
+    )
+    return int(cur.lastrowid)
+
+
+def update_angle_candidate(conn, candidate_id: int, *, status: str,
+                           reject_reason: str | None = None,
+                           nearest_existing: str | None = None) -> None:
+    """更新候选状态(accept→accepted / reject→rejected + reason)。"""
+    conn.execute(
+        """UPDATE angle_candidates SET status=?, reject_reason=?, nearest_existing=? WHERE id=?""",
+        (status, reject_reason, nearest_existing, candidate_id),
+    )
+
+
+def list_angle_candidates(conn, status: str | None = None) -> list[sqlite3.Row]:
+    """列候选(可按 status 过滤)。meta-angle-discoverer 查 rejected 防循环用。"""
+    if status:
+        return conn.execute(
+            "SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC", (status,)
+        ).fetchall()
+    return conn.execute("SELECT * FROM angle_candidates ORDER BY tried_at DESC").fetchall()
+
+
+def ensure_ideas_angle_code(conn: sqlite3.Connection) -> None:
+    """补 ideas.angle_code 列(信息角度血缘)。v10。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ideas)")}
+    if "angle_code" not in cols:
+        conn.execute("ALTER TABLE ideas ADD COLUMN angle_code TEXT")
 
 
 def _map_monthly_icir(x: float | None) -> float:

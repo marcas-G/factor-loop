@@ -10,7 +10,8 @@
   v4 angle        信息角度元层 angle_ontology + factors.angle_code
   v5 rename_eval_metrics  factor_evals.seven_dim → eval_metrics(消七维命名残留)
   v6 quality_fields  factors.quality_score/quality_grade(多指标聚合分,方案1+4)
-  v7 intuition_field factors.intuition(语义意图描述,embedding 主原料)
+  v7 intuition_field factors.intuition(语义意图描述,研究用)
+  v8 anchor_text    factors.anchor_text(embedding 锚定文本,固定四要素模板生成)
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -30,7 +31,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 7
+CURRENT_VERSION = 10
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -70,8 +71,23 @@ def _add_quality_fields(conn: sqlite3.Connection) -> None:
 
 
 def _add_intuition_field(conn: sqlite3.Connection) -> None:
-    """v7 factors.intuition(语义意图描述,embedding 主原料)。"""
+    """v7 factors.intuition(语义意图描述,研究用)。"""
     db.ensure_intuition_field(conn)
+
+
+def _add_anchor_text(conn: sqlite3.Connection) -> None:
+    """v8 factors.anchor_text(embedding 锚定文本,固定四要素模板生成)。"""
+    db.ensure_anchor_text_field(conn)
+
+
+def _add_angle_candidates(conn: sqlite3.Connection) -> None:
+    """v9 angle_candidates 表(angle 自发现候选记录,防归纳循环)。"""
+    db.ensure_angle_candidates_table(conn)
+
+
+def _add_ideas_angle_code(conn: sqlite3.Connection) -> None:
+    """v10 ideas.angle_code(信息角度血缘,因子回灌从这继承)。"""
+    db.ensure_ideas_angle_code(conn)
 
 
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
@@ -83,6 +99,9 @@ MIGRATIONS = [
     (5, "rename_eval_metrics", _rename_eval_metrics),
     (6, "quality_fields", _add_quality_fields),
     (7, "intuition_field", _add_intuition_field),
+    (8, "anchor_text",     _add_anchor_text),
+    (9, "angle_candidates", _add_angle_candidates),
+    (10, "ideas_angle_code", _add_ideas_angle_code),
 ]
 
 
