@@ -12,6 +12,9 @@
   v6 quality_fields  factors.quality_score/quality_grade(多指标聚合分,方案1+4)
   v7 intuition_field factors.intuition(语义意图描述,研究用)
   v8 anchor_text    factors.anchor_text(embedding 锚定文本,固定四要素模板生成)
+  v9 angle_candidates angle_candidates 表(angle 自发现候选记录,防归纳循环)
+  v10 ideas_angle_code ideas.angle_code(信息角度血缘,因子回灌从这继承)
+  v11 iterations_status_iterable iterations.status/iterable(迭代建议状态机,JS 早有 py 补齐)
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -31,7 +34,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 10
+CURRENT_VERSION = 11
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -90,6 +93,13 @@ def _add_ideas_angle_code(conn: sqlite3.Connection) -> None:
     db.ensure_ideas_angle_code(conn)
 
 
+def _add_iterations_columns(conn: sqlite3.Connection) -> None:
+    """v11 iterations.status/iterable(迭代建议状态机)。
+    schema.sql 新库已含;此步给既有 Python 库补列(JS 侧 init 早有 migrateIterationsSchema,
+    py 侧原本漏 → 纯 Python 库与版本号 v10 不一致)。"""
+    db.ensure_iterations_columns(conn)
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -102,6 +112,7 @@ MIGRATIONS = [
     (8, "anchor_text",     _add_anchor_text),
     (9, "angle_candidates", _add_angle_candidates),
     (10, "ideas_angle_code", _add_ideas_angle_code),
+    (11, "iterations_status_iterable", _add_iterations_columns),
 ]
 
 

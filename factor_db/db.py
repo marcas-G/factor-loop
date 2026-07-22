@@ -1179,6 +1179,19 @@ def ensure_ideas_angle_code(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ideas ADD COLUMN angle_code TEXT")
 
 
+def ensure_iterations_columns(conn: sqlite3.Connection) -> None:
+    """补 iterations.status/iterable 列(迭代建议状态机)。
+    v11 iterations_status_iterable。与 pipeline-mcp migrateIterationsSchema 对齐——
+    schema.sql 新库已含,此函数给既有 Python 库经 migrate 补列(JS 侧靠 init 兜底,py 侧原本漏)。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(iterations)")}
+    if not cols:
+        return  # 表不存在(全新库待 schema.sql 建),跳过
+    if "status" not in cols:
+        conn.execute("ALTER TABLE iterations ADD COLUMN status TEXT NOT NULL DEFAULT 'realized'")
+    if "iterable" not in cols:
+        conn.execute("ALTER TABLE iterations ADD COLUMN iterable INTEGER NOT NULL DEFAULT 1")
+
+
 def _map_monthly_icir(x: float | None) -> float:
     """monthly_icir 固定阈值归一(不依赖库)。≥2→1, ≥1→0.7, ≥0.5→0.4, ≥0.2→0.2, 否则0。"""
     if x is None:

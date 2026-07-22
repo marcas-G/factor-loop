@@ -81,12 +81,19 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
   [3, "graph_bounds"],
   [4, "angle"],
+  [5, "rename_eval_metrics"],
+  [6, "quality_fields"],
+  [7, "intuition_field"],
+  [8, "anchor_text"],
+  [9, "angle_candidates"],
+  [10, "ideas_angle_code"],
+  [11, "iterations_status_iterable"],
 ];
 
 function migrateSchemaVersion() {
@@ -595,6 +602,9 @@ export function realizeIteration(iterId, toXname, { icirDelta = null } = {}) {
   const d = db();
   const row = d.prepare("SELECT status FROM iterations WHERE id = ?").get(iterId);
   if (!row) throw new Error(`iteration id 不存在: ${iterId}`);
+  if (row.status !== "in_progress") {
+    return { ok: false, error: `iteration ${iterId} 状态=${row.status},非 in_progress 不可 realize` };
+  }
   const outcome = icirDelta == null ? "neutral"
     : icirDelta > 0.02 ? "improved"
     : icirDelta < -0.02 ? "declined"

@@ -55,7 +55,8 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     const metrics = extractMetrics(evalMetrics);
     const isPass = verdict.verdict === "pass";
 
-    // 第4红线代码兜底:|screening.icir|<0.5 且无变换族救场 → 强制 fail(防 LLM 失稳放弱信号)
+    // === 早期否决(不依赖入库数据,写库前判,省一次写) ===
+    // 第4红线:|screening.icir|<0.5 且无变换族救场 → fail(防 LLM 失稳放弱信号)
     if (isPass && Math.abs(metrics.icir ?? 0) < 0.5) {
       const tf = evalMetrics?.transform_family || {};
       const hasRescue = Object.values(tf).some((v) => Math.abs(Number(v)) >= 0.05);
@@ -65,9 +66,36 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(2)}<0.5,pass→fail`);
       }
     }
-
-    // 评估硬兜底:冗余/残差/数据缺(代码层校验,不靠 LLM 自觉)
+    // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
     if (verdict.verdict === "pass") {
+      const dbm = evalMetrics?.deep_best || {};
+      const deepOk = Object.values(dbm).some((v) => v != null);
+      if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
+        verdict.verdict = "fail";
+        (verdict.key_weaknesses ||= []).push("代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决");
+        console.log(`  [db] 评估不全硬否决: deepbest None + ICIR=${metrics.icir}<3`);
+      }
+    }
+
+    // === pass:先写 factor 拿 written,再做入库后冗余/残差检查 ===
+    // 根因:冗余/残差检查依赖因子已入库的 IC 向量(icRefreshFactor 下载 dailyX 算 IC 序列),
+    // 必须在 addFactorFromHFile 之后跑。原实现把检查放在写库前且引用未声明的 written,
+    // ReferenceError 被 try-catch 吞 → 检查静默失效。现改为:写库→检查→必要时降级 status。
+    let written = null;
+    if (verdict.verdict === "pass") {
+      written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
+      if (!written) {
+        return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+      }
+      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      try { await factorDb.generateAnchorText(written); }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
+      let embOk = false;
+      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
+      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
+      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
+
+      // 入库后冗余/残差检查(依赖 IC 数据,因子已入库,icRefresh 先算 IC 向量使新因子可被检索)
       try { await factorDb.icRefreshFactor(written); }
       catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
       // 冗余:max |pearson|>=0.7 → fail
@@ -93,22 +121,16 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
           }
         }
       } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
-      // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
-      const dbm = evalMetrics?.deep_best || {};
-      const deepOk = Object.values(dbm).some((v) => v != null);
-      if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
-        verdict.verdict = "fail";
-        (verdict.key_weaknesses ||= []).push("代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决");
-        console.log(`  [db] 评估不全硬否决: deepbest None + ICIR=${metrics.icir}<3`);
+
+      // 入库后否决:已写的 evaluated factor 降级为 dead_end,后续走 dead_end eval/lesson
+      if (verdict.verdict === "fail") {
+        factorDb.updateFactorStatus(written, "dead_end");
+        console.log(`  [db] 入库后否决: ${written} evaluated→dead_end`);
       }
     }
 
     if (verdict.verdict === "pass") {
-      // 写 factors + factor_evals + success_pattern lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
-      if (!written) {
-        return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
-      }
+      // pass:写 evaluated eval + success_pattern lesson + 假设支持度 + retry 迭代
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
         evalMetrics: evalMetrics,
         conditionalReturns: evalMetrics?.deep_best || null,
@@ -117,16 +139,6 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         status: "evaluated",
       });
       console.log(`  [db] 因子 ${written} 入库 status=evaluated IC=${metrics.ic_mean ?? "null"} ICIR=${metrics.icir ?? "null"}`);
-
-      // 三件套兜底：.h 无 frontmatter 时从 state 补 formula_text/tags；再补 emb（新因子入库补全）
-      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
-      let anchorOk = false;
-      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
-      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
-      let embOk = false;
-      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
-      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
-      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
       // success_pattern lesson
       const lessonText = buildSuccessLessonText(factor, verdict, evalMetrics);
@@ -169,12 +181,22 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
       return { xname: written, status: "evaluated", metrics, lessonId };
     } else {
-      // verdict=fail：lesson.factor_xname 有 FK → 必须先写 factors（status=dead_end）
-      // 同时写 factor_evals（带 status="dead_end" 触发 latest_ic/icir 更新）+ dead_end lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end", intuition: factor.intuition || null });
+      // fail/dead_end:lesson.factor_xname 有 FK → 必须先写 factors(status=dead_end)。
+      // 早期否决时 written 还没写,这里补;入库后否决时 written 已是 dead_end(上面降级改过),跳过重写。
       if (!written) {
-        return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+        written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end", intuition: factor.intuition || null });
+        if (!written) {
+          return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+        }
+        factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+        try { await factorDb.generateAnchorText(written); }
+        catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
+        let embOk = false;
+        try { embOk = (await factorDb.generateEmbedding(written)).ok; }
+        catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
+        console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
       }
+      // 写 factor_evals（带 status="dead_end" 触发 latest_ic/icir 更新）+ dead_end lesson
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
         evalMetrics: evalMetrics,
         conditionalReturns: evalMetrics?.deep_best || null,
@@ -183,16 +205,6 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         status: "dead_end",
       });
       console.log(`  [db] dead_end eval 入库 IC=${metrics.ic_mean ?? "null"} ICIR=${metrics.icir ?? "null"}`);
-
-      // 三件套兜底 + emb（dead_end 因子也入库，补全以便检索/避雷）
-      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
-      let anchorOk = false;
-      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
-      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
-      let embOk = false;
-      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
-      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
-      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
       const lessonText = buildDeadEndLessonText(factor, verdict, evalMetrics);
       const lessonId = factorDb.addLesson("dead_end", lessonText, {

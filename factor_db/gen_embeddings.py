@@ -1,8 +1,8 @@
-"""阶段 C：为每个因子生成 384 维语义 embedding，写入 factors_vec。
+"""阶段 C：为每个因子生成 512 维语义 embedding，写入 factors_vec。
 
 - 模型：BAAI/bge-small-zh-v1.5（CPU 推理，单条 10-30ms）
-- 输入：纯语义文本 = intuition(主体) / 缺失降级 formula 中文注释 + angle 信息源后缀
-  formula 代码 / tags / class_name 不进 embedding(形式噪声,扭曲语义空间)
+- 输入：factors.anchor_text(固定四要素模板,ai_generate_anchor.py 生成)
+  anchor_text 为空(未生成)→ 跳过该因子不写,避免 encode("") 产脏向量污染检索
 - 归一化后写入（cosine = 内积）
 - 幂等：emb_generated_at 非空则跳过；--force 强制重算
 
@@ -54,7 +54,8 @@ def get_embedder(model_name: str):
 def build_text(row) -> str:
     """锚定文本 = factors.anchor_text(固定四要素模板生成,统一风格,检索稳定)。
     由 ai_generate_anchor.py 按固定 prompt 生成(机制/利润来源/信息源/预测),
-    所有因子风格一致——这是 embedding 检索稳定的根基。"""
+    所有因子风格一致——这是 embedding 检索稳定的根基。
+    返回空串表示 anchor_text 未生成,调用方应跳过(不写脏 embedding)。"""
     return (row["anchor_text"] or "").strip()
 
 
@@ -92,9 +93,17 @@ def main() -> None:
         print(f"[INFO] 待 embed: {len(rows)} 个因子，model={args.model}")
 
         ok = 0
+        skipped = 0
         for i, r in enumerate(rows, 1):
             xname = r["xname"]
             text = build_text(r)
+            if not text:
+                # anchor_text 未生成(LLM 失败/降级)→ 跳过不写。
+                # encode("") 不抛异常但产出无意义向量,normalize 后污染语义检索。
+                # emb_generated_at 保持 NULL,下次 anchor 补上后重试。
+                skipped += 1
+                print(f"[{i}/{len(rows)}] {xname}: SKIP (anchor_text 为空,未生成)")
+                continue
             try:
                 emb = embedder.encode(text, normalize_embeddings=True).tolist()
             except Exception as e:
@@ -105,7 +114,7 @@ def main() -> None:
             if i % 10 == 0 or i == len(rows):
                 print(f"[{i}/{len(rows)}] {xname}: OK ({len(emb)}d)")
 
-        print(f"\n[RESULT] embedded={ok}/{len(rows)}")
+        print(f"\n[RESULT] embedded={ok}/{len(rows)} skipped={skipped}(anchor_text 缺)")
 
 
 if __name__ == "__main__":
