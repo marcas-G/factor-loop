@@ -1363,7 +1363,7 @@ export function addGraphNode({ table, data }) {
       : null;
     const info = db().prepare(
       `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer,angle_code)
-       VALUES (?,?,'open',?,?,?,?,?)`
+       VALUES (?,?,'open',?,?,?,?)`
     ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS", data.angle_code ?? null);
     return Number(info.lastInsertRowid);
   }

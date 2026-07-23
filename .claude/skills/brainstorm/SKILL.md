@@ -106,6 +106,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 7. **角度新颖**(A·新>优):候选倾向 fresh/unexplored 角度(从 idea 的 angle 出发往未饱和子方向发散);落 saturated 角度的候选,`diff_check` 必须附"正交论证"——和同角度已有因子预期 IC 行为不同的具体依据(不同算子/不同 horizon/不同信号源)
 8. **冗余避雷**(D):候选须避开第1步捞到的"冗余模式"(X 角度+Y 算子→已和 Z 冗余),在 `db_research.found_redundancy` 记命中模式 + 说明本候选怎么避开(换算子/角度/信号源)
 9. **验证路径对齐**(A):候选必须能验证 `argument_chain.constraint`/`falsifiable_trace` 描述的方法——候选的算子/机制须能触及假设的可证伪预言(如预言"X 的 IC≥0.04",候选就得是能产出该 IC 的因子)。落 constraint 要求的验证维度外的候选=不忠实,不要造。
+10. **输出语义匹配假设**(A·忠实度):`output` 算子须匹配假设的 IC 裁判语义。**事件驱动/幅度语义因子**(flicker/spike/sign-flip/event 触发,假设预言涉及幅度阈值如 |IC|≥0.03 / sign_match / z-score):output **保留原始量级或 z-score,禁用 `percentile_rank(...)-0.5` 居中化**(rank 压缩幅度 + 非事件期泄漏条件信号,破坏事件假设的 falsifiable_trace IC 裁判 → reviewer 判 unfaithful)。**连续值/分布语义因子**(rank/分位本身是信号)可 percentile_rank。
 
 ## 持久化（写完候选后必须做）
 
