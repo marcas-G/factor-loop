@@ -16,7 +16,7 @@ import path from "node:path";
 import { DRY_RUN, FACTOR_CHECK_PY, RUN_DIR, FACTORS_DB } from "../lib/config.mjs";
 import { runPy } from "../infra/run-py.mjs";
 import { triageFailure } from "../infra/airflow-log.mjs";
-import { extractMetricsFromCheckOutput } from "../lib/metrics.mjs";
+import { extractMetricsFromCheckOutput, maxZeroRatioFromScreening } from "../lib/metrics.mjs";
 import { DatabaseSync } from "node:sqlite";
 
 // 平台 feature 名 = .h 文件 stem（parse_index 实测：book_HHI.h → "book_HHI"）。
@@ -159,22 +159,38 @@ export async function checkFactorProgrammatic(factor, submitResult, checkOutput)
 
   // —— 3. factor_check.py 正常退出：看 daily_ic 产物 ——
   if (!dailyIcExists || dailyIcSize < 1024) {
-    const reason = !dailyIcExists ? "check_output_missing" : "check_output_too_small";
+    // daily_ic 缺失时看 zero_ratio 分段(不再无脑判 missing 当 transient 重 submit):
+    //   >=0.999 全零 → DAG 缓存陷阱特征,仍判 missing 走 platform.mjs 换名自愈
+    //   0.8<=z<0.999 高零值非全零 → 因子输出稀疏(门控叠加/冷启动过长),判 too_small 走 rewrite
+    //   <0.8 → 真 IC 计算问题/数据问题,判 missing 走重试
+    const SPARSE_ZERO_RATIO = 0.8;
+    const FULL_ZERO = 0.999;
+    const zeroRatio = maxZeroRatioFromScreening(checkOutput, featureKey);
+    let reason;
+    if (dailyIcExists) {
+      reason = "check_output_too_small";
+    } else if (zeroRatio != null && zeroRatio >= SPARSE_ZERO_RATIO && zeroRatio < FULL_ZERO) {
+      reason = "check_output_too_small";  // 高零值非全零:因子稀疏,质量侧 rewrite
+    } else {
+      reason = "check_output_missing";
+    }
     // dag 若 failed 仍优先报真因
     if (triageEvidence) {
       return _classifyFailed({ checkOutput, dailyIcPath, dailyIcExists, dailyIcSize, result, triageEvidence, tg });
     }
-    const diagnosis = reason === "check_output_too_small" ? buildTooSmallDiagnosis() : null;
+    const diagnosis = reason === "check_output_too_small" ? buildTooSmallDiagnosis(zeroRatio) : null;
+    const zrNote = zeroRatio != null ? `，zero_ratio=${zeroRatio.toFixed(3)}${zeroRatio >= SPARSE_ZERO_RATIO && zeroRatio < FULL_ZERO ? "(稀疏→质量rewrite)" : ""}` : "";
     return {
       ok: false,
       failureLayer: reason,
       checkOutput,
       dailyIcPath: dailyIcExists ? dailyIcPath : null,
       dailyIcSize,
-      summary: `[检查失败] daily_ic_results.txt ${!dailyIcExists ? "缺失" : `过小 (${dailyIcSize}B)`}`,
+      summary: `[检查失败] daily_ic_results.txt ${!dailyIcExists ? "缺失" : `过小 (${dailyIcSize}B)`}${zrNote}`,
       evidence: {
         reason,
         daily_ic_size: dailyIcSize,
+        zero_ratio: zeroRatio,
         stdout_tail: result.stdout.slice(-500),
         dir_listing: listDir(checkOutput, 3, 30),
         ...(diagnosis || {}),
@@ -340,10 +356,12 @@ function buildRuntimeErrorDiagnosis(causeText, exitCode) {
   };
 }
 
-function buildTooSmallDiagnosis() {
+function buildTooSmallDiagnosis(zeroRatio = null) {
+  // zero_ratio 实测值注入诊断,让 rewrite agent 看到具体稀疏度定向改(如"99.6%为零,非零率0.4%")
+  const zrStr = zeroRatio != null ? `(实测 zero_ratio=${zeroRatio.toFixed(3)},非零率仅 ${((1 - zeroRatio) * 100).toFixed(1)}%)` : "";
   return {
     diagnosis: {
-      nature: "结构性失败（因子质量）：DAG 成功但 IC 产物空 → 因子值近全0/NaN/非零率过低，平台跳过 IC 计算",
+      nature: `结构性失败（因子质量）：DAG 成功但 IC 产物空 → 因子值近全0/NaN/非零率过低${zrStr}，平台跳过 IC 计算`,
       root_cause_candidates: [
         "硬门控（如 volHigh ? x : 0）把因子压成近全0 → 降门控分位(如 0.80→0.50) 或软化成 sigmoid 权重 out=w*lr",
         "冷启动期全0（需积累 N 样本才输出，如 _volHistory.size()>=30）→ 缩短冷启动阈值或冷启动期输出 baseline",

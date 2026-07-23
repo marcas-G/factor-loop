@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 
 import { toSnake, nextUniqueXname, renameFactorH } from "../../stages/rename-factor.mjs";
-import { isAllZeroFromScreening } from "../../lib/metrics.mjs";
+import { isAllZeroFromScreening, maxZeroRatioFromScreening } from "../../lib/metrics.mjs";
 
 test("toSnake: PascalCase → snake_case（含缩写词 BHHI/BPDiff）", () => {
   assert.equal(toSnake("TradeRunVolAccel"), "trade_run_vol_accel");
@@ -80,4 +80,19 @@ test("isAllZeroFromScreening: 全 <0.999 → false", () => {
 
 test("isAllZeroFromScreening: 文件缺失 → false", () => {
   assert.equal(isAllZeroFromScreening("/nonexistent-path", "X"), false);
+});
+
+test("maxZeroRatioFromScreening: 返回 max zero_ratio(factor2 稀疏场景 0.996)", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-test-"));
+  const featureKey = "TestFactor";
+  const dir = path.join(tmpDir, featureKey, "dailyX", `${featureKey}_feval`);
+  fs.mkdirSync(dir, { recursive: true });
+  // 模拟 factor 2: 99.6% 为零(zero_ratio=0.996)→ 应判 too_small(稀疏 rewrite) 而非 missing(transient 重试)
+  fs.writeFileSync(path.join(dir, "screening.csv"), "zero_ratio\n0.996\n0.95\n");
+  const z = maxZeroRatioFromScreening(tmpDir, featureKey);
+  assert.ok(z != null && Math.abs(z - 0.996) < 1e-9, `expected ~0.996, got ${z}`);
+});
+
+test("maxZeroRatioFromScreening: 文件缺失 → null", () => {
+  assert.equal(maxZeroRatioFromScreening("/nonexistent-path", "X"), null);
 });
