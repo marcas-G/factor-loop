@@ -905,13 +905,16 @@ def tag_factor_angle(conn: sqlite3.Connection, xname: str, angle_code: str) -> N
 def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
     """每角度的探索状态:因子数/dead_end/evaluated/最高icir/饱和度。explore_uncovered_angle 的输入。
 
-    饱和度启发:saturated=因子≥5且dead_end占≥60%; thin=因子≤2; unexplored=0因子; partial=其余。"""
+    饱和度启发:saturated=因子≥5且dead_end占≥60%; thin=因子≤2; unexplored=0因子且0 idea; partial=其余。
+    saturation 把 idea 占用算进去:有 idea(方向已推理触及)但无 factor → partial(非 explore fresh),
+    避免 graph 反复往"假 fresh"角度派 explore 产同方向对偶命题。"""
     rows = conn.execute(
         """
         SELECT a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom,
                COUNT(f.xname) AS n_factors,
                COALESCE(SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END),0) AS n_dead_end,
                COALESCE(SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END),0) AS n_evaluated,
+               (SELECT COUNT(*) FROM ideas i WHERE i.angle_code = a.code) AS n_ideas,
                MAX(f.latest_icir) AS max_icir
         FROM angle_ontology a
         LEFT JOIN factors f ON f.angle_code = a.code AND f.deprecated_at IS NULL
@@ -921,10 +924,12 @@ def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
     ).fetchall()
     out = []
     for r in rows:
-        n, nd = r["n_factors"], r["n_dead_end"]
+        n, nd, ni = r["n_factors"], r["n_dead_end"], r["n_ideas"] or 0
         sc = graph_constants()["saturation"]
-        if n == 0:
+        if n == 0 and ni == 0:
             sat = "unexplored"
+        elif n == 0 and ni > 0:
+            sat = "partial"
         elif n >= sc["min_n_saturated"] and nd >= n * sc["dead_ratio_saturated"]:
             sat = "saturated"
         elif n <= sc["max_n_thin"]:
@@ -935,7 +940,7 @@ def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
             "code": r["code"], "name": r["name"], "field_family": r["field_family"],
             "extraction": r["extraction"], "signal_target": r["signal_target"],
             "theory_axiom": r["theory_axiom"], "n_factors": n, "n_dead_end": nd,
-            "n_evaluated": r["n_evaluated"], "max_icir": r["max_icir"], "saturation": sat,
+            "n_evaluated": r["n_evaluated"], "n_ideas": ni, "max_icir": r["max_icir"], "saturation": sat,
         })
     return out
 
