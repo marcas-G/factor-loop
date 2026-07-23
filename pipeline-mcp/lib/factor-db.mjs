@@ -81,12 +81,19 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
   [3, "graph_bounds"],
   [4, "angle"],
+  [5, "rename_eval_metrics"],
+  [6, "quality_fields"],
+  [7, "intuition_field"],
+  [8, "anchor_text"],
+  [9, "angle_candidates"],
+  [10, "ideas_angle_code"],
+  [11, "iterations_status_iterable"],
 ];
 
 function migrateSchemaVersion() {
@@ -595,6 +602,9 @@ export function realizeIteration(iterId, toXname, { icirDelta = null } = {}) {
   const d = db();
   const row = d.prepare("SELECT status FROM iterations WHERE id = ?").get(iterId);
   if (!row) throw new Error(`iteration id 不存在: ${iterId}`);
+  if (row.status !== "in_progress") {
+    return { ok: false, error: `iteration ${iterId} 状态=${row.status},非 in_progress 不可 realize` };
+  }
   const outcome = icirDelta == null ? "neutral"
     : icirDelta > 0.02 ? "improved"
     : icirDelta < -0.02 ? "declined"
@@ -619,13 +629,13 @@ export function reopenIteration(iterId) {
 }
 
 // brainstorm 调:检索待接续建议,按 priority 排序。
-// priority = (evaluated?2.0:0.5) × max(icir,0.1) × exp(-age_days/14) —— pass 精进优先于 dead_end 重试,强因子优先,老建议降权。
+// priority = (evaluated?2.0:0.5) × exp(-age_days/14) —— pass 精进优先于 dead_end 重试,老建议降权。
+// 新>优:不按 icir 排序(去掉 max(icir,0.1) 乘子)——新颖弱信号(evaluated 但低 icir)与强信号同等可接续。
 export function listOpenIterations({ topK = 5, sourceStatus = null } = {}) {
   const d = db();
   const sql = `SELECT i.id AS suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id, i.iterable, i.ts,
             f.status AS from_status, f.latest_icir AS from_icir, f.formula_text AS from_formula,
             (CASE WHEN f.status = 'evaluated' THEN 2.0 ELSE 0.5 END)
-              * MAX(COALESCE(f.latest_icir, 0), 0.1)
               * EXP(-(julianday('now') - julianday(i.ts)) / 14.0) AS priority
      FROM iterations i
      JOIN factors f ON f.xname = i.from_xname
@@ -1093,7 +1103,7 @@ export async function semanticSearchFactors(queryText, k = 10) {
 // IC 行为冗余检索：找和 target 因子 IC 序列相似的库内因子（预测能力同涨同跌 = 真冗余）。
 // 比 formula 文本语义检索更贴近业务；evaluate 用它量化"与已有因子相关性"。
 export async function icCorrelateFactors(targetFactor, opts = {}) {
-  const { symbol, freq, yHorizon, k = 20, minAbsPearson = 0.5, top = 15 } = opts;
+  const { symbol, freq, yHorizon, k = 20, minAbsPearson = 0.6, top = 15 } = opts;
   const { runPy } = await import("../infra/run-py.mjs");
   const script = path.join(CWD, "factor_db", "ic_correlate.py");
   const args = [

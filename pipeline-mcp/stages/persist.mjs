@@ -20,6 +20,11 @@
 
 import * as factorDb from "../lib/factor-db.mjs";
 
+// 通过判据阈值(新 > 优:指标低可过,冗余必严)。集中常量,单一真相,便于调/test。
+const NOISE_ICIR_FLOOR = 0.05;        // 第4红线:|screening.icir|<此值(纯噪声,基本无任何水准信号)且无救场 → fail
+const REDUNDANCY_PEARSON_FAIL = 0.6;  // IC 行为冗余硬否决:max|pearson|>=此值 → fail
+const RESIDUAL_FAIL = 0.5;            // 残差 IC 强度硬否决:<此值(预测力多被库内线性解释=冗余) → fail
+
 // 从 eval_metrics 提取 metrics，适配三种历史结构：
 //   1. 嵌套（期望）：{core_metrics: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
 //   2. factor 1 扁平：{1_ic, 2_icir, 3_hit_rate, 4_train_test_consistency, ...}
@@ -55,45 +60,20 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
     const metrics = extractMetrics(evalMetrics);
     const isPass = verdict.verdict === "pass";
 
-    // 第4红线代码兜底:|screening.icir|<0.5 且无变换族救场 → 强制 fail(防 LLM 失稳放弱信号)
-    if (isPass && Math.abs(metrics.icir ?? 0) < 0.5) {
+    // === 早期否决(不依赖入库数据,写库前判,省一次写) ===
+    // 第4红线:|screening.icir|<NOISE_ICIR_FLOOR(纯噪声)且无变换族救场 → fail
+    // 新>优:弱信号(0.05–0.5)不否决,只毙纯噪声;指标低只要正交不冗余可过
+    if (isPass && Math.abs(metrics.icir ?? 0) < NOISE_ICIR_FLOOR) {
       const tf = evalMetrics?.transform_family || {};
       const hasRescue = Object.values(tf).some((v) => Math.abs(Number(v)) >= 0.05);
       if (!hasRescue) {
         verdict.verdict = "fail";
-        (verdict.key_weaknesses ||= []).push("代码兜底:|screening.icir|<0.5 且无变换族救场(某变换|IC|≥0.05),第4红线否决");
-        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(2)}<0.5,pass→fail`);
+        (verdict.key_weaknesses ||= []).push(`代码兜底:|screening.icir|<${NOISE_ICIR_FLOOR}(纯噪声)且无变换族救场,第4红线否决`);
+        console.log(`  [db] 第4红线代码兜底: |ICIR|=${Math.abs(metrics.icir).toFixed(3)}<${NOISE_ICIR_FLOOR},pass→fail`);
       }
     }
-
-    // 评估硬兜底:冗余/残差/数据缺(代码层校验,不靠 LLM 自觉)
+    // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
     if (verdict.verdict === "pass") {
-      try { await factorDb.icRefreshFactor(written); }
-      catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
-      // 冗余:max |pearson|>=0.7 → fail
-      try {
-        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: 0.7 });
-        const topP = corr?.results?.[0];
-        if (topP && Math.abs(topP.pearson_approx ?? 0) >= 0.7) {
-          verdict.verdict = "fail";
-          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=0.7,硬否决`);
-          console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
-        }
-      } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
-      // 残差:<0.4 → fail(零新息)
-      try {
-        const resid = await factorDb.residualIcStrength(written);
-        const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
-        if (strengths.length) {
-          const minR = Math.min(...strengths);
-          if (minR < 0.4) {
-            verdict.verdict = "fail";
-            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<0.4,零新息,硬否决`);
-            console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
-          }
-        }
-      } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
-      // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
       const dbm = evalMetrics?.deep_best || {};
       const deepOk = Object.values(dbm).some((v) => v != null);
       if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
@@ -103,12 +83,60 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
     }
 
+    // === pass:先写 factor 拿 written,再做入库后冗余/残差检查 ===
+    // 根因:冗余/残差检查依赖因子已入库的 IC 向量(icRefreshFactor 下载 dailyX 算 IC 序列),
+    // 必须在 addFactorFromHFile 之后跑。原实现把检查放在写库前且引用未声明的 written,
+    // ReferenceError 被 try-catch 吞 → 检查静默失效。现改为:写库→检查→必要时降级 status。
+    let written = null;
     if (verdict.verdict === "pass") {
-      // 写 factors + factor_evals + success_pattern lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
+      written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
       if (!written) {
         return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
       }
+      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      try { await factorDb.generateAnchorText(written); }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
+      let embOk = false;
+      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
+      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
+      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
+
+      // 入库后冗余/残差检查(依赖 IC 数据,因子已入库,icRefresh 先算 IC 向量使新因子可被检索)
+      try { await factorDb.icRefreshFactor(written); }
+      catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
+      // 冗余:max |pearson|>=REDUNDANCY_PEARSON_FAIL → fail(新>优:冗余必严)
+      try {
+        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: REDUNDANCY_PEARSON_FAIL });
+        const topP = corr?.results?.[0];
+        if (topP && Math.abs(topP.pearson_approx ?? 0) >= REDUNDANCY_PEARSON_FAIL) {
+          verdict.verdict = "fail";
+          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=${REDUNDANCY_PEARSON_FAIL},硬否决`);
+          console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
+        }
+      } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
+      // 残差:<RESIDUAL_FAIL → fail(预测力多被库内线性解释=冗余,零新息)
+      try {
+        const resid = await factorDb.residualIcStrength(written);
+        const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
+        if (strengths.length) {
+          const minR = Math.min(...strengths);
+          if (minR < RESIDUAL_FAIL) {
+            verdict.verdict = "fail";
+            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<${RESIDUAL_FAIL},零新息,硬否决`);
+            console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
+          }
+        }
+      } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
+
+      // 入库后否决:已写的 evaluated factor 降级为 dead_end,后续走 dead_end eval/lesson
+      if (verdict.verdict === "fail") {
+        factorDb.updateFactorStatus(written, "dead_end");
+        console.log(`  [db] 入库后否决: ${written} evaluated→dead_end`);
+      }
+    }
+
+    if (verdict.verdict === "pass") {
+      // pass:写 evaluated eval + success_pattern lesson + 假设支持度 + retry 迭代
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
         evalMetrics: evalMetrics,
         conditionalReturns: evalMetrics?.deep_best || null,
@@ -117,16 +145,6 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         status: "evaluated",
       });
       console.log(`  [db] 因子 ${written} 入库 status=evaluated IC=${metrics.ic_mean ?? "null"} ICIR=${metrics.icir ?? "null"}`);
-
-      // 三件套兜底：.h 无 frontmatter 时从 state 补 formula_text/tags；再补 emb（新因子入库补全）
-      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
-      let anchorOk = false;
-      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
-      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
-      let embOk = false;
-      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
-      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
-      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
       // success_pattern lesson
       const lessonText = buildSuccessLessonText(factor, verdict, evalMetrics);
@@ -169,12 +187,22 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
       return { xname: written, status: "evaluated", metrics, lessonId };
     } else {
-      // verdict=fail：lesson.factor_xname 有 FK → 必须先写 factors（status=dead_end）
-      // 同时写 factor_evals（带 status="dead_end" 触发 latest_ic/icir 更新）+ dead_end lesson
-      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end", intuition: factor.intuition || null });
+      // fail/dead_end:lesson.factor_xname 有 FK → 必须先写 factors(status=dead_end)。
+      // 早期否决时 written 还没写,这里补;入库后否决时 written 已是 dead_end(上面降级改过),跳过重写。
       if (!written) {
-        return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+        written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "dead_end", intuition: factor.intuition || null });
+        if (!written) {
+          return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+        }
+        factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+        try { await factorDb.generateAnchorText(written); }
+        catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
+        let embOk = false;
+        try { embOk = (await factorDb.generateEmbedding(written)).ok; }
+        catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
+        console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
       }
+      // 写 factor_evals（带 status="dead_end" 触发 latest_ic/icir 更新）+ dead_end lesson
       factorDb.addEval(written, ts, metrics, ideaId, checkResult.checkOutput, {
         evalMetrics: evalMetrics,
         conditionalReturns: evalMetrics?.deep_best || null,
@@ -183,16 +211,6 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
         status: "dead_end",
       });
       console.log(`  [db] dead_end eval 入库 IC=${metrics.ic_mean ?? "null"} ICIR=${metrics.icir ?? "null"}`);
-
-      // 三件套兜底 + emb（dead_end 因子也入库，补全以便检索/避雷）
-      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
-      let anchorOk = false;
-      try { anchorOk = (await factorDb.generateAnchorText(written)).ok; }
-      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
-      let embOk = false;
-      try { embOk = (await factorDb.generateEmbedding(written)).ok; }
-      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
-      console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
 
       const lessonText = buildDeadEndLessonText(factor, verdict, evalMetrics);
       const lessonId = factorDb.addLesson("dead_end", lessonText, {

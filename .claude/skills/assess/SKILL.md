@@ -57,13 +57,15 @@ Task({
 
 **双轨本质**:忠实度(因子有没有验证假设)+ 经验(因子有没有效)。忠实度是假设验证的前提——不忠实则因子与假设无关,IC 高也是别的机制的功劳,假设未被验证。
 
+> **🎯 新 > 优(全局原则)**:通过判据是"正交新颖",不是"指标强"。**ICIR 低不否决**(弱信号 0.05–1.5 只要正交不冗余即 pass),**冗余才否决**(pearson≥0.6 / 残差<0.5 硬卡)。宁可收新颖弱信号,不要高 IC 冗余因子占名额。
+
 ### 第一维 · 预测能力(秩空间,弃 pearson)
 
 因子在"形状/顺序"空间工作,衡量工具也必须是。
 
 | 指标 | 判断标准 | 数据来源 |
 |---|---|---|
-| **秩 IC 的 ICIR/t 值**(首要) | 看 \|ICIR\|≥1.5 达标——**负 ICIR = 反向信号,反着用即有效,\|ICIR\| 大算强不算失败**(勿因负值判弱);t 值显著 + std 低 | screening(Spearman / ICIR / sign_match_rate) |
+| **秩 IC 的 ICIR/t 值**(首要) | 看 \|ICIR\|≥1.5 达标(**只分强弱档,不否决低指标**——新>优:0.05–1.5 弱信号只要正交不冗余仍 pass)——**负 ICIR = 反向信号,反着用即有效,\|ICIR\| 大算强不算失败**(勿因负值判弱);t 值显著 + std 低 | screening(Spearman / ICIR / sign_match_rate) |
 | **平稳性 + 差分**(新增) | ADF p<0.05 已平稳 → 无需差分;非平稳且 diff_improvement>0 → 该差分 | stationarity(adf_pvalue / need_differential / orig_ic / diff_ic / diff_improvement) |
 | 显著性 | Welch t + p_value | zero |
 | 分组单调性 | 5 组收益平滑严格单调 | 待补 |
@@ -98,7 +100,7 @@ Task({
 | **换手率** | 日均换手低;高换手=追微波动 | `tradability.avg_turnover_per_day` |
 | **成本后 Sharpe(8bps)** | 毛 Sharpe vs 成本后(8bps 严格);转负=毛强净亏 | `tradability.sharpe_net_8bps` |
 | 容量 | 日换手>100 → 容量受限(固定代理) | `tradability.capacity_risk` |
-| 正交 | pairwise `\|pearson\|<0.7` **且** 残差 IC 强度不低(`factor_residual_ic_strength` 高=预测力多为新息,低=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
+| 正交 | pairwise `\|pearson\|<0.6` **且** 残差 IC 强度不低(`factor_residual_ic_strength` ≥0.5=预测力多为新息,<0.5=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
 | **变换族预测力**(新增) | 最强变换 |IC| 显著优于原始(>20%) → 建议改用该变换；ridge_residual 最强=预测力来自新息 | transform_family(orig_ic / delta_ic / impulse_ic / asym_impulse_pos_ic / asym_impulse_neg_ic / ridge_residual_ic) |
 
 **变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;assess 自己从 6 个 |IC| 判最强变换):
@@ -114,11 +116,11 @@ Task({
 1. **样本外秩 IC 符号反转**:与样本内完全相反(zero / sign_match 可查)
 2. **推进式回测失败**:滚动训练-预测,连续多月亏或后期断崖(train_test 可近似)
 3. **成本翻倍夏普转负**(16bps):`tradability.veto3_cost_double`(成本翻倍 Sharpe 转负 → fail)
-4. **预测力下限**:主场景 `|screening.icir| < 0.5`(预测力极弱,正负皆然——稳定反向信号 |ICIR| 高不否决,只卡绝对值太低)且无救场 → fail
-   - 救场(命中任一则**不否决**,进综合判断):变换族某变换 `|IC| ≥ 0.05`(transform_family.*,某形态有可用水准预测力),或某 horizon 实际 `|IC| ≥ 0.03`(长 horizon 有可用水准预测力)
+4. **预测力下限(纯噪声线)**:主场景 `|screening.icir| < 0.05`(纯噪声,基本无任何水准信号——稳定反向信号 |ICIR| 高不否决,只卡绝对值极低)且无救场 → fail
+   - 救场(命中任一则**不否决**):变换族某变换 `|IC| ≥ 0.05`(transform_family.*,某形态有可用水准预测力),或某 horizon 实际 `|IC| ≥ 0.03`(长 horizon 有可用水准预测力)
    - 数据:`screening.icir` + `transform_family` + `factor_ic_daily`(按 horizon 的 IC);某项缺失则对应救场分支不计(不可得 = 不构成救场)
-   - 注意:`factor_residual_ic_strength` 是新颖度(预测力不被库内线性解释的比例)**不是预测力绝对值**,不单独作救场——弱信号即使新颖也仍弱,该挂还挂
-   - 说明:补这条是因为原 3 条否决没覆盖"预测力本身太弱"——防止 |ICIR| 极低(如 0.12)但忠实度/正交尚可的因子蒙混 pass。阈值 0.5 是"基本无信号"线(evaluated 强信号阈 1.5,1.0 有信号,0.5 以下噪声主导)
+   - **新>优**:0.05–0.5 弱信号**不否决**——新颖度(`factor_residual_ic_strength`)是核心通过维度,弱信号只要正交不冗余(pearson/残差达标)即 pass;仅纯噪声(<0.05,任何形态都无水准信号)才 fail。
+   - 说明:阈值 0.05 是"纯噪声"线(任何变换/horizon 都无水准预测力);0.05–1.5 弱信号由正交维度决定去留,不由 ICIR 绝对值否决。
 
 ### 综合参考
 
@@ -152,13 +154,13 @@ Task({
    - 调 `factor_ic_refresh {xname}`:刷新 IC 向量入库(check_done 才有 dailyX 可算),同时产出 @1 因果 IC。**双重用途**:① 冗余检索向量(下步 correlate 用);② **对齐一致性核对**(见"判定态度·数据信任")——对比 feed IC(screening 的 icir)与 @1 因果 IC:符号一致且量级不离谱则对齐可信;符号反或背离(feed ICIR>2 但因果 ICIR<0.3)才诊断为"对齐不一致",`key_weaknesses` 写"feed IC{feed_icir} 与 @1 因果 IC{causal_icir} 对齐不一致"并倾向 fail。**容错**:`ok:false` 则跳过,verdict 照常,`key_weaknesses` 注明"ic 向量刷新失败,冗余/对齐未检"
    - 调 `factor_ic_correlate {target: xname}`:查库内行为冗余因子(按 `|pearson|` 排序)
    - 纳入 verdict:
-     - `|pearson| ≥ 0.7` → **verdict=fail 硬否决**(IC 行为冗余,坚决不放过——冗余因子占名额不产新息,ICIR 再高、机制叙述再不同也不豁免;真有机制差异应在低相关的新角度体现,不是在高相关的冗余里辩解)。`key_weaknesses` 写"与 {factor} IC 行为冗余 pearson={x}({vs_scene}),硬否决"
-     - 最高 `|pearson| < 0.5` → `key_strengths` 写"与库内因子 IC 行为正交(最高 |pearson|={x}),增量空间大"
-     - `0.5 ≤ |pearson| < 0.7` → 中性,`key_weaknesses` 提一句
-   - 调 `factor_residual_ic_strength {target: xname}`(库内有 factor_ic_daily 时,补 pairwise 盲区):相对全库基底的残差比例——某因子 pairwise 都不高(和谁都不像)但合起来仍冗余时,pearson 抓不到,residual 能抓。判据:`factor_residual_ic_strength < 0.4` → **verdict=fail 硬否决**(预测力多被库内线性解释,冗余坚决不放过,即使 pairwise 不高);`> 0.7` → `key_strengths` 写"残差 IC 强度={x},预测力多为新息"。**容错**:库不足/无 factor_ic_daily → 脚本返回 strength=1.0(无区分力),`key_weaknesses` 注"残差 IC 未评估(库不足)",不据此判。
+     - `|pearson| ≥ 0.6` → **verdict=fail 硬否决**(IC 行为冗余,坚决不放过——冗余因子占名额不产新息,ICIR 再高、机制叙述再不同也不豁免;真有机制差异应在低相关的新角度体现,不是在高相关的冗余里辩解)。`key_weaknesses` 写"与 {factor} IC 行为冗余 pearson={x}({vs_scene}),硬否决"
+     - 最高 `|pearson| < 0.4` → `key_strengths` 写"与库内因子 IC 行为正交(最高 |pearson|={x}),增量空间大"
+     - `0.4 ≤ |pearson| < 0.6` → 中性,`key_weaknesses` 提一句
+   - 调 `factor_residual_ic_strength {target: xname}`(库内有 factor_ic_daily 时,补 pairwise 盲区):相对全库基底的残差比例——某因子 pairwise 都不高(和谁都不像)但合起来仍冗余时,pearson 抓不到,residual 能抓。判据:`factor_residual_ic_strength < 0.5` → **verdict=fail 硬否决**(预测力多被库内线性解释,冗余坚决不放过,即使 pairwise 不高);`> 0.7` → `key_strengths` 写"残差 IC 强度={x},预测力多为新息"。**容错**:库不足/无 factor_ic_daily → 脚本返回 strength=1.0(无区分力),`key_weaknesses` 注"残差 IC 未评估(库不足)",不据此判。
 5. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
 
-> IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.7。
+> IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.6。
 
 ### 输出格式
 
