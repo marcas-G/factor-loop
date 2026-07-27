@@ -75,11 +75,12 @@ export async function checkFactorProgrammatic(factor, submitResult, checkOutput)
 
   const result = await runPy(
     FACTOR_CHECK_PY,
-    ["run", "--skip-submit", "--names", featureKey, "--dir", checkOutput, "--mode", "full", "--force"],
+    ["run", "--skip-submit", "--names", featureKey, "--dir", checkOutput, "--mode", "none", "--force"],  // adapt/default-test: csv_ic 无 dailyX tick, 跳过 feval/pearson/deep
     { timeoutSec: 86400 }
   );
 
-  const dailyIcPath = findDailyIc(checkOutput, featureKey);
+  // adapt/default-test: success 判据改 csv_ic_summary.csv(替代 daily_ic_results.txt)
+  const dailyIcPath = findCsvIcSummary(checkOutput, featureKey);
   const dailyIcExists = fs.existsSync(dailyIcPath);
   const dailyIcSize = dailyIcExists ? fs.statSync(dailyIcPath).size : 0;
 
@@ -158,7 +159,7 @@ export async function checkFactorProgrammatic(factor, submitResult, checkOutput)
   }
 
   // —— 3. factor_check.py 正常退出：看 daily_ic 产物 ——
-  if (!dailyIcExists || dailyIcSize < 1024) {
+  if (!dailyIcExists || dailyIcSize < 100) {  // adapt/default-test: csv_ic_summary.csv ~1KB(5 horizon), 阈值从 1024 降到 100
     // daily_ic 缺失时看 zero_ratio 分段(不再无脑判 missing 当 transient 重 submit):
     //   >=0.999 全零 → DAG 缓存陷阱特征,仍判 missing 走 platform.mjs 换名自愈
     //   0.8<=z<0.999 高零值非全零 → 因子输出稀疏(门控叠加/冷启动过长),判 too_small 走 rewrite
@@ -281,6 +282,8 @@ function _success(checkOutput, dailyIcPath, dailyIcSize, result, featureKey) {
       reason: "check_done",
       daily_ic_preview: icPreview,
       eval_metrics: evalMetrics,
+      // adapt/default-test: csv_ic 模式标记评估退化(仅 IC 类,tradability/stationarity 等 tick 维度缺失)
+      ...(evalMetrics.csv_ic ? { platform: "default_test", eval_metrics_coverage: ["ic_only"] } : {}),
       stdout_tail: result.stdout.slice(-500),
     },
   };
@@ -289,6 +292,11 @@ function _success(checkOutput, dailyIcPath, dailyIcSize, result, featureKey) {
 // factor_check.py 产物结构：<checkOutput>/<featureKey>/dailyX/<featureKey>_deep/daily_ic_results.txt
 export function findDailyIc(checkOutput, featureKey) {
   return path.join(checkOutput, featureKey, "dailyX", `${featureKey}_deep`, "daily_ic_results.txt");
+}
+
+// adapt/default-test: csv_ic 产物结构 <checkOutput>/<featureKey>/csv_ic/csv_ic_summary.csv
+export function findCsvIcSummary(checkOutput, featureKey) {
+  return path.join(checkOutput, featureKey, "csv_ic", "csv_ic_summary.csv");
 }
 
 export function listDir(dir, maxDepth = 3, maxEntries = 30) {

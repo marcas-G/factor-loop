@@ -25,7 +25,8 @@ export async function submitFactorProgrammatic(factor, factorFile) {
 
   console.log(`  [submit] ${factor.name} features=${features}${feeds ? ` feeds=${feeds}` : ""}`);
 
-  const args = ["submit", "--file", factorFile, "--features", features, "--generate-xs", "--json"];
+  // adapt/default-test: 新平台删 GenerateXs(ComputeCsvIc 在 featuretool.py 内默认 on)
+  const args = ["submit", "--file", factorFile, "--features", features, "--json"];
   if (feeds) args.push("--feeds", feeds);
 
   const result = await runPy(FEATURETOOL_PY, args, { timeoutSec: SUBMIT_TIMEOUT_SEC });

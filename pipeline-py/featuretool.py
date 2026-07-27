@@ -84,7 +84,7 @@ def _do_login(username, password):
             "-b", cookie_jar, "-c", cookie_jar,
             "--data-urlencode", f"username={username}",
             "--data-urlencode", f"password={password}",
-            "--data-urlencode", "_next=/featuretool/default/index",
+            "--data-urlencode", "_next=/featuretool/default_test/index",
             "--data-urlencode", f"_formkey={m.group(1)}",
             "--data-urlencode", "_formname=login",
             f"{BASE_URL}/user/login",
@@ -335,10 +335,10 @@ def cmd_submit(args):
             "-F", f"start_date={start_date}",
             "-F", f"end_date={end_date}",
         ]
-        if generate_xs:
-            curl_cmd += ["-F", "GenerateXs=on"]
+        # adapt/default-test: 新平台删 GenerateXs; ComputeCsvIc 默认 on(平台端算 csv_ic 替代 dailyX 本地算)
+        curl_cmd += ["-F", "ComputeCsvIc=on"]
         curl_cmd += [
-            "-F", "_next=/featuretool/default/index",
+            "-F", "_next=/featuretool/default_test/index",
             "-F", f"_formkey={formkey}",
             "-F", "_formname=default",
             f"{BASE_URL}/submit",

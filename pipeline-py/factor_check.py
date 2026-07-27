@@ -98,6 +98,12 @@ def extract_class_name(h_file):
     return None, False, None
 
 
+def platform_name_to_stem(feature):
+    """adapt/default-test: 平台 feature 名=<stem>_test_<feed>, 提取 stem 对齐 check.mjs featureKey(.h stem)。
+    无 _test_ 后缀(老平台/兼容)时原样返回。"""
+    return feature.split("_test_")[0] if "_test_" in feature else feature
+
+
 def submit_factor(cookie, h_file, class_name, is_template, template_args, feeds, start_date, end_date):
     """提交单个因子"""
     html = fetch(f"{BASE_URL}/submit?username=", cookie)
@@ -125,11 +131,11 @@ def submit_factor(cookie, h_file, class_name, is_template, template_args, feeds,
             "-F", f"Feeds={feeds}",
             "-F", f"start_date={start_date}",
             "-F", f"end_date={end_date}",
-            "-F", "_next=/featuretool/default/index",
+            "-F", "_next=/featuretool/default_test/index",
             "-F", f"_formkey={formkey}",
             "-F", "_formname=default",
             f"{BASE_URL}/submit",
-            "-F", "GenerateXs=on",
+            "-F", "ComputeCsvIc=on",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if 'submit?username=' in result.stdout:
@@ -1922,7 +1928,10 @@ def cmd_run(args):
 
             pending = []
             for name in target_names:
-                f = factor_map.get(name)
+                # adapt/default-test: 平台 feature 名=<stem>_test_<feed>, stem 前缀匹配防 pending
+                f = factor_map.get(name) or next(
+                    (v for k, v in factor_map.items() if k.startswith(name + "_")), None
+                )
                 if f:
                     if f["state"] == "success":
                         pass
@@ -1950,7 +1959,9 @@ def cmd_run(args):
         _, factors = fetch_factors(cookie)
 
         if target_names:
-            to_download = [f for f in factors if f["feature"] in target_names and f["download_url"]]
+            # adapt/default-test: feature 名=<stem>_test_<feed>, stem 前缀匹配
+            to_download = [f for f in factors if f["download_url"] and (
+                f["feature"] in target_names or any(f["feature"].startswith(t + "_") for t in target_names))]
         else:
             to_download = [f for f in factors if f["state"] == "success" and f["download_url"]]
 
@@ -1961,8 +1972,9 @@ def cmd_run(args):
         processes = []
         for f in to_download:
             fname = f["feature"]
+            stem = platform_name_to_stem(fname)  # adapt/default-test: 目录用 stem 对齐 check.mjs featureKey
             dl_url = f"{HOST}{f['download_url']}"
-            tar_path = os.path.join(output_dir, f"{fname}.tar.gz")
+            tar_path = os.path.join(output_dir, f"{stem}.tar.gz")
             print(f"  下载: {fname} ...", end="", flush=True)
 
             p = subprocess.Popen(
@@ -1970,7 +1982,7 @@ def cmd_run(args):
                  "-b", f"{COOKIE_NAME}={cookie}", dl_url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            processes.append((p, fname, tar_path))
+            processes.append((p, stem, tar_path))
 
         for p, fname, tar_path in processes:
             p.wait()
@@ -1987,7 +1999,7 @@ def cmd_run(args):
 
         tar_files = sorted(glob.glob(os.path.join(output_dir, "*.tar.gz")))
         for tar_path in tar_files:
-            fname = Path(tar_path).stem
+            fname = Path(tar_path).name.removesuffix(".tar.gz")  # adapt/default-test: 去 .tar.gz 双后缀(Path.stem 只去 .gz 留 .tar, 致 extract_dir 多 .tar 不匹配 check.mjs featureKey)
             extract_dir = os.path.join(output_dir, fname)
             print(f"  解压: {fname}/")
             try:
@@ -2001,7 +2013,7 @@ def cmd_run(args):
                 print(f"    失败: {e}")
 
     # ========== Phase 5: 评估 ==========
-    if not args.skip_analyze:
+    if not args.skip_analyze and mode != "none":
         print(f"\n{'='*60}")
         print(f"Phase 5: 因子评估 (mode={mode})")
         print(f"{'='*60}")
@@ -2012,6 +2024,8 @@ def cmd_run(args):
         if mode in ("pearson", "deep", "full"):
             run_analysis_batch(output_dir, mode, DEFAULT_START_COL, DEFAULT_HIGHLIGHT_LAST_N,
                                start_date, end_date, DEFAULT_N_GROUPS, feval_path, force=args.force)
+    elif mode == "none":
+        print(f"\n{'='*60}\nPhase 5: 跳过评估 (mode=none, adapt/default-test: csv_ic 平台已算 IC, 无 dailyX tick 可跑 feval/pearson/deep)\n{'='*60}")
 
     # ========== Phase 6: HTML 总结报告 ==========
     if not args.skip_analyze and mode == "full":
@@ -2099,8 +2113,8 @@ def main():
     run_parser.add_argument("--feeds", help="交易品种（默认 SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1）")
     run_parser.add_argument("--start-date", help="起始日期 YYYY-MM-DD（默认 2024-01-02）")
     run_parser.add_argument("--end-date", help="结束日期 YYYY-MM-DD（默认 2024-06-30）")
-    run_parser.add_argument("--mode", choices=["feval", "pearson", "deep", "full"], default="feval",
-                            help="评估模式（默认 feval）")
+    run_parser.add_argument("--mode", choices=["feval", "pearson", "deep", "full", "none"], default="feval",
+                            help="评估模式（默认 feval; none=跳过评估, adapt/default-test csv_ic 平台已算）")
     run_parser.add_argument("--skip-submit", action="store_true", help="跳过提交步骤")
     run_parser.add_argument("--skip-wait", action="store_true",
                             help="跳过等待平台计算完成（默认会等待；与 --skip-submit 正交）")
@@ -2113,8 +2127,8 @@ def main():
     # analyze
     analyze_parser = sub.add_parser("analyze", help="仅运行因子评估（已下载的数据）")
     analyze_parser.add_argument("--dir", "-d", required=True, help="数据目录")
-    analyze_parser.add_argument("--mode", choices=["feval", "pearson", "deep", "full"], default="feval",
-                                help="评估模式（默认 feval）")
+    analyze_parser.add_argument("--mode", choices=["feval", "pearson", "deep", "full", "none"], default="feval",
+                                help="评估模式（默认 feval; none=跳过评估）")
     analyze_parser.add_argument("--start-date", help="起始日期 YYYY-MM-DD")
     analyze_parser.add_argument("--end-date", help="结束日期 YYYY-MM-DD")
     analyze_parser.add_argument("--feval", help=f"feval 包路径（默认 {DEFAULT_FEVAL_PATH}）")

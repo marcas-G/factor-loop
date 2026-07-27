@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 HOST = "https://tools.xyz.abc"
-BASE_URL = f"{HOST}/featuretool/default"
+BASE_URL = f"{HOST}/featuretool/default_test"  # adapt/default-test: 新平台应用前缀(default_test),产物 csv_ic 非 dailyX
 COOKIE_FILE = os.path.expanduser("~/.featuretool_cookie")
 COOKIE_NAME = "session_id_featuretool"
 CREDS_FILE = "/home/lgao/featuretool_creds.json"  # 自动登录用的账号密码 {username, password}
@@ -72,7 +72,7 @@ def do_login(username, password):
             ["curl", "-s", "-L", "-k", "--max-time", "30", "-b", jar, "-c", jar,
              "--data-urlencode", f"username={username}",
              "--data-urlencode", f"password={password}",
-             "--data-urlencode", "_next=/featuretool/default/index",
+             "--data-urlencode", "_next=/featuretool/default_test/index",
              "--data-urlencode", f"_formkey={m.group(1)}",
              "--data-urlencode", "_formname=login", login_url],
             capture_output=True, text=True, timeout=60)
@@ -162,7 +162,7 @@ def parse_index(html):
         state = m.group(4).strip()
         download_raw = m.group(5).strip()
 
-        dl_match = re.search(r'href="(/featuretool/default/download_file\?[^"]*)"', download_raw)
+        dl_match = re.search(r'href="(/featuretool/default_test/download_ic\?[^"]*)"', download_raw)
         download_url = dl_match.group(1) if dl_match else ""
         run_id_match = re.search(r'run_id=([^&"]+)', download_url)
         run_id = run_id_match.group(1) if run_id_match else ""

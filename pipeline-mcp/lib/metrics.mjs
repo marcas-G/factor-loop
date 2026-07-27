@@ -282,6 +282,47 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
     }
   }
 
+  // ---- adapt/default-test: csv_ic 分支(feval/deep CSV 全缺时,从平台 csv_ic 抽 IC 类) ----
+  // 新平台不下 dailyX、factor_check mode=none 跳过 feval/pearson/deep,上面所有 CSV 都不存在。
+  // 这里从 <xname>/csv_ic/csv_ic_summary.csv 抽 IC 类喂 screening/deep_best,其余维度(tradability/
+  // stationarity/transform_family/conditional_sharpe/cum_ret 等)无 tick 算不了,留空靠 assess 容错。
+  if (!result.core_metrics.screening) {
+    const csvIcSummaryPath = findFirst(checkOutput, [`${xname}/csv_ic/csv_ic_summary.csv`]);
+    const csvRows = csvIcSummaryPath ? readCsv(csvIcSummaryPath)?.rows : null;
+    if (csvRows && csvRows.length) {
+      // 取 |rank_icir| 最大 horizon 作代表(与老 pickBestAbs 一致)
+      const best = csvRows
+        .map(r => ({ icir: num(r.rank_icir), row: r }))
+        .filter(x => x.icir != null)
+        .sort((a, b) => Math.abs(b.icir) - Math.abs(a.icir));
+      if (best.length) {
+        const b = best[0].row;
+        result.core_metrics.screening = {
+          ic_mean: num(b.rank_ic_mean),
+          icir: num(b.rank_icir),
+          hit_rate: num(b.hit_rate),
+          n_days: num(b.n_days),
+          horizon: num(b.horizon),
+          pearson_pooled: num(b.pearson_pooled),
+          pair: `${b.x_col}@${b.horizon}s`,
+        };
+        result.deep_best.daily_rank_ic = num(b.rank_ic_mean);
+        result.deep_best.daily_icir = num(b.rank_icir);
+      }
+      // 全 horizon 摘要(供 assess 否决④纯噪声救场 + 调试)
+      result.csv_ic = {
+        horizons: csvRows.map(r => ({
+          horizon: num(r.horizon),
+          rank_ic_mean: num(r.rank_ic_mean),
+          rank_icir: num(r.rank_icir),
+          hit_rate: num(r.hit_rate),
+          n_days: num(r.n_days),
+        })),
+        source: "default_test/csv_ic",
+      };
+    }
+  }
+
   return result;
 }
 
