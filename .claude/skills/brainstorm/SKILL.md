@@ -13,6 +13,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - `source`（可选）：idea 来源，`inspiration`（默认，发散思维）或 `hypothesis`（收敛验证——读 `.claude/hypothesis-framework.md` 按三道门槛构造合规假设）。
 - `n_factors`（可选）：候选数，默认 3。
 - `run_id`（被 research-loop 嵌套调用时传入）：用于写 state.factors。
+- `idea_id`（hypothesize 模式下 research-loop 传入）：用 `hypothesis_get` 读 argument_chain,判断假设验证方法(生成型可造因子 / 审计型造因子验证不了须分流)。inspiration 模式无。
 
 ## 工作环境 — factors.db 结构
 
@@ -45,6 +46,7 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 | `factor_similar {xname, k}` | 给定 xname 找相似（要求因子已入库，brainstorm 一般用不上）|
 | `iteration_list_open {top_k, source_status?}` | **检索待接续的迭代建议**（open suggestions，按 priority 降序）。库内 pass 精进 / dead_end 重试的未兑现建议。有相关的就接续成候选，演进链往下长 |
 | `graph_angle_coverage {}` | **角度饱和度**(新>优核心):各信息角度的因子数/dead_end 数,标 unexplored/thin/partial/saturated。saturated=已挖透新候选大概率 IC 冗余;fresh=未探索更可能正交 |
+| `hypothesis_get {idea_id}` | **读假设 argument_chain**:`constraint`(假设怎么验证)+ `falsifiable_trace`(可证伪预言)。判断验证方法是"造新因子"(生成型)还是"对已有因子做统计审计"(审计型)——审计型造因子验证不了,须分流 |
 
 ## 全品种约束
 
@@ -59,6 +61,10 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 - `factor_list {k:20}` — 最近因子状态
 - `graph_angle_coverage {}` — **角度饱和度**(新>优核心输入):saturated 角度(已挖透,新候选大概率 IC 冗余)vs fresh(unexplored/thin,更可能正交)。候选方向据此
 - **冗余模式避雷**(D):从 recent_lessons 识别"冗余毙"的 dead_end(key_weaknesses 含"冗余"/"pearson"/"残差"),记"X 角度+Y 算子 → 已和 Z 因子 IC 冗余"模式——候选须避开(换算子/角度/信号源)
+- `hypothesis_get {idea_id: <idea_id>}`(有 idea_id 时必调) — **读 argument_chain 的 `constraint`(怎么验证)+ `falsifiable_trace`(可证伪预言)**。
+  ⚠️ **验证方法判断**(决定能否造因子):
+  - **生成型**:constraint 要"造新因子,看它 IC/预测力满足预言"(如"X 的 IC 应≥0.04")→ 正常产候选(下步检索/出候选)。
+  - **审计型**:constraint 要"对**已有因子**做统计实验"(如 lagged-partial-correlation 残差 IC / purged CV / τ 扫描,对象是库内已存在因子名)→ **造因子验证不了,直接返回 `{non_generative:true,...}`**(见"输出格式"),不进检索/出候选步,让 research-loop 分流避免白跑。
 
 ### 第 2 步 · 围绕 idea 检索
 
@@ -99,6 +105,8 @@ description: 量化因子候选生成。触发 `/brainstorm [idea]` 或被 resea
 6. **接续优先**：若第 2 步检索到与 idea 相关的 open iteration 建议，至少 1 个候选应是接续候选（带 `iterates_from` + `suggestion_id`），并在 `coord_usage`/`diff_check` 里说明接续关系与差异点。没有相关 open 建议时，全部新造
 7. **角度新颖**(A·新>优):候选倾向 fresh/unexplored 角度(从 idea 的 angle 出发往未饱和子方向发散);落 saturated 角度的候选,`diff_check` 必须附"正交论证"——和同角度已有因子预期 IC 行为不同的具体依据(不同算子/不同 horizon/不同信号源)
 8. **冗余避雷**(D):候选须避开第1步捞到的"冗余模式"(X 角度+Y 算子→已和 Z 冗余),在 `db_research.found_redundancy` 记命中模式 + 说明本候选怎么避开(换算子/角度/信号源)
+9. **验证路径对齐**(A):候选必须能验证 `argument_chain.constraint`/`falsifiable_trace` 描述的方法——候选的算子/机制须能触及假设的可证伪预言(如预言"X 的 IC≥0.04",候选就得是能产出该 IC 的因子)。落 constraint 要求的验证维度外的候选=不忠实,不要造。
+10. **输出语义匹配假设**(A·忠实度):`output` 算子须匹配假设的 IC 裁判语义。**事件驱动/幅度语义因子**(flicker/spike/sign-flip/event 触发,假设预言涉及幅度阈值如 |IC|≥0.03 / sign_match / z-score):output **保留原始量级或 z-score,禁用 `percentile_rank(...)-0.5` 居中化**(rank 压缩幅度 + 非事件期泄漏条件信号,破坏事件假设的 falsifiable_trace IC 裁判 → reviewer 判 unfaithful)。**连续值/分布语义因子**(rank/分位本身是信号)可 percentile_rank。
 
 ## 持久化（写完候选后必须做）
 
@@ -115,6 +123,14 @@ persist_candidates {
 不要逐候选 run_save（多次调用易在输出大 JSON 后停止 + 点路径覆盖丢 schema 字段）。`persist_candidates` 一次搞定，返回 `{idea_id, n_factors}`。
 
 ## 输出格式
+
+**先判断**(第1步 `hypothesis_get` 读 argument_chain 后):
+
+- **审计型假设**(验证=对已有因子做统计实验,造因子验证不了)→ 返回此 JSON,**不进检索/出候选步,不调 persist_candidates**:
+```json
+{ "non_generative": true, "reason": "<为什么造因子验证不了,如:验证是对 VolRegimeBookPressure 做 lagged-partial-correlation 残差 IC,属统计审计非造因子>", "verification_method": "<constraint 摘要,供 research-loop 标记待统计验证>" }
+```
+- **生成型假设**(造新因子可验证)→ 返回下方 factors 数组,走 persist_candidates。
 
 严格 JSON，无其他文字：
 

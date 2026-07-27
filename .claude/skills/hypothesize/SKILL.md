@@ -75,7 +75,10 @@ Task({
 ## G4 · 落盘 + fail 分诊
 
 **verdict = pass**(s2 且 s4 都 pass):
-1. `mcp__quant-mcp__graph_add_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>, angle_code:<G1 explore 触发角度,仅 explore 操作加>}}` → 拿 `idea_id`。**explore 必带 angle_code**(因子 angle_code 血缘靠它,漏带 → 标错)
+1. `mcp__quant-mcp__graph_add_node {table:"ideas", data:{text, argument_chain, necessity_grade:<reviewer 判的 grade>, node_layer:<reasoner 建议的 DERIVED|HYPOTHESIS>, angle_code:<本 idea 的信息角度>}}` → 拿 `idea_id`。
+   - **所有操作都带 angle_code**(不只 explore):explore=G1 触发的 fresh_angle;generalize/fill=触发点(聚簇 target idea / 空节 idea)的 angle_code 继承,触发点无则 reasoner 据 idea 内容标最近邻 angle_ontology code。
+   - **为什么必带**:graph_angle_coverage 据 ideas.angle_code 判该角度已被触及(不再当 fresh);因子 angle_code 血缘也靠它。**漏带 → 该角度被当 fresh,graph 反复派 explore 产同方向对偶命题**(本轮 #154→#176→#178 反复 spoofing/前兆方向的根因)。
+   - **若用 `persist_argument_chain` 落 idea(替代 graph_add_node)也必须传 `angle_code` 参数**(同上)。
 2. 把 new_edges 里所有 `<NEW>` 替换为 `idea_id`
 3. `mcp__quant-mcp__graph_add_edges {edges: <替换后的 new_edges>}`
 4. 若操作=resolve_contradiction:`mcp__quant-mcp__graph_mark_contradiction_resolved {edge_id:<触发边id>, idea_id}`

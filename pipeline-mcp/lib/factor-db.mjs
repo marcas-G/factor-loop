@@ -728,11 +728,11 @@ export function addIdea(text, parentIdeaId = null) {
 //     necessary = 过 S2+S4 真硬证; identification = S2 硬但 S4 退化为可识别标量(如 Roll s=2√(-Cov));
 //     conditional = S2 有 S4 弱; draft = 待补
 export function addHypothesis(text, argumentChain, opts = {}) {
-  const { parentIdeaId = null, necessityGrade = null } = opts;
+  const { parentIdeaId = null, necessityGrade = null, angleCode = null } = opts;
   const chainJson = argumentChain != null ? JSON.stringify(argumentChain) : null;
   const info = db().prepare(
-    `INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade) VALUES (?, ?, 'open', ?, ?)`
-  ).run(text, parentIdeaId, chainJson, necessityGrade);
+    `INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, angle_code) VALUES (?, ?, 'open', ?, ?, ?)`
+  ).run(text, parentIdeaId, chainJson, necessityGrade, angleCode);
   return Number(info.lastInsertRowid);
 }
 
@@ -1363,7 +1363,7 @@ export function addGraphNode({ table, data }) {
       : null;
     const info = db().prepare(
       `INSERT INTO ideas (text,parent_idea_id,status,argument_chain,necessity_grade,node_layer,angle_code)
-       VALUES (?,?,'open',?,?,?,?,?)`
+       VALUES (?,?,'open',?,?,?,?)`
     ).run(data.text, data.parent_idea_id ?? null, chain, data.necessity_grade ?? null, data.node_layer ?? "HYPOTHESIS", data.angle_code ?? null);
     return Number(info.lastInsertRowid);
   }
@@ -1468,15 +1468,23 @@ export function queryAngleCoverage() {
            COUNT(f.xname) AS n_factors,
            COALESCE(SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END),0) AS n_dead_end,
            COALESCE(SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END),0) AS n_evaluated,
+           (SELECT COUNT(*) FROM ideas i WHERE i.angle_code=a.code) AS n_ideas,
            MAX(f.latest_icir) AS max_icir
     FROM angle_ontology a
     LEFT JOIN factors f ON f.angle_code=a.code AND f.deprecated_at IS NULL
     GROUP BY a.code,a.name,a.field_family,a.extraction,a.signal_target,a.theory_axiom
     ORDER BY n_factors ASC`).all();
   return rows.map((r) => {
-    const n = r.n_factors, nd = r.n_dead_end;
+    const n = r.n_factors, nd = r.n_dead_end, ni = r.n_ideas || 0;
     const sc = graphConstants().saturation;
-    const saturation = n === 0 ? "unexplored" : (n >= sc.min_n_saturated && nd >= n * sc.dead_ratio_saturated ? "saturated" : (n <= sc.max_n_thin ? "thin" : "partial"));
+    // saturation 把 idea 占用算进去:有 idea(方向已推理触及)但无 factor → partial
+    // (该产因子验证,非 explore fresh 目标),避免 graph 反复往"假 fresh"角度派 explore 产同方向对偶命题
+    let saturation;
+    if (n === 0 && ni === 0) saturation = "unexplored";        // 真 fresh:无 factor 无 idea
+    else if (n === 0 && ni > 0) saturation = "partial";         // 有 idea 待验证(方向已触及),非 fresh
+    else if (n >= sc.min_n_saturated && nd >= n * sc.dead_ratio_saturated) saturation = "saturated";
+    else if (n <= sc.max_n_thin) saturation = "thin";
+    else saturation = "partial";
     return { ...r, saturation };
   });
 }

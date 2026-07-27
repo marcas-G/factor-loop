@@ -33,14 +33,16 @@ export const persistArgumentChainSchema = {
         enum: ["necessary", "identification", "conditional", "draft"],
         description: "必然性分级。necessary=过S2+S4真硬证; identification=S2硬但S4退化为可识别标量(Roll式 s=2√(-Cov)); conditional=S2有S4弱; draft=待补。reviewer pass 时判定,degrade 时按建议填。",
       },
+      angle_code: { type: "string", description: "可选: 信息角度 code(explore 操作产时填 G1 触发角度;graph_angle_coverage 据此判该角度已被 idea 触及,不再当 fresh,避免 graph 反复往已触及角度派 explore 产同方向对偶命题)" },
     },
     required: ["text", "argument_chain"],
   },
 };
-export async function persistArgumentChainHandler({ text, argument_chain, parent_idea_id, necessity_grade }) {
+export async function persistArgumentChainHandler({ text, argument_chain, parent_idea_id, necessity_grade, angle_code }) {
   const id = factorDb.addHypothesis(text, argument_chain, {
     parentIdeaId: parent_idea_id ?? null,
     necessityGrade: necessity_grade ?? null,
+    angleCode: angle_code ?? null,
   });
   return { idea_id: id };
 }

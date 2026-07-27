@@ -308,17 +308,24 @@ export function extractMetricsFromDailyIc(dailyIcPreview) {
   return { ic_mean: icMean, icir, sharpe, rank_ic: rankIc };
 }
 
-// check_output_missing 时检测因子值是否全零：读 feval/screening.csv 的 zero_ratio 列 max。
-// 全零(zero_ratio>=0.999) + daily_ic 缺失 = DAG 缓存陷阱特征（代码对但缓存旧全零结果）。
-// 文件缺失/无数据 → false（无法判全零，不触发换名）。
-export function isAllZeroFromScreening(checkOutput, featureKey) {
+// 读 feval/screening.csv 的 zero_ratio 列 max(因子输出为零的比例,0-1)。
+// 高 zero_ratio = 因子输出稀疏(质量信号:门控叠加/冷启动过长/底事件罕见)。
+// 文件缺失/无数据 → null(无法判)。
+export function maxZeroRatioFromScreening(checkOutput, featureKey) {
   const screeningPath = path.join(checkOutput, featureKey, "dailyX", `${featureKey}_feval`, "screening.csv");
   const csv = readCsv(screeningPath);
-  if (!csv || !csv.rows || !csv.rows.length) return false;
+  if (!csv || !csv.rows || !csv.rows.length) return null;
   let maxZero = 0;
   for (const r of csv.rows) {
     const z = num(r.zero_ratio);
     if (z != null && z > maxZero) maxZero = z;
   }
-  return maxZero >= 0.999;
+  return maxZero;
+}
+
+// check_output_missing 时检测因子值是否全零：maxZeroRatio>=0.999 + daily_ic 缺失 = DAG 缓存陷阱特征
+// （代码对但缓存旧全零结果）。文件缺失/无数据 → false（无法判全零，不触发换名）。
+export function isAllZeroFromScreening(checkOutput, featureKey) {
+  const z = maxZeroRatioFromScreening(checkOutput, featureKey);
+  return z != null && z >= 0.999;
 }

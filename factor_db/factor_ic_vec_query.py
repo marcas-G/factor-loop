@@ -54,6 +54,7 @@ def find_correlated_factors(
     min_abs_pearson: float = 0.5,
     same_symbol_only: bool = True,
     same_horizon_only: bool = True,
+    status_filter: str | None = "evaluated",
 ) -> list[dict]:
     """找和 target IC 行为相似的因子。
 
@@ -64,6 +65,9 @@ def find_correlated_factors(
         min_abs_pearson: Pearson 绝对值阈值
         same_symbol_only: 限定同 symbol（推荐）
         same_horizon_only: 限定同 y_horizon（推荐，跨 horizon 比较业务意义弱）
+        status_filter: 基底只对照该 status 的因子(默认 'evaluated')。
+            dead_end 是冗余/失败毙的废品,不该进冗余比对基底——否则每轮 dead_end 累积,
+            新因子越来越易撞废品被判冗余(越挖越难)。传 None 关闭(看全 status)。
 
     Returns:
         [{"factor", "symbol", "freq", "y_horizon", "distance", "pearson_approx"}, ...]
@@ -72,12 +76,15 @@ def find_correlated_factors(
     if target_blob is None:
         return []
 
+    # status 过滤会筛掉 dead_end,扩大搜索 k 补偿(否则过滤后结果不足 top_k)
+    search_k = top_k * 3 if status_filter else top_k
+
     sql = """
         SELECT factor_xname, symbol, freq, y_horizon, distance
         FROM factor_ic_vec
         WHERE embedding MATCH ? AND k = ?
     """
-    params: list = [target_blob, top_k]
+    params: list = [target_blob, search_k]
     if same_symbol_only:
         sql += " AND symbol = ?"
         params.append(symbol)
@@ -87,11 +94,22 @@ def find_correlated_factors(
 
     sql += " ORDER BY distance"
 
+    # status 过滤集合(基底只留 evaluated,排除 dead_end 污染)
+    valid_xnames = None
+    if status_filter:
+        valid_xnames = {
+            r[0] for r in conn.execute(
+                "SELECT xname FROM factors WHERE status = ?", (status_filter,)
+            ).fetchall()
+        }
+
     results = []
     for factor, sym, frq, yh, dist in conn.execute(sql, params).fetchall():
         if (factor == target_factor and sym == symbol
                 and frq == freq and yh == y_horizon):
             continue
+        if valid_xnames is not None and factor not in valid_xnames:
+            continue  # dead_end/其他 status 不进冗余基底
         approx = _l2_to_pearson(dist)
         if abs(approx) >= min_abs_pearson:
             results.append({
