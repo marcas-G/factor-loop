@@ -49,13 +49,11 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 2. **因子候选**（基于假设产 N 实现验证，非坐标拼装）：调 Skill `brainstorm`，传 `{idea: state.idea, idea_id: state.idea_id, n_factors: 3, run_id}`。
    - brainstorm 基于 hypothesize 产的假设，产 N 个因子实现（同一假设的不同验证角度/实现方式——围绕 argument_chain 的核心机制构造）
    - brainstorm skill 内部：MCP 摸底 + 检索 → 生成候选（全品种 feeds）→ `persist_candidates` + run_save(factors)
-   - **审计型假设分流**(A+B):brainstorm 读 argument_chain.constraint 判断验证方法。若返回 `{non_generative: true, ...}`(验证=对已有因子做统计实验,造因子验证不了)→ **不派 run-factor**(避免盲造不忠实因子白跑),`run_save {patch: {idea_verdict: "需统计实验验证", idea_conclusion: "<non_generative.verification_method>", status: "done", finished_at: <ISO>}}` 后**立即进 Step4**(报告"假设 #X 是审计型,验证方法=<...>,需离线统计实验,本轮不造因子")。
 3. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
 
 **连续失败处理**：brainstorm skill 内部 MCP 连续失败 3 次会自己 `run_save {status: "paused"}` 并停止；主会话检测到 `state.status == "paused"` 时中止后续 Step。
 
-**→ 衔接硬规则**：brainstorm 返回 **factors JSON** 后，**必须立即在同一回合**于一个消息内并行发 3 个 `Task` (run-factor-agent) tool call。禁止输出"brainstorm 已完成，3 个候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置，必须严守。
-   - **例外**:brainstorm 返回 `{non_generative: true}`(审计型假设,造因子验证不了)→ **不派 run-factor**,`run_save {status:"done", idea_verdict:"需统计实验验证", ...}` 后立即进 Step4(汇报)。这是设计内分流,不违反衔接硬规则。
+**→ 衔接硬规则**：brainstorm 返回 JSON 后，**必须立即在同一回合**于一个消息内并行发 3 个 `Task` (run-factor-agent) tool call。禁止输出"brainstorm 已完成，3 个候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置，必须严守。
 
 ## Step 2 · 每个 factor 跑 runFactor（Task 子代理，并发 3）
 
