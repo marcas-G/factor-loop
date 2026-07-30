@@ -305,6 +305,9 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
           horizon: num(b.horizon),
           pearson_pooled: num(b.pearson_pooled),
           pair: `${b.x_col}@${b.horizon}s`,
+          zero_rate: num(b.zero_rate),
+          active_rate: num(b.active_rate),
+          pearson_nonzero: num(b.pearson_nonzero),
         };
         result.deep_best.daily_rank_ic = num(b.rank_ic_mean);
         result.deep_best.daily_icir = num(b.rank_icir);
@@ -317,6 +320,9 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
           rank_icir: num(r.rank_icir),
           hit_rate: num(r.hit_rate),
           n_days: num(r.n_days),
+          zero_rate: num(r.zero_rate),
+          active_rate: num(r.active_rate),
+          pearson_nonzero: num(r.pearson_nonzero),
         })),
         source: "default_test/csv_ic",
       };

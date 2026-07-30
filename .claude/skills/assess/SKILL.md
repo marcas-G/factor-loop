@@ -153,14 +153,23 @@ Task({
 4. **查正交(第三维,check_done 必做)**:据冗余 refine verdict
 
    **优先用平台 csv_ic 产物(2026-07-29 新增, 替代悬置的 ic_refresh dailyX)**:
-   - **csv_ic_xcorr(因子间相关性矩阵)**: 读 `state.factors[i].evidence.eval_metrics.csv_ic.xcorr_md`(platform_check_factor 已抓, metrics.mjs 已适配)。写临时文件后调 Bash `python3 factor_db/csv_ic_adapter.py find_redundant /tmp/xcorr.md <当前xname> --threshold 0.6` 解析（markdown 表格→因子对+|r|+冗余标记, csv_ic_adapter 已实现+测试通过）。查当前因子与库内因子 |r|:
-     - `|r| ≥ 0.6` → **verdict=fail 硬否决**(IC 行为冗余,坚决不放过)。`key_weaknesses` 写"与 {factor} IC 相关 |r|={x}, 平台 xcorr 硬否决"
-     - 最高 `|r| < 0.4` → `key_strengths` 写"与库内因子 IC 正交(最高 |r|={x}), 平台 xcorr"
-     - `0.4 ≤ |r| < 0.6` → 中性, `key_weaknesses` 提一句
-   - **csv_ic_daily_ts(逐日 IC 时序)**: 读 `state.factors[i].evidence.eval_metrics.csv_ic.daily_ts`(平台逐日 IC, 替代 ic_refresh dailyX 缺口)。写临时 csv 后调 Bash `python3 factor_db/csv_ic_adapter.py ingest_daily_ts /tmp/daily_ts.csv <xname>` 写入 factor_ic_daily 表（供 ic_correlate/residual 查, 绕过 dailyX 下载）。
 
-   **回退(无 csv_ic_xcorr/daily_ts — 旧平台或 metrics.mjs 未抓到)**:
-   - 调 `factor_ic_refresh {xname}`(default_test 平台常 ok:false 无 dailyX)→ `factor_ic_correlate` → `factor_residual_ic_strength`, 判据同上(|pearson|≥0.6 fail / <0.4 正交 / 残差<0.5 fail)。**容错**:ok:false 则跳过, verdict 照常, `key_weaknesses` 注"ic 向量刷新失败, 冗余/对齐未检(平台 csv_ic_ts/xcorr 也未抓到)"
+   ⚠️ **python 环境**: `csv_ic_adapter.py`(ingest/parse) 用系统 `python3`(csv模块); `vec_refresh_from_daily.py` 用 `/home/lgao/quant-venv/bin/python3`(有sqlite_vec)。不混用。
+   ⚠️ **metrics.mjs 缓存**: pipeline-mcp 可能缓存旧版, evidence 可能没 csv_ic.daily_ts/xcorr_md。**workaround**: 没抓到时 Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录文件。
+
+   - **csv_ic_xcorr(因子间相关性矩阵)**:
+     1. 读 `state.factors[i].evidence.eval_metrics.csv_ic.xcorr_md`; 没有则 Bash find check 输出目录的 `csv_ic_xcorr.md`
+     2. Bash `python3 factor_db/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`
+     - `|r| ≥ 0.6` → **verdict=fail 硬否决**。`key_weaknesses` 写"与 {factor} IC 相关 |r|={x}, 平台 xcorr 硬否决"
+     - 最高 `|r| < 0.4` → `key_strengths` 写"与库内因子 IC 正交(最高 |r|={x}), 平台 xcorr"
+   - **csv_ic_daily_ts(逐日 IC → ic_correlate)**:
+     1. 读 `state.factors[i].evidence.eval_metrics.csv_ic.daily_ts`; 没有则 Bash find check 输出目录的 `csv_ic_ts.csv`
+     2. Bash `python3 factor_db/csv_ic_adapter.py ingest_daily_ts <ts_file> <xname>` 写入 factor_ic_daily
+     3. Bash `/home/lgao/quant-venv/bin/python3 factor_db/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
+     4. 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}` 查冗余
+
+   **回退(check 输出目录也无 csv_ic_ts/xcorr — 真旧平台)**:
+   - 调 `factor_ic_refresh {xname}`(default_test 常 ok:false 无 dailyX)→ `factor_ic_correlate` → `factor_residual_ic_strength`, 判据同上。**容错**:ok:false 则跳过, verdict 照常, `key_weaknesses` 注"ic 向量刷新失败, 冗余/对齐未检"
 5. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
 
 > IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.6。
