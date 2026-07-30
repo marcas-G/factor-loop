@@ -151,13 +151,16 @@ Task({
    - 再初判(`faithful` 或无 argument_chain):按"一、判定核心"(三维度综合 + 否决前置)推理初步 verdict
 3. **入库**:`persist_factor {run_id, factor_index, verdict}`(工具内部从 state.json 读 factor/factorFile/checkResult,无需拼装)
 4. **查正交(第三维,check_done 必做)**:据冗余 refine verdict
-   - 调 `factor_ic_refresh {xname}`:刷新 IC 向量入库(check_done 才有 dailyX 可算),同时产出 @1 因果 IC。**双重用途**:① 冗余检索向量(下步 correlate 用);② **对齐一致性核对**(见"判定态度·数据信任")——对比 feed IC(screening 的 icir)与 @1 因果 IC:符号一致且量级不离谱则对齐可信;符号反或背离(feed ICIR>2 但因果 ICIR<0.3)才诊断为"对齐不一致",`key_weaknesses` 写"feed IC{feed_icir} 与 @1 因果 IC{causal_icir} 对齐不一致"并倾向 fail。**容错**:`ok:false` 则跳过,verdict 照常,`key_weaknesses` 注明"ic 向量刷新失败,冗余/对齐未检"
-   - 调 `factor_ic_correlate {target: xname}`:查库内行为冗余因子(按 `|pearson|` 排序)
-   - 纳入 verdict:
-     - `|pearson| ≥ 0.6` → **verdict=fail 硬否决**(IC 行为冗余,坚决不放过——冗余因子占名额不产新息,ICIR 再高、机制叙述再不同也不豁免;真有机制差异应在低相关的新角度体现,不是在高相关的冗余里辩解)。`key_weaknesses` 写"与 {factor} IC 行为冗余 pearson={x}({vs_scene}),硬否决"
-     - 最高 `|pearson| < 0.4` → `key_strengths` 写"与库内因子 IC 行为正交(最高 |pearson|={x}),增量空间大"
-     - `0.4 ≤ |pearson| < 0.6` → 中性,`key_weaknesses` 提一句
-   - 调 `factor_residual_ic_strength {target: xname}`(库内有 factor_ic_daily 时,补 pairwise 盲区):相对全库基底的残差比例——某因子 pairwise 都不高(和谁都不像)但合起来仍冗余时,pearson 抓不到,residual 能抓。判据:`factor_residual_ic_strength < 0.5` → **verdict=fail 硬否决**(预测力多被库内线性解释,冗余坚决不放过,即使 pairwise 不高);`> 0.7` → `key_strengths` 写"残差 IC 强度={x},预测力多为新息"。**容错**:库不足/无 factor_ic_daily → 脚本返回 strength=1.0(无区分力),`key_weaknesses` 注"残差 IC 未评估(库不足)",不据此判。
+
+   **优先用平台 csv_ic 产物(2026-07-29 新增, 替代悬置的 ic_refresh dailyX)**:
+   - **csv_ic_xcorr(因子间相关性矩阵)**: 读 `state.factors[i].evidence.eval_metrics.csv_ic.xcorr_md`(platform_check_factor 已抓, metrics.mjs 已适配)。平台算好的因子间 |r| 矩阵, |r|>0.7 加粗标记冗余对。查当前因子与库内因子 |r|:
+     - `|r| ≥ 0.6` → **verdict=fail 硬否决**(IC 行为冗余,坚决不放过)。`key_weaknesses` 写"与 {factor} IC 相关 |r|={x}, 平台 xcorr 硬否决"
+     - 最高 `|r| < 0.4` → `key_strengths` 写"与库内因子 IC 正交(最高 |r|={x}), 平台 xcorr"
+     - `0.4 ≤ |r| < 0.6` → 中性, `key_weaknesses` 提一句
+   - **csv_ic_daily_ts(逐日 IC 时序)**: 读 `state.factors[i].evidence.eval_metrics.csv_ic.daily_ts`(平台算好的逐日 IC, 替代 ic_refresh 的 dailyX 下载缺口)。供 ic_correlate/residual 深入查(xcorr 不够或需残差分析时, 从 daily_ts 重建 IC 向量)。
+
+   **回退(无 csv_ic_xcorr/daily_ts — 旧平台或 metrics.mjs 未抓到)**:
+   - 调 `factor_ic_refresh {xname}`(default_test 平台常 ok:false 无 dailyX)→ `factor_ic_correlate` → `factor_residual_ic_strength`, 判据同上(|pearson|≥0.6 fail / <0.4 正交 / 残差<0.5 fail)。**容错**:ok:false 则跳过, verdict 照常, `key_weaknesses` 注"ic 向量刷新失败, 冗余/对齐未检(平台 csv_ic_ts/xcorr 也未抓到)"
 5. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
 
 > IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.6。

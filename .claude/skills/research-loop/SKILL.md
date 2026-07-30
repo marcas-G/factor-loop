@@ -17,7 +17,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 | 边界 | 必须立即做的第一个 tool call |
 |---|---|
-| Step 0 → Step 1 | `Skill brainstorm`（或按 IDEA_SOURCE 选 inspiration/hypothesis-pool 抽 coords）|
+| Step 0 → Step 1 | `Bash python3 factor_db/transform_step1.py`（变换引擎产候选）|
 | Step 1 → Step 2 | 在一个消息内并行发 3 个 `Task` (run-factor-agent) |
 | Step 2 → Step 3 | 对第一个 `check_done` factor 调 `Skill assess` |
 | Step 3 → Step 4 | `run_save {status: "done", finished_at: ...}` |
@@ -39,21 +39,24 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：Step 0 完成（拿到 run_id 或读完 state）后，**必须立即在同一回合**进入 Step 1 的第一个 tool call（抽 coords / 调 Skill brainstorm）。禁止输出"已初始化，开始 brainstorm"之类的纯文字回合。
 
-## Step 1 · 假设生成 + 因子候选（hypothesize → brainstorm）
+## Step 1 · 因子候选（变换引擎: 父因子 → 变换 → N 候选）
 
-1. **假设生成**（图驱动，替代坐标抽样）：调 Skill `hypothesize`，传 `{run_id}`。
-   - hypothesize 内部自主：`graph_select_operation` 动态打分选操作 → 派 `graph-reasoner-agent` 在知识图上做结构化扩展（resolve_contradiction / generalize_from_refutation / fill_chain_gap / orthogonal_branch）→ 派 `reviewer-agent` 对抗审稿 → `graph_add_node` / `graph_add_edges` 落盘
-   - 产出：1 个必然假设（necessary/identification）+ argument_chain + necessity_grade + idea_id + operation_used
-   - 回主会话：`state.idea` / `state.idea_id`（带 argument_chain + grade）已落盘
-   - **卡住处理（无 fallback）**：hypothesize 返回 `{no_hypothesis: true}`（全角度 saturated / 触发点耗尽）→ `run_save {status: "paused", paused_reason: "图推理耗尽，无新假设"}` + 向用户报告 + **停止**（衔接硬规则 paused 例外）
-2. **因子候选**（基于假设产 N 实现验证，非坐标拼装）：调 Skill `brainstorm`，传 `{idea: state.idea, idea_id: state.idea_id, n_factors: 3, run_id}`。
-   - brainstorm 基于 hypothesize 产的假设，产 N 个因子实现（同一假设的不同验证角度/实现方式——围绕 argument_chain 的核心机制构造）
-   - brainstorm skill 内部：MCP 摸底 + 检索 → 生成候选（全品种 feeds）→ `persist_candidates` + run_save(factors)
-3. 回主会话后，`state.idea` / `state.idea_id` / `state.factors` 已落盘
+替代原 hypothesize + brainstorm（图推理改用变换引擎）。从已有因子（PARENT_POOL）随机选父因子, 经变换引擎产 N 个新因子候选。
 
-**连续失败处理**：brainstorm skill 内部 MCP 连续失败 3 次会自己 `run_save {status: "paused"}` 并停止；主会话检测到 `state.status == "paused"` 时中止后续 Step。
+1. **跑变换引擎产候选骨架**: 调 Bash `python3 factor_db/transform_step1.py --n 3`（从 PARENT_POOL 随机选父, 产 3 候选）。
+   - 产出 JSON: 3 个候选, 每个含 {commands(变换指令, 自然语言), new_label(新标签), param_hints(参数连带提示), factor_skeleton(name/tags/params/categories)}
+   - factor_skeleton 的 formula/intuition 留空, 待下一步 LLM 填
 
-**→ 衔接硬规则**：brainstorm 返回 JSON 后，**必须立即在同一回合**于一个消息内并行发 3 个 `Task` (run-factor-agent) tool call。禁止输出"brainstorm 已完成，3 个候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置，必须严守。
+2. **LLM 改写描述 + 填 factor**: 对每个候选, 主 agent:
+   - 读父因子描述（调 MCP `factor_detail {xname: <父因子名>}` 取 formula_text/intuition）+ 候选的 commands（变换指令）
+   - 按变换指令改写父因子 formula + intuition → 新因子 formula + intuition（注意 param_hints: 涉及参数重定的, 标注占位值 + 说明）
+   - 合并: factor_skeleton(name/tags/params/categories) + 新填 formula/intuition → 完整 factor 对象
+
+3. **persist_candidates**: 调 MCP `persist_candidates {run_id, idea_text: "变换引擎: 父<父因子名> + <commands摘要>", factors: [3个完整factor对象]}` 存 state。
+
+4. 回主会话后, `state.factors` 已落盘（3 个候选, 含 formula/intuition/tags/params）。
+
+**→ 衔接硬规则**：persist_candidates 返回后, **必须立即在同一回合**于一个消息内并行发 3 个 `Task` (run-factor-agent) tool call。禁止输出"候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置, 必须严守。
 
 ## Step 2 · 每个 factor 跑 runFactor（Task 子代理，并发 3）
 

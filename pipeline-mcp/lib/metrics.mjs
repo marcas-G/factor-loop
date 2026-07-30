@@ -320,6 +320,20 @@ export function extractMetricsFromCheckOutput(checkOutput, xname) {
         })),
         source: "default_test/csv_ic",
       };
+      // 逐日 IC 时序(2026-07-29 平台新增 csv_ic_ts.csv, 供正交检查 ic_correlate/residual)
+      // 替代 ic_refresh 的 dailyX 下载(default_test 无 dailyX), 直接从平台产物读逐日 IC
+      const csvIcTsPath = findFirst(checkOutput, [`${xname}/csv_ic/csv_ic_ts.csv`]);
+      if (csvIcTsPath) {
+        const tsRows = readCsv(csvIcTsPath)?.rows;
+        if (tsRows && tsRows.length) result.csv_ic.daily_ts = tsRows;
+      }
+      // 因子间相关性矩阵(2026-07-29 平台新增 csv_ic_xcorr.md, |r|>0.7 加粗冗余对)
+      // assess CE1 正交检查可直接用(无需 ic_correlate 自己算)
+      const csvIcXcorrPath = findFirst(checkOutput, [`${xname}/csv_ic/csv_ic_xcorr.md`]);
+      if (csvIcXcorrPath) {
+        try { result.csv_ic.xcorr_md = require('fs').readFileSync(csvIcXcorrPath, 'utf8'); }
+        catch (e) { /* 忽略读取失败 */ }
+      }
     }
   }
 
