@@ -125,51 +125,58 @@ def find_redundant(parsed, target_factor, threshold=0.6):
     return redundant
 
 
-def ingest_daily_ts(csv_path, factor_xname, symbol='SHFE-AG', freq='default', y_horizon=1):
+def ingest_daily_ts(csv_path, factor_xname, symbol='SHFE-AG', freq='default', y_horizon=None):
     """把 csv_ic_ts.csv(逐日 IC) 写入 factor_ic_daily 表。
 
-    供 ic_correlate/residual 查（替代 ic_refresh 的 dailyX 下载）。
-    尝试常见列名: date/Date/trade_date + rank_ic/ic/ic_mean/rank_ic_mean。
+    实际格式(2026-07-30 验证): date, factor, x_col, horizon, y_col, rank_ic, pearson_day
+    - horizon 列: 多 horizon(1/5/10/60/300), 每 date×horizon 一行
+    - x_col 含 symbol(X.SHFE-AG@...), 自动提取; 或用 symbol 参数兜底
 
-    返回写入行数。
+    返回 {ok, written}。
     """
-    import pandas as pd
+    import csv
+    import re
     from factor_db import db
 
-    df = pd.read_csv(csv_path)
-    # 找日期列
-    date_col = None
-    for c in ['date', 'Date', 'trade_date', 'datetime', 'day']:
-        if c in df.columns:
-            date_col = c
-            break
-    # 找 IC 列
-    ic_col = None
-    for c in ['rank_ic', 'ic', 'ic_mean', 'rank_ic_mean', 'spearman', 'IC']:
-        if c in df.columns:
-            ic_col = c
-            break
-
-    if not date_col or not ic_col:
-        return {'ok': False, 'error': f'列名不匹配: date_col={date_col}, ic_col={ic_col}, 实际列={list(df.columns)}'}
+    with open(csv_path, 'r', encoding='utf-8') as fh:
+        reader = csv.DictReader(fh)
+        cols = reader.fieldnames or []
+        date_col = next((c for c in ['date', 'Date', 'trade_date'] if c in cols), None)
+        ic_col = next((c for c in ['rank_ic', 'ic', 'ic_mean', 'rank_ic_mean'] if c in cols), None)
+        horizon_col = next((c for c in ['horizon', 'Horizon', 'h'] if c in cols), None)
+        xcol_col = next((c for c in ['x_col', 'factor', 'X'] if c in cols), None)
+        if not date_col or not ic_col:
+            return {'ok': False, 'error': f'列名不匹配: date={date_col}, ic={ic_col}, 实际={cols}'}
+        rows = list(reader)
 
     written = 0
     with db.get_conn() as conn:
-        # 先清该因子的旧 daily（避免重复）
-        conn.execute(
-            "DELETE FROM factor_ic_daily WHERE factor_xname = ? AND symbol = ? AND y_horizon = ?",
-            (factor_xname, symbol, y_horizon)
-        )
-        for _, row in df.iterrows():
+        conn.execute("DELETE FROM factor_ic_daily WHERE factor_xname = ?", (factor_xname,))
+        for row in rows:
             date = str(row[date_col])
-            ic = row[ic_col]
-            if pd.isna(ic):
+            ic_str = (row.get(ic_col) or '').strip()
+            if not ic_str or ic_str.lower() == 'nan':
                 continue
+            try:
+                ic = float(ic_str)
+            except ValueError:
+                continue
+            h_str = (row.get(horizon_col) or '').strip() if horizon_col else ''
+            try:
+                h = int(h_str) if h_str else (y_horizon or 1)
+            except ValueError:
+                h = y_horizon or 1
+            sym = symbol
+            xcol_val = (row.get(xcol_col) or '') if xcol_col else ''
+            if xcol_val:
+                m = re.search(r'X\.(SHFE-\w+?)[@\.]', xcol_val)
+                if m:
+                    sym = m.group(1)
             conn.execute(
                 "INSERT OR REPLACE INTO factor_ic_daily "
                 "(factor_xname, symbol, freq, y_horizon, date, ic) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (factor_xname, symbol, freq, y_horizon, date, float(ic))
+                (factor_xname, sym, freq, h, date, ic)
             )
             written += 1
 
