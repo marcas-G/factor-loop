@@ -26,12 +26,12 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 
 ## 一、判定核心(评价标准)
 
-因子评价不只看单一预测指标。按**三维度综合 + 一票否决硬关**评,区分因子是"找到不变结构"还是"换种方式过拟合"。所有指标来自平台/本地代码聚合的评估数据(非 LLM 自评)。
+因子评价 = **过关闸门(二元)→ 冗余度首要(价值排序)** 双轨。先过闸门(忠实度 + 信噪比 ICIR≥0.3 + 效应量 |rank_ic|≥0.01 + 可交易 + 无符号/推进反转);过闸门的因子再按**冗余度**(对组合的边际信息贡献)定去留——真正交 pass、冗余 fail。**ICIR 强弱只作过关闸门、不作排序依据**:组合价值=信息维度多样性,不是单 ICIR 高。所有指标来自平台/本地代码聚合的评估数据(非 LLM 自评)。
 
 ### 判定态度
 
 - 单独评估此因子(不跟其他候选对比)
-- **不只看 ICIR 阈值**:三维度综合,ICIR 只是第一维其一
+- **ICIR 是过关闸门非排序键**:可信 ICIR≥0.3 过关(见否决④),过闸门后强弱不再管,交给冗余度首要
 - **强假设**:因子是否回应了 idea 的核心假设(hypothesis 在数据上验证)
 - **强证据**:所有结论引用具体数字
 - **一票否决前置**:否决任一命中直接 `fail`,不进综合;三维度数据不全时 verdict 谨慎
@@ -53,11 +53,11 @@ Task({
 
 **判据**:reviewer 返回 faithful/unfaithful。
 - `unfaithful` → **一票否决**,verdict=fail(因子未验证假设,即使 IC 高)。key_weaknesses 写"实现偏离假设核心机制: <偏离点>"。
-- `faithful` → 进经验维度(下述三维度综合)。
+- `faithful` → 进经验维度(下述双轨判定:过关闸门 + 冗余度首要)。
 
 **双轨本质**:忠实度(因子有没有验证假设)+ 经验(因子有没有效)。忠实度是假设验证的前提——不忠实则因子与假设无关,IC 高也是别的机制的功劳,假设未被验证。
 
-> **🎯 新 > 优(全局原则)**:通过判据是"正交新颖",不是"指标强"。**ICIR 低不否决**(弱信号 0.05–1.5 只要正交不冗余即 pass),**冗余才否决**(pearson≥0.6 / 残差<0.5 硬卡)。宁可收新颖弱信号,不要高 IC 冗余因子占名额。
+> **🎯 冗余度首要(全局原则)**:因子价值 = 对组合的边际信息贡献,**由冗余度决定,不由 ICIR 强弱决定**。ICIR 仅作过关闸门(可信口径≥0.3,见否决④);过闸门后**冗余度是首要排序键**:真正交(pearson<0.6 且残差≥0.5)= 高价值 pass,哪怕 ICIR 中等;冗余(pearson≥0.6 或残差<0.5)= fail,哪怕 ICIR 强。宁可收正交的中等信号,不要高 ICIR 冗余因子占名额。⚠️ 信噪比<0.3 不过闸门——低信噪比 IC 是噪声,和谁都低相关→假"正交",冗余度判定不可信。
 
 ### 第一维 · 预测能力(秩空间,弃 pearson)
 
@@ -65,7 +65,8 @@ Task({
 
 | 指标 | 判断标准 | 数据来源 |
 |---|---|---|
-| **秩 IC 的 ICIR/t 值**(首要) | 看 \|ICIR\|≥1.5 达标(**只分强弱档,不否决低指标**——新>优:0.05–1.5 弱信号只要正交不冗余仍 pass)——**负 ICIR = 反向信号,反着用即有效,\|ICIR\| 大算强不算失败**(勿因负值判弱);t 值显著 + std 低 | screening(Spearman / ICIR / sign_match_rate) |
+| **秩 IC 的 ICIR**(过关闸门,非排序键) | 可信 ICIR≥0.3 过关(稀疏 zero_rate≥0.5 用 daily,稠密用 screening pooled,见"第一维补");<0.3 信噪比不足→fail。≥0.3 后 ICIR 强弱不再区分(只过闸门),不作通过依据,交给冗余度首要。负 ICIR=反向信号反着用,看绝对值 | screening / daily |
+| **秩 IC 效应量**(过关闸门) | 可信 `\|rank_ic\|≥0.01` 过关。<0.01 效应极小(扣成本净亏)。和 ICIR 独立,都过才过关 | screening.ic_mean / daily mean_ic |
 | **平稳性 + 差分**(新增) | ADF p<0.05 已平稳 → 无需差分;非平稳且 diff_improvement>0 → 该差分 | stationarity(adf_pvalue / need_differential / orig_ic / diff_ic / diff_improvement) |
 | 显著性 | Welch t + p_value | zero |
 | 分组单调性 | 5 组收益平滑严格单调 | 待补 |
@@ -75,6 +76,17 @@ Task({
 - `is_stationary=true`(ADF p<0.05):因子日级平稳,不漂移,直接用原始信号 → key_strengths 写"因子平稳(ADF p={x}),无需差分"
 - `is_stationary=false` 且 `diff_improvement>0`(差分后 pooled IC 升):非平稳但差分能提升 → key_weaknesses 写"因子非平稳(ADF p={x}),差分后 IC 改善{diff_improvement},建议用差分信号"
 - `is_stationary=false` 且 `diff_improvement≤0`:非平稳且差分无效 → 倾向 fail(信号含漂移噪声,差分也救不了)
+
+### 第一维补 · 稀疏因子口径(关键,防 pooled ICIR 虚高)
+
+`screening.icir` / `csv_ic.horizons[].rank_icir` 是 **pooled rank IC**(全样本拼一起算一个秩相关)。对稀疏因子(zero_rate 高、active_rate 低)pooled ICIR **系统性虚高且可能反号**——被少数触发日主导、hit_rate 虚高到 1.0。实测:zero_rate=0.94 的因子 pooled ICIR=5.50,真实逐日 ICIR=-0.89(pooled 把 6% 触发日的秩相关放大)。
+
+- **判定稀疏**:`screening.zero_rate ≥ 0.5` 或 `active_rate ≤ 0.5` → 视为稀疏因子
+- **稀疏时口径切换**:否决④ 双闸门(ICIR + rank_ic)判据**一律改用 daily 口径**(ICIR=逐日 rank IC 的 mean/std,rank_ic=mean_ic),pooled 仅作记录、**不作判据**。负值按"反向信号"对待,关键看绝对值与逐日稳定性
+- **key_weaknesses 必注明**:"zero_rate=X, pooled ICIR Y 不可信(稀疏虚高),以 daily ICIR Z 为准"
+- **稠密因子(zero_rate<0.5)**:pooled 与 daily 通常一致,pooled ICIR 可用;但仍对照 daily,**符号相反即口径异常** → key_weaknesses 注明并以 daily 为准
+- **🔥 预测力双闸门(统一,见否决④)**:无论稀疏/稠密,可信 ICIR<0.3 或 |rank_ic|<0.01 → fail。稀疏因子 daily IC 近噪声时尤须卡——其"低冗余"是噪声随机性非真新颖。|daily ICIR|∈[0.3,1.5) 的过关因子 ICIR 中等不丢分,继续走冗余度首要
+- daily ICIR 取法见步骤4(路径B 第5步)
 
 ### 第二维 · 稳健性
 
@@ -116,11 +128,12 @@ Task({
 1. **样本外秩 IC 符号反转**:与样本内完全相反(zero / sign_match 可查)
 2. **推进式回测失败**:滚动训练-预测,连续多月亏或后期断崖(train_test 可近似)
 3. **成本翻倍夏普转负**(16bps):`tradability.veto3_cost_double`(成本翻倍 Sharpe 转负 → fail)
-4. **预测力下限(纯噪声线)**:主场景 `|screening.icir| < 0.05`(纯噪声,基本无任何水准信号——稳定反向信号 |ICIR| 高不否决,只卡绝对值极低)且无救场 → fail
-   - 救场(命中任一则**不否决**):变换族某变换 `|IC| ≥ 0.05`(transform_family.*,某形态有可用水准预测力),或某 horizon 实际 `|IC| ≥ 0.03`(长 horizon 有可用水准预测力)
-   - 数据:`screening.icir` + `transform_family` + `factor_ic_daily`(按 horizon 的 IC);某项缺失则对应救场分支不计(不可得 = 不构成救场)
-   - **新>优**:0.05–0.5 弱信号**不否决**——新颖度(`factor_residual_ic_strength`)是核心通过维度,弱信号只要正交不冗余(pearson/残差达标)即 pass;仅纯噪声(<0.05,任何形态都无水准信号)才 fail。
-   - 说明:阈值 0.05 是"纯噪声"线(任何变换/horizon 都无水准预测力);0.05–1.5 弱信号由正交维度决定去留,不由 ICIR 绝对值否决。
+4. **预测力双闸门**(信噪比 + 效应量,任一不过 → fail):
+   - **信噪比**:可信 ICIR ≥ 0.3(<0.3 IC 序列近噪声,冗余度判定不可信)
+   - **效应量**:可信 `|rank_ic| ≥ 0.01`(<0.01 效应极小,"稳定地空转",扣 8bps 成本净亏)
+   - **可信口径取法**(两者同源):稀疏(zero_rate≥0.5)用 daily(ICIR=mean/std、rank_ic=mean_ic),稠密用 screening(pooled);⚠️ 稀疏因子用 pooled 会被虚高绕过(如 ICIR5.50/rank_ic0.10 实则 daily -0.89/极小),必须用 daily
+   - 救场(命中任一则不否决):变换族某形态 `|IC|≥0.3`(其他形态有可信水准信号)
+   - 说明:ICIR 保证测得稳、rank_ic 保证测出来的值钱,两者独立都要过;稳定反向信号看绝对值;数据见 `screening`+`factor_ic_vec_meta`+`transform_family`
 
 ### 综合参考
 
@@ -146,31 +159,28 @@ Task({
 ## 二、操作流程(执行判定)
 
 1. **取数据**:从 state 读 evidence + hypothesis + factor_file + idea_id(见"输入")
-2. **忠实度审稿 + 初判**:
-   - 先忠实度(有 argument_chain 时):派 reviewer-agent 忠实度模式(见第零维)。`unfaithful` → verdict=fail(一票否决),跳过初判。
-   - 再初判(`faithful` 或无 argument_chain):按"一、判定核心"(三维度综合 + 否决前置)推理初步 verdict
-3. **入库**:`persist_factor {run_id, factor_index, verdict}`(工具内部从 state.json 读 factor/factorFile/checkResult,无需拼装)
-4. **查正交(第三维,check_done 必做)**:据冗余 refine verdict
+2. **忠实度审稿**(有 argument_chain 时):派 reviewer-agent 忠实度模式(见第零维)。`unfaithful` → 直接定 verdict=fail(一票否决),跳到步骤 5 commit(跳过 3/4)。无 argument_chain 跳过本步。
+3. **入表占位(prepare)**:`persist_factor {run_id, factor_index, mode: "prepare"}` —— 入 factors 表(status=draft),**不写 eval/lesson、不定 verdict**。目的是让因子进表,解锁步骤 4 路径 B 的 ingest(全新因子入库前 ingest 撞外键)。
+4. **查正交(第三维,check_done 必做)**:因子已入表(步骤 3),可查库间冗余。结果作为步骤 5 定 verdict 的正交维度输入。
 
-   **优先用平台 csv_ic 产物(2026-07-29 新增, 替代悬置的 ic_refresh dailyX)**:
+   ⚠️ **python 环境**: `csv_ic_adapter.py`(ingest/parse) 用系统 `python3`; `vec_refresh_from_daily.py` 用 `/home/lgao/quant-venv/bin/python3`(有sqlite_vec)。不混用。
+   ⚠️ **metrics.mjs 缓存**: evidence 可能没 csv_ic 字段。**workaround**: Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录。
 
-   ⚠️ **python 环境**: `csv_ic_adapter.py`(ingest/parse) 用系统 `python3`(csv模块); `vec_refresh_from_daily.py` 用 `/home/lgao/quant-venv/bin/python3`(有sqlite_vec)。不混用。
-   ⚠️ **metrics.mjs 缓存**: pipeline-mcp 可能缓存旧版, evidence 可能没 csv_ic.daily_ts/xcorr_md。**workaround**: 没抓到时 Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录文件。
-
-   - **csv_ic_xcorr(因子间相关性矩阵)**:
-     1. 读 `state.factors[i].evidence.eval_metrics.csv_ic.xcorr_md`; 没有则 Bash find check 输出目录的 `csv_ic_xcorr.md`
-     2. Bash `python3 factor_db/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`
-     - `|r| ≥ 0.6` → **verdict=fail 硬否决**。`key_weaknesses` 写"与 {factor} IC 相关 |r|={x}, 平台 xcorr 硬否决"
-     - 最高 `|r| < 0.4` → `key_strengths` 写"与库内因子 IC 正交(最高 |r|={x}), 平台 xcorr"
-   - **csv_ic_daily_ts(逐日 IC → ic_correlate)**:
+   - **路径 B(主,库间 IC 冗余硬否决)**:抓"公式不同但日级 IC 同涨同跌"的真冗余(如同 run 变体、库内近似因子)。
      1. 读 `state.factors[i].evidence.eval_metrics.csv_ic.daily_ts`; 没有则 Bash find check 输出目录的 `csv_ic_ts.csv`
-     2. Bash `python3 factor_db/csv_ic_adapter.py ingest_daily_ts <ts_file> <xname>` 写入 factor_ic_daily
+     2. Bash `python3 factor_db/csv_ic_adapter.py ingest_daily_ts <ts_file> <xname>` 写入 factor_ic_daily(**因子步骤 3 已入库,不撞 FK**)
      3. Bash `/home/lgao/quant-venv/bin/python3 factor_db/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
-     4. 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}` 查冗余
-
-   **回退(check 输出目录也无 csv_ic_ts/xcorr — 真旧平台)**:
-   - 调 `factor_ic_refresh {xname}`(default_test 常 ok:false 无 dailyX)→ `factor_ic_correlate` → `factor_residual_ic_strength`, 判据同上。**容错**:ok:false 则跳过, verdict 照常, `key_weaknesses` 注"ic 向量刷新失败, 冗余/对齐未检"
-5. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
+     4. 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}`
+     5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景(symbol 从 screening.pair 解析、y_horizon=screening.horizon)的 `icir/mean_ic/std_ic` → `run_save` 写 `factors.<i>.evidence.eval_metrics.daily_icir`,供步骤5 在稀疏因子(zero_rate≥0.5)时替代 pooled screening.icir 作判据。查不到(此场景未算)→ 稀疏因子降级:key_weaknesses 注"daily ICIR 未检",verdict 谨慎倾向 fail。查询:
+        ```
+        python3 -c "import sqlite3;r=sqlite3.connect('factors.db').execute('SELECT icir,mean_ic,std_ic,n_samples FROM factor_ic_vec_meta WHERE factor_xname LIKE ? AND symbol=? AND y_horizon=?',('<xname>%','<sym>',<hz>)).fetchone();print(r)"
+        ```
+     - **硬否决**:`factor_ic_correlate` 最高 `|pearson_approx| ≥ 0.6` → 冗余,`key_weaknesses` 写"IC 行为冗余 vs {factor} |r|={x}";`factor_residual_ic_strength` 最低 `< 0.5` → 冗余,写"残差={x}<0.5 零新息"
+   - **路径 A(辅,因子内部一致性,非库间冗余)**:`csv_ic_xcorr.md` 是**该因子自身**的 X↔X 矩阵(5品种×2horizon 互相关),**查不出与库内因子的冗余**——`find_redundant` 只会匹配到自身的不同场景(如 AG main↔AG@1)。仅作泛化/对齐敏感性参考,**不作库间冗余硬否决**。
+     - Bash `python3 factor_db/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`,结果只写入 `key_weaknesses`/`key_strengths` 描述内部一致性(如"AG main↔@1 反号=对齐敏感"),不触发否决。
+   - **回退(无 csv_ic_ts — 真旧平台)**:`factor_ic_refresh {xname}` 走 dailyX,**dailyX 现已无数据,常 ok:false,直接跳过**;verdict 照常,`key_weaknesses` 注"库间 IC 冗余未检(无 daily_ts/dailyX)"
+5. **定 verdict + 入库(commit)**:按"判定核心"双轨(过关闸门:忠实+预测力双闸门+可交易+无反转;过闸门后冗余度首要)定**最终 verdict**(pass/fail),调 `persist_factor {run_id, factor_index, mode: "commit", verdict: <最终verdict>}` —— 写 eval/lesson/定 status(draft→evaluated/dead_end)、假设 `support_score` 全量重算。**一次定,无初判/改判**。
+6. **落盘**:`run_save {run_id, patch: {"factors.<i>.verdict": <最终verdict>, "factors.<i>.persisted": <persist_factor 返回值>}}`
 
 > IC 冗余比 brainstorm 阶段的 formula 文本语义查重更准——能抓"公式不同但预测行为同涨同跌"的真冗余,对应第三维正交阈值 |pearson|<0.6。
 
