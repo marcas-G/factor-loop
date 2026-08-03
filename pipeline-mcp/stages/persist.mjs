@@ -22,8 +22,8 @@ import * as factorDb from "../lib/factor-db.mjs";
 
 // 通过判据阈值(新 > 优:指标低可过,冗余必严)。集中常量,单一真相,便于调/test。
 const NOISE_ICIR_FLOOR = 0.05;        // 第4红线:|screening.icir|<此值(纯噪声,基本无任何水准信号)且无救场 → fail
-const REDUNDANCY_PEARSON_FAIL = 0.6;  // IC 行为冗余硬否决:max|pearson|>=此值 → fail
-const RESIDUAL_FAIL = 0.5;            // 残差 IC 强度硬否决:<此值(预测力多被库内线性解释=冗余) → fail
+// 注:原 REDUNDANCY_PEARSON_FAIL / RESIDUAL_FAIL 入库后否决已退役(读 dailyX/IC 向量老数据源,
+// 与 assess 用的新平台 csv_ic 打架;dailyX 现已无数据)。冗余判定统一由 assess 基于 csv_ic xcorr 做。
 
 // 从 eval_metrics 提取 metrics，适配三种历史结构：
 //   1. 嵌套（期望）：{core_metrics: {screening: {ic_mean, icir}}, deep_best: {conditional_sharpe, rank_ic_max}}
@@ -41,13 +41,30 @@ function extractMetrics(evalMetrics) {
   };
 }
 
-export async function persistVerdict(factor, factorFile, checkResult, retryInfo, verdict, ideaId) {
+export async function persistVerdict(factor, factorFile, checkResult, retryInfo, verdict, ideaId, mode = "commit") {
   try {
     if (checkResult.failureLayer !== "check_done") {
       return { ok: false, error: `failureLayer=${checkResult.failureLayer} 非 check_done，不入库` };
     }
+
+    // prepare 模式:只入 factors 表占位(status=draft),解锁 assess 路径B(ingest_daily_ts)的 FK。
+    // 不写 eval/lesson、不定 verdict——assess 查完正交后用 commit 模式定最终 verdict。
+    if (mode === "prepare") {
+      const written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "draft", intuition: factor.intuition || null });
+      if (!written) {
+        return { ok: false, error: `addFactorFromHFile 返回 null（frontmatter 解析失败或无 xname/class_name），factorFile=${factorFile}` };
+      }
+      factorDb.ensureFormulaTags(written, factor.formula, factor.tags);
+      try { await factorDb.generateAnchorText(written); }
+      catch (e) { console.error(`  [db] anchor 生成失败(降级不阻塞): ${e.message}`); }
+      try { await factorDb.generateEmbedding(written); }
+      catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
+      console.log(`  [db] prepare: ${written} 入表 status=draft(占位,不定 verdict)`);
+      return { xname: written, mode: "prepare", status: "draft" };
+    }
+
     if (!verdict) {
-      return { ok: false, error: "verdict 为空" };
+      return { ok: false, error: "verdict 为空（commit 模式必填；占位入库用 mode=prepare）" };
     }
 
     const featureKey = (checkResult.features || factor.name || "").replace(/<.*>$/, "").trim();
@@ -83,10 +100,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
     }
 
-    // === pass:先写 factor 拿 written,再做入库后冗余/残差检查 ===
-    // 根因:冗余/残差检查依赖因子已入库的 IC 向量(icRefreshFactor 下载 dailyX 算 IC 序列),
-    // 必须在 addFactorFromHFile 之后跑。原实现把检查放在写库前且引用未声明的 written,
-    // ReferenceError 被 try-catch 吞 → 检查静默失效。现改为:写库→检查→必要时降级 status。
+    // === pass:写 factor(evaluated)→ eval → success_lesson。忠实落 agent verdict,不再入库后改判。===
+    // (原"入库后冗余/残差否决"读 dailyX/IC 向量老数据源,与 assess 用的新平台 csv_ic 打架;
+    //  dailyX 现已无数据,该判定退役。冗余判定统一由 assess 基于 csv_ic xcorr 做。)
     let written = null;
     if (verdict.verdict === "pass") {
       written = factorDb.addFactorFromHFile(factorFile, ideaId, { status: "evaluated", intuition: factor.intuition || null });
@@ -100,39 +116,6 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       try { embOk = (await factorDb.generateEmbedding(written)).ok; }
       catch (e) { console.error(`  [db] emb 生成失败(降级不阻塞): ${e.message}`); }
       console.log(`  [db] formula/tags 兜底完成; emb=${embOk ? "OK" : "SKIP/FAIL"}`);
-
-      // 入库后冗余/残差检查(依赖 IC 数据,因子已入库,icRefresh 先算 IC 向量使新因子可被检索)
-      try { await factorDb.icRefreshFactor(written); }
-      catch (e) { console.error(`  [db] ic_refresh 失败(降级跳冗余检查): ${e.message}`); }
-      // 冗余:max |pearson|>=REDUNDANCY_PEARSON_FAIL → fail(新>优:冗余必严)
-      try {
-        const corr = await factorDb.icCorrelateFactors(written, { k: 10, minAbsPearson: REDUNDANCY_PEARSON_FAIL });
-        const topP = corr?.results?.[0];
-        if (topP && Math.abs(topP.pearson_approx ?? 0) >= REDUNDANCY_PEARSON_FAIL) {
-          verdict.verdict = "fail";
-          (verdict.key_weaknesses ||= []).push(`代码兜底:冗余 vs ${topP.factor} pearson=${topP.pearson_approx.toFixed(3)}>=${REDUNDANCY_PEARSON_FAIL},硬否决`);
-          console.log(`  [db] 冗余硬否决: vs ${topP.factor} p=${topP.pearson_approx.toFixed(3)}`);
-        }
-      } catch (e) { console.error(`  [db] ic_correlate 失败(降级): ${e.message}`); }
-      // 残差:<RESIDUAL_FAIL → fail(预测力多被库内线性解释=冗余,零新息)
-      try {
-        const resid = await factorDb.residualIcStrength(written);
-        const strengths = (resid?.scenes || []).map((s) => s.residual_ic_strength).filter((x) => x != null);
-        if (strengths.length) {
-          const minR = Math.min(...strengths);
-          if (minR < RESIDUAL_FAIL) {
-            verdict.verdict = "fail";
-            (verdict.key_weaknesses ||= []).push(`代码兜底:残差 IC 强度=${minR.toFixed(3)}<${RESIDUAL_FAIL},零新息,硬否决`);
-            console.log(`  [db] 残差硬否决: strength=${minR.toFixed(3)}`);
-          }
-        }
-      } catch (e) { console.error(`  [db] residual 失败(降级): ${e.message}`); }
-
-      // 入库后否决:已写的 evaluated factor 降级为 dead_end,后续走 dead_end eval/lesson
-      if (verdict.verdict === "fail") {
-        factorDb.updateFactorStatus(written, "dead_end");
-        console.log(`  [db] 入库后否决: ${written} evaluated→dead_end`);
-      }
     }
 
     if (verdict.verdict === "pass") {

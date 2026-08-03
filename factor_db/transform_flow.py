@@ -12,11 +12,41 @@
   6. 输出变换指令 + 新标签（交 LLM 改写描述）
 """
 import json
+import math
 import random
 from pathlib import Path
 from coupling_check import check_coupling, auto_fix_coupling, param_coupling_hints, ADD_OI_LIFT_BIDASK
 
 NODES = json.load(open(Path(__file__).parent / "transform_nodes.json", encoding="utf-8"))["nodes"]
+
+
+class LowDiscrepancyRNG:
+    """低差异随机源: random.random() 接口, 可无缝替换 random 模块。
+
+    用途: 让「多次 pick_transforms 共享一条低差异流」, 使整批候选在变换空间铺匀,
+    减少「连续 int seed → 各自独立随机流 → 扎堆」的覆盖病。
+    有 scipy → Sobol 序列; 无 scipy → 黄金比 Kronecker 序列(同样低差异, 无依赖)。
+    """
+
+    def __init__(self, seed=0):
+        self._seed = seed
+        self._i = 0
+        try:
+            from scipy.stats import qmc
+            self._sobol = qmc.Sobol(d=1, seed=seed)
+            self._mode = "sobol"
+        except ImportError:
+            self._sobol = None
+            self._mode = "kronecker"
+
+    def random(self):
+        """返回 [0, 1) 的下一个低差异点。"""
+        self._i += 1
+        if self._mode == "sobol":
+            return float(self._sobol.random(1)[0, 0])
+        # 黄金比 Kronecker 序列: (seed + i·φ) mod 1
+        phi = (math.sqrt(5) - 1) / 2
+        return (self._seed + self._i * phi) % 1.0
 
 
 def pick_candidates(label):
@@ -59,23 +89,51 @@ def pick_candidates(label):
     return candidates
 
 
-def pick_transforms(label, n=3, seed=None, prefer_dims=None):
-    """随机选 n 个变换（互斥：同维度只选一个）。prefer_dims 优先（对症维度排前）。"""
-    if seed is not None:
-        random.seed(seed)
-    candidates = pick_candidates(label)
-    random.shuffle(candidates)
-    # prefer_dims 优先（对症维度排前, 内部保持shuffle随机）
-    if prefer_dims:
-        candidates.sort(key=lambda c: 0 if c[0] in prefer_dims else 1)
-    picked = []
-    picked_dims = set()
-    for dim, op, val in candidates:
-        if dim not in picked_dims:
-            picked.append((dim, op, val))
-            picked_dims.add(dim)
-        if len(picked) >= n:
-            break
+def pick_transforms(label, n=3, seed=None, prefer_dims=None,
+                    temperature=1.0, prefer_bonus=1.0, rng=None):
+    """Softmax 温度采样选 n 个变换（互斥：同维度只选一个）。
+
+    随机源由 rng 注入:
+      rng=None（默认）+ seed → 走全局 random（老逻辑, 向后兼容）
+      rng=LowDiscrepancyRNG(...) → 低差异采样（整批铺匀）
+
+    temperature = 聪明↔随机 旋钮:
+      T→0  纯利用: 只选 prefer_dims, 退化为原硬排序
+      T→∞  纯随机: 退化为原 shuffle
+      中间  高分更可能中, 但保留随机 ← "聪明又随机"
+    prefer_bonus = prefer_dims 维度的加分幅度（偏好强度）。
+    prefer_dims=None → 所有人分相等, 等价均匀随机（向后兼容）。
+    """
+    if rng is None:
+        if seed is not None:
+            random.seed(seed)
+        rng = random
+    pool = list(pick_candidates(label))
+    if not pool:
+        return []
+
+    def score(c):
+        return prefer_bonus if (prefer_dims and c[0] in prefer_dims) else 0.0
+
+    picked, picked_dims = [], set()
+    while pool and len(picked) < n:
+        # softmax 权重（数值稳定）: w = exp((score - max) / T)
+        scores = [score(c) for c in pool]
+        mx = max(scores)
+        weights = [math.exp((s - mx) / temperature) for s in scores]
+        total = sum(weights)
+        # 轮盘赌按权重抽一个（随机源 = rng）
+        r = rng.random() * total
+        acc, idx = 0.0, 0
+        for i, w in enumerate(weights):
+            acc += w
+            if r <= acc:
+                idx = i
+                break
+        chosen = pool[idx]
+        picked.append(chosen)
+        picked_dims.add(chosen[0])
+        pool = [c for c in pool if c[0] != chosen[0]]  # 互斥: 移除同维度
     return picked
 
 
@@ -107,10 +165,13 @@ def apply_transforms(label, transforms):
     return new_label, commands
 
 
-def run_flow(parent_label, n_transforms=3, seed=None, prefer_dims=None):
+def run_flow(parent_label, n_transforms=3, seed=None, prefer_dims=None,
+             rng=None, temperature=1.0, prefer_bonus=1.0):
     """完整变换流程（标签层）。
 
     返回 (变换指令, 新标签, 连带修正, 参数提示, 成功?)。
+    rng/temperature/prefer_bonus 透传给 pick_transforms:
+      rng=None + seed → 老逻辑（向后兼容）; rng=LowDiscrepancyRNG → 低差异采样。
     """
     # 1. 验证父标签
     violations = check_coupling(parent_label)
@@ -118,7 +179,9 @@ def run_flow(parent_label, n_transforms=3, seed=None, prefer_dims=None):
         return None, None, None, f"父标签不自洽: {violations}", False
 
     # 2. 选变换（prefer_dims 优先: 对症维度）
-    transforms = pick_transforms(parent_label, n_transforms, seed=seed, prefer_dims=prefer_dims)
+    transforms = pick_transforms(parent_label, n_transforms,
+                                 seed=seed, prefer_dims=prefer_dims,
+                                 rng=rng, temperature=temperature, prefer_bonus=prefer_bonus)
 
     # 3. 应用
     new_label, commands = apply_transforms(parent_label, transforms)

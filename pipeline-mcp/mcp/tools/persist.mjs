@@ -25,21 +25,22 @@ export async function persistIdeaHandler({ text }) {
 export const persistFactorSchema = {
   name: "persist_factor",
   description:
-    "基于 evaluate 阶段的 verdict 写库。只需传 run_id + factor_index + verdict，工具内部从 state.json 读 factor/factorFile/checkResult/retryInfo/ideaId。",
+    "因子入库。mode=prepare: 只入 factors 表占位(status=draft, 解锁 assess 路径B ingest 的 FK, 不写 eval/lesson/不定 verdict); mode=commit(默认): 按 verdict 写 eval/lesson/定 status。工具内部从 state.json 读 factor/factorFile/checkResult/retryInfo/ideaId。",
   inputSchema: {
     type: "object",
     properties: {
       run_id: { type: "string", description: "研究 run id" },
       factor_index: { type: "integer", description: "state.factors 数组下标（从 0 开始）" },
+      mode: { type: "string", enum: ["prepare", "commit"], description: "prepare=入表占位不定verdict; commit=按verdict落库(默认)" },
       verdict: {
         type: "object",
-        description: "evaluate skill 推理出的 verdict 对象，含 {verdict:'pass'|'fail', key_strengths, key_weaknesses, suggested_iteration}",
+        description: "commit 模式必填: verdict 对象 {verdict:'pass'|'fail', key_strengths, key_weaknesses, suggested_iteration}。prepare 模式省略",
       },
     },
-    required: ["run_id", "factor_index", "verdict"],
+    required: ["run_id", "factor_index"],
   },
 };
-export async function persistFactorHandler({ run_id, factor_index, verdict }) {
+export async function persistFactorHandler({ run_id, factor_index, verdict, mode = "commit" }) {
   const state = await runLoad(run_id);
   if (factor_index < 0 || factor_index >= state.factors.length) {
     return { ok: false, error: `factor_index 越界: ${factor_index} (factors.length=${state.factors.length})` };
@@ -69,7 +70,7 @@ export async function persistFactorHandler({ run_id, factor_index, verdict }) {
   const retryInfo = f.last_rewrite || null;
   const ideaId = state.idea_id ?? null;
 
-  return persistVerdict(factor, f.factor_file, checkResult, retryInfo, verdict, ideaId);
+  return persistVerdict(factor, f.factor_file, checkResult, retryInfo, verdict, ideaId, mode);
 }
 
 // persist_candidates: brainstorm 一次性持久化 idea + N 候选。

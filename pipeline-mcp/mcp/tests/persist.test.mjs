@@ -104,3 +104,127 @@ test("persist_candidates 写入 state.idea/idea_id/factors[].name（不丢 schem
   assert.deepEqual(state.factors[0].tags, ["trade_price", "volume"]);
   assert.equal(state.factors[0].status, "pending");
 });
+
+// 回归:persist_factor 删除"入库后否决"后,pass 忠实落 evaluated、不再被内部冗余检查降级;
+// fail 落 dead_end。锁定"工具不再改 agent 的 verdict"。
+test("persist_factor pass 忠实落 evaluated(不内部降级)", async () => {
+  setupTempDb();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quant-runs-"));
+  const { setRunsRoot, runInit, runSave } = await import("../lib/run-store.mjs");
+  setRunsRoot(tmpRoot);
+  const factorFile = writeMockFactorFile(tmpRoot, "TestPassFactor");
+  const { run_id } = await runInit({ factors: [{ name: "TestPassFactor" }] });
+  await runSave(run_id, {
+    "factors.0.failure_layer": "check_done",
+    "factors.0.factor_file": factorFile,
+    "factors.0.evidence": {
+      eval_metrics: {
+        core_metrics: { screening: { ic_mean: 0.05, icir: 3.0, spearman: 0.04 } },
+        deep_best: { rank_ic_max: 0.05 },
+      },
+    },
+  });
+  const result = await tools.persistFactorHandler({
+    run_id,
+    factor_index: 0,
+    verdict: { verdict: "pass", key_strengths: ["正交新颖"], key_weaknesses: [] },
+  });
+  assert.equal(result.status, "evaluated", "pass 应落 evaluated,不被内部冗余否决降级");
+  assert.equal(result.xname, "TestPassFactor");
+  assert.ok(result.lessonId > 0);
+});
+
+test("persist_factor fail 落 dead_end", async () => {
+  setupTempDb();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quant-runs-"));
+  const { setRunsRoot, runInit, runSave } = await import("../lib/run-store.mjs");
+  setRunsRoot(tmpRoot);
+  const factorFile = writeMockFactorFile(tmpRoot, "TestFailFactor");
+  const { run_id } = await runInit({ factors: [{ name: "TestFailFactor" }] });
+  await runSave(run_id, {
+    "factors.0.failure_layer": "check_done",
+    "factors.0.factor_file": factorFile,
+    "factors.0.evidence": {
+      eval_metrics: {
+        core_metrics: { screening: { ic_mean: 0.01, icir: 0.5 } },
+        deep_best: { rank_ic_max: 0.01 },
+      },
+    },
+  });
+  const result = await tools.persistFactorHandler({
+    run_id,
+    factor_index: 0,
+    verdict: { verdict: "fail", key_strengths: [], key_weaknesses: ["冗余"], suggested_iteration: "换品种" },
+  });
+  assert.equal(result.status, "dead_end");
+  assert.ok(result.lessonId > 0);
+});
+
+// 回归:assess "先 persist 入库 → 查正交发现冗余 → 二次 persist 改判" 依赖 persist_factor
+// 二次调用幂等改判(addFactorFromHFile 幂等 + 追加 eval + 更新 status + support 重算)。
+test("persist_factor 二次调用改判(pass→fail 更新 status)", async () => {
+  setupTempDb();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quant-runs-"));
+  const { setRunsRoot, runInit, runSave } = await import("../lib/run-store.mjs");
+  setRunsRoot(tmpRoot);
+  const factorFile = writeMockFactorFile(tmpRoot, "TestFlipFactor");
+  const { run_id } = await runInit({ factors: [{ name: "TestFlipFactor" }] });
+  await runSave(run_id, {
+    "factors.0.failure_layer": "check_done",
+    "factors.0.factor_file": factorFile,
+    "factors.0.evidence": {
+      eval_metrics: {
+        core_metrics: { screening: { ic_mean: 0.05, icir: 3.0, spearman: 0.04 } },
+        deep_best: { rank_ic_max: 0.05 },
+      },
+    },
+  });
+  // 第一次:初判 pass → evaluated
+  const r1 = await tools.persistFactorHandler({
+    run_id,
+    factor_index: 0,
+    verdict: { verdict: "pass", key_strengths: ["正交"], key_weaknesses: [] },
+  });
+  assert.equal(r1.status, "evaluated");
+  // 第二次:入库后正交检查发现冗余,改判 fail → dead_end(幂等不报错)
+  const r2 = await tools.persistFactorHandler({
+    run_id,
+    factor_index: 0,
+    verdict: { verdict: "fail", key_strengths: [], key_weaknesses: ["IC 行为冗余 vs X |r|=0.8"] },
+  });
+  assert.equal(r2.status, "dead_end", "二次 persist 应把 status 从 evaluated 改判为 dead_end");
+});
+
+// 回归:assess 新流程 prepare(入表占位 draft, 不写 eval/lesson)→ 查正交 → commit(定 verdict)。
+test("persist_factor prepare→commit(prepare 占位不写eval, commit 定verdict)", async () => {
+  setupTempDb();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quant-runs-"));
+  const { setRunsRoot, runInit, runSave } = await import("../lib/run-store.mjs");
+  setRunsRoot(tmpRoot);
+  const factorFile = writeMockFactorFile(tmpRoot, "TestPrepareFactor");
+  const { run_id } = await runInit({ factors: [{ name: "TestPrepareFactor" }] });
+  await runSave(run_id, {
+    "factors.0.failure_layer": "check_done",
+    "factors.0.factor_file": factorFile,
+    "factors.0.evidence": {
+      eval_metrics: {
+        core_metrics: { screening: { ic_mean: 0.05, icir: 3.0, spearman: 0.04 } },
+        deep_best: { rank_ic_max: 0.05 },
+      },
+    },
+  });
+  // prepare: 入表 draft, 不写 eval/lesson, 不定 verdict
+  const rp = await tools.persistFactorHandler({ run_id, factor_index: 0, mode: "prepare" });
+  assert.equal(rp.mode, "prepare");
+  assert.equal(rp.status, "draft");
+  assert.equal(rp.xname, "TestPrepareFactor");
+  // commit: 定 verdict pass → evaluated(draft→evaluated)
+  const rc = await tools.persistFactorHandler({
+    run_id,
+    factor_index: 0,
+    mode: "commit",
+    verdict: { verdict: "pass", key_strengths: ["正交"], key_weaknesses: [] },
+  });
+  assert.equal(rc.status, "evaluated");
+  assert.ok(rc.lessonId > 0);
+});

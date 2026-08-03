@@ -15,7 +15,7 @@
 """
 import json
 import argparse
-from transform_flow import run_flow
+from transform_flow import run_flow, LowDiscrepancyRNG
 
 
 # dead_end 原因 → 对症变换维度（优先变换这些维度, 针对性救活）
@@ -28,16 +28,31 @@ DEAD_END_FIX = {
 }
 
 
-def gen_candidates(parent_label, parent_name, n=3, n_transforms=2, seed_start=0):
-    """跑 transform_flow N 次，产 N 候选。prefer_dims 据 dead_end_reason 对症选变换。"""
+def gen_candidates(parent_label, parent_name, n=3, n_transforms=2, seed_start=0,
+                   low_discrepancy=False, temperature=1.0, prefer_bonus=1.0):
+    """跑 transform_flow N 次，产 N 候选。prefer_dims 据 dead_end_reason 对症选变换。
+
+    low_discrepancy: 实测对本系统无益, 默认关闭, 保留开关仅供实验:
+      - 维度覆盖均匀度: 与独立 seed 几乎相同(熵比 0.89 vs 0.90)——
+        互斥约束 + Softmax 已把维度层面铺匀, 低差异无边际收益。
+      - 组合去重率: 独立 seed 反而更优(100% vs 94%)——
+        离散组合空间里「每次独立随机」在去重上本质最优; 低差异的「均匀」
+        优势只在连续数值积分场景成立, 生搬到这里反而引入结构化重复。
+    temperature / prefer_bonus: Softmax 旋钮, 是本次改动真正有价值的部分。
+    """
     # 读 dead_end_reason → prefer_dims（对症变换维度, 非纯随机）
     dead_end_reason = parent_label.get("_dead_end_reason")
     prefer_dims = DEAD_END_FIX.get(dead_end_reason) if dead_end_reason else None
+    # 共享一条低差异流（整批铺匀的关键）; None → 走老逻辑（每候选独立 seed）
+    rng = LowDiscrepancyRNG(seed=seed_start) if low_discrepancy else None
     candidates = []
     seed = seed_start
     while len(candidates) < n:
         commands, new_label, fixes, param_hints, ok = run_flow(
-            parent_label, n_transforms=n_transforms, seed=seed, prefer_dims=prefer_dims
+            parent_label, n_transforms=n_transforms,
+            seed=None if low_discrepancy else seed,
+            prefer_dims=prefer_dims, rng=rng,
+            temperature=temperature, prefer_bonus=prefer_bonus,
         )
         seed += 1
         if not ok:
@@ -54,11 +69,25 @@ def gen_candidates(parent_label, parent_name, n=3, n_transforms=2, seed_start=0)
     return candidates
 
 
+def gen_name_hint(new_label):
+    """从变换标签提取关键维度, 作为 LLM 起描述性名的语义提示(替代父名+Tidx)。"""
+    dims = []
+    for key in ["关系类型", "差分", "字段", "输出变换", "lead-lag τ方式", "触发类型", "平滑"]:
+        v = new_label.get(key)
+        if not v:
+            continue
+        if isinstance(v, list):
+            v = "+".join(f["name"] if isinstance(f, dict) else str(f) for f in v)
+        dims.append(f"{key}={v}")
+    return "; ".join(dims[:4])
+
+
 def label_to_factor_skeleton(new_label, parent_name, candidate_idx):
-    """从新标签推导 factor JSON 骨架（name/tags/params）。
-    formula/intuition 留主 agent LLM 填（基于 commands 改写父描述）。"""
-    # name: 父名 + 变体序号
-    name = f"{parent_name}T{candidate_idx}"
+    """从新标签推导 factor JSON 骨架（name_hint/tags/params）。
+    name/formula/intuition 都留主 agent LLM 填——name 据 commands 起
+    描述性 PascalCase 名（不复用父因子名, 体现变换本身）。"""
+    # name: 留空, 由 research-loop LLM 据 commands + name_hint 起（不再父名+Tidx）
+    name = None
 
     # tags: 从标签推导
     tags = []
@@ -80,10 +109,11 @@ def label_to_factor_skeleton(new_label, parent_name, candidate_idx):
 
     return {
         "name": name,
+        "name_hint": gen_name_hint(new_label),
         "tags": tags,
         "params": params,
         "categories": ["AG", "CU", "AU", "AL", "NI"],
-        # formula / intuition 留空, 主 agent LLM 按 commands 改写父描述填
+        # name / formula / intuition 留空, 主 agent LLM 按 commands 改写填
         "formula": None,
         "intuition": None,
     }
@@ -95,6 +125,12 @@ if __name__ == "__main__":
     ap.add_argument("--n", type=int, default=3, help="候选数")
     ap.add_argument("--n-transforms", type=int, default=2, help="每候选变换数")
     ap.add_argument("--seed-start", type=int, default=100)
+    ap.add_argument("--low-discrepancy", action="store_true",
+                    help="开启低差异采样(共享 Sobol 流)。默认关: 实测对离散组合去重无益")
+    ap.add_argument("--temperature", type=float, default=1.0,
+                    help="Softmax 温度: 小=偏利用(prefer_dims), 大=偏随机")
+    ap.add_argument("--prefer-bonus", type=float, default=1.0,
+                    help="prefer_dims 维度加分幅度")
     args = ap.parse_args()
 
     # 父因子: 从 PARENT_POOL 选(--parent 指定 或 随机)
@@ -112,7 +148,9 @@ if __name__ == "__main__":
 
     candidates = gen_candidates(
         parent_label, parent_name,
-        n=args.n, n_transforms=args.n_transforms, seed_start=args.seed_start
+        n=args.n, n_transforms=args.n_transforms, seed_start=args.seed_start,
+        low_discrepancy=args.low_discrepancy,
+        temperature=args.temperature, prefer_bonus=args.prefer_bonus,
     )
 
     # 产出：每个候选 = 标签层产出 + factor 骨架（formula/intuition 待 LLM 填）

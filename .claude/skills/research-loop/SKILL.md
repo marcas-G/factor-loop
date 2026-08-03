@@ -44,13 +44,14 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 替代原 hypothesize + brainstorm（图推理改用变换引擎）。从已有因子（PARENT_POOL）随机选父因子, 经变换引擎产 N 个新因子候选。
 
 1. **跑变换引擎产候选骨架**: 调 Bash `python3 factor_db/transform_step1.py --n 3`（从 PARENT_POOL 随机选父, 产 3 候选）。
-   - 产出 JSON: 3 个候选, 每个含 {commands(变换指令, 自然语言), new_label(新标签), param_hints(参数连带提示), factor_skeleton(name/tags/params/categories)}
-   - factor_skeleton 的 formula/intuition 留空, 待下一步 LLM 填
+   - 产出 JSON: 3 个候选, 每个含 {commands(变换指令, 自然语言), new_label(新标签), param_hints(参数连带提示), factor_skeleton(name=None + name_hint/tags/params/categories)}
+   - factor_skeleton 的 name/formula/intuition 均留空, 待下一步 LLM 填（name_hint 是变换维度提示, 辅助起名）
 
-2. **LLM 改写描述 + 填 factor**: 对每个候选, 主 agent:
+2. **LLM 改写描述 + 起名 + 填 factor**: 对每个候选, 主 agent:
    - 读父因子描述（调 MCP `factor_detail {xname: <父因子名>}` 取 formula_text/intuition）+ 候选的 commands（变换指令）
    - 按变换指令改写父因子 formula + intuition → 新因子 formula + intuition（注意 param_hints: 涉及参数重定的, 标注占位值 + 说明）
-   - 合并: factor_skeleton(name/tags/params/categories) + 新填 formula/intuition → 完整 factor 对象
+   - **起 name（必填）**: 据 commands + name_hint 起一个**描述性 PascalCase 类名**——名字体现变换本身的机制（如 lead-lag OI 冲击→`LaggedOiImpulseConfirm`、log差分+代数比值→`LogRatioOiPriceElastic`）, **不复用父因子名**（血缘已在 idea_text/tags, 不靠名字）。可先调 `factor_list` 避开库内已有 xname, 撞名则加变换特征后缀
+   - 合并: factor_skeleton(name=新起的/tags/params/categories) + 新填 formula/intuition → 完整 factor 对象
 
 3. **persist_candidates**: 调 MCP `persist_candidates {run_id, idea_text: "变换引擎: 父<父因子名> + <commands摘要>", factors: [3个完整factor对象]}` 存 state。
 
