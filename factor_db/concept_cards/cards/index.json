@@ -1,0 +1,17 @@
+[
+ "PH_SCALE_IMB_FAMILY",
+ "PH_SCALE_TradeDirStreak",
+ "PH_SCALE_ShockAbsorptionAsym",
+ "PH_MIRROR_DepthForming_TickPressure",
+ "PH_MIRROR_BookImbalanc_SpreadRvLiqE",
+ "PH_MIRROR_CancelAsymVo_DensityCondA",
+ "PH_MIRROR_RawBookImbal_SpreadResidS",
+ "PH_MIRROR_SpreadCancel_SpreadTrendR",
+ "PH_MIRROR_Counterparty_ImbalanceBas",
+ "PH_REGIME_MidReversalAR2Projection",
+ "PH_REGIME_DepthPrecursorSymmetryPr",
+ "PH_REGIME_SpreadRvOlsResidOfiConfi",
+ "PH_REGIME_DepthFormingPrecursorBid",
+ "PH_REGIME_OIBuildupConfigChase",
+ "PH_REGIME_OfiBookVolModulate"
+]

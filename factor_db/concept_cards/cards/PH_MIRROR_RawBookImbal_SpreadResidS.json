@@ -1,0 +1,45 @@
+{
+ "phenomenon_id": "PH_MIRROR_RawBookImbal_SpreadResidS",
+ "source_type": "MIRROR_BEHAVIOR_ASYMMETRY",
+ "inventor_view": {
+  "observation": "两个测量实现的日级预测行为互为镜像(相关 -0.87)，但平均效应量相差 4.0 倍(强侧 |IC|≈0.341 且有效，弱侧 |IC|≈0.086 且有效)。交换两侧角色并反转响应方向后，理论镜像的行为并不对称。",
+  "expected_symmetry": "mirrored_behavior_should_match_or_reverse",
+  "observed_violation": [
+   "magnitude_difference",
+   "effectiveness_difference"
+  ],
+  "matched_conditions": "PENDING_STATE_DATA",
+  "unanswered_question": "哪个当前未测量的方向中性状态，使两个镜像过程不再等价?",
+  "available_observations": [
+   "multi_level_depth_snapshot",
+   "midprice",
+   "spread",
+   "directional_flow_proxies",
+   "snapshot_differences",
+   "cross_feed(main_vs_sub)",
+   "daily_ic_vectors"
+  ],
+  "forbidden_dependencies": [
+   "order_identity",
+   "order_event_time",
+   "real_intervention_model",
+   "pointwise_state_distance"
+  ]
+ },
+ "memory_view": {
+  "type": "MIRROR_BEHAVIOR_ASYMMETRY",
+  "factor_a": "RawBookImbalanceRatio",
+  "factor_b": "SpreadResidSignModulateBook",
+  "horizon": 1,
+  "n_days": 117,
+  "corr": -0.866,
+  "mean_a": 0.3405,
+  "mean_b": -0.0858,
+  "icir_a": 6.203,
+  "icir_b": -2.112,
+  "mag_ratio": 3.97,
+  "effective_a": true,
+  "effective_b": true,
+  "robust": true
+ }
+}

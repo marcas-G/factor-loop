@@ -90,7 +90,9 @@ export async function persistVerdict(factor, factorFile, checkResult, retryInfo,
       }
     }
     // deepbest 全 None → 评估不全(第二/三维缺),ICIR<3 则 fail
-    if (verdict.verdict === "pass") {
+    // csv_ic-only 链路(default_test ComputeCsvIc)系统性无 deep 数据(check.mjs 显式跳过 feval/pearson/deep),
+    // 豁免——pass 判据已由 assess 基于 csv_ic ICIR/IC + 冗余度(残差/xcorr)完成,deep_best 缺失非评估不全。
+    if (verdict.verdict === "pass" && !evalMetrics?.csv_ic) {
       const dbm = evalMetrics?.deep_best || {};
       const deepOk = Object.values(dbm).some((v) => v != null);
       if (!deepOk && Math.abs(metrics.icir ?? 0) < 3) {
