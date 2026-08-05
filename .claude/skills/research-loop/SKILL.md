@@ -66,7 +66,6 @@ skill 返回候选数组后：
 
 1. 在**一个消息内**同时发 3 个 Task tool call（parallel tool use），每个：
    - `subagent_type: "run-factor-agent"`
-   - `mode: "bypassPermissions"`（子代理免弹窗——上游 bug 子代理不继承父权限+MCP工具静默卡死,必须显式带;配合 agent frontmatter 的 permissionMode 双保险）
    - `prompt`: 包含 `factor`（含 name/formula/intuition/categories/**tags**/params/hypothesis）+ `idea` + `run_id` + `factor_index`（该 factor 在 state.factors 数组里的下标，agent 用它做 `factors.<index>.xxx` 的 run_save）。**tags 从 state.factors[i].tags 取**（brainstorm 生成），写入 prompt 让 agent 生成 .h frontmatter 时带上
 2. 等待 3 个全部返回，收集每个的 `{xname, failure_layer}`（轻量路由信息，agent.md 规定的 return contract）
 3. agent 已在最终态自己调 `run_save` 落盘了完整字段（status / failure_layer / evidence / retry_trace / last_rewrite）——主会话**不再写这些**，避免靠 return message 传 state 时被 Claude 总结倾向截断

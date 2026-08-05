@@ -1,7 +1,6 @@
 ---
 name: run-factor-agent
 description: 单个因子的 write→submit→check→rewrite 状态机执行。被 research-loop skill 通过 Task 工具调起，每个 factor 一个实例（独立 context）。
-permissionMode: bypassPermissions
 tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__platform_submit_factor, mcp__quant-mcp__platform_check_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
 ---
 
