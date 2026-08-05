@@ -1,6 +1,6 @@
 ---
 name: concept-invent
-description: 算子驱动的因子挖掘（通道B）。触发 `/concept-invent <故事节点xname?>` 或被 research-loop Step1 嵌套调用。故事节点→想缺口→查算子库（复用or发明）→实现→评估→抽算子入库。算子为主体，因子为应用实例。
+description: 算子驱动的因子挖掘（research-loop Step1 候选源）。触发 `/concept-invent <故事节点xname?>` 或被 research-loop Step1 嵌套调用。故事节点→想缺口→查算子库（复用or发明）→实现→评估→抽算子入库。算子为主体，因子为应用实例。
 ---
 
 # Concept-Invent — 算子驱动的因子挖掘

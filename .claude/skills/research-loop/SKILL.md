@@ -17,7 +17,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 | 边界 | 必须立即做的第一个 tool call |
 |---|---|
-| Step 0 → Step 1 | `Bash python3 factor_db/transform_step1.py`（变换引擎产候选）|
+| Step 0 → Step 1 | `Skill concept-invent`（算子驱动产候选）|
 | Step 1 → Step 2 | 在一个消息内并行发 3 个 `Task` (run-factor-agent) |
 | Step 2 → Step 3 | 对第一个 `check_done` factor 调 `Skill assess` |
 | Step 3 → Step 4 | `run_save {status: "done", finished_at: ...}` |
@@ -39,39 +39,26 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **→ 衔接硬规则**：Step 0 完成（拿到 run_id 或读完 state）后，**必须立即在同一回合**进入 Step 1 的第一个 tool call（抽 coords / 调 Skill brainstorm）。禁止输出"已初始化，开始 brainstorm"之类的纯文字回合。
 
-## Step 1 · 因子候选（双通道: 演化 + 发明）
+## Step 1 · 因子候选（concept-invent 单一流程）
 
-替代原 hypothesize + brainstorm。候选源两条通道（默认通道A；通道B 用 `python3 factor_db/transform_step1.py --channel invent` 或调 Skill concept-invent 切换/混合）：
+替代原 hypothesize + brainstorm + transform_step1.py。候选源唯一：**concept-invent skill**（算子驱动挖掘）。它内部通过查算子库主观判断「复用已有算子（=演化）or 发明新算子」——复用与发明是它的两个判断分支，不是两个并列通道。
 
-- **通道A · 算子演化**（默认，70% 预算）：父因子 → 变换 → N 候选。效率、稳定产出，但不出非典型（沿已有算子局部搜索）。
-- **通道B · 算子发明**（30% 预算）：现象卡 → 新测量问题 → 测量契约 → 候选。非典型算子来源（概念空间开放 + 实现空间受约束）。
-  - 程序：`python3 factor_db/phenomenon_miner.py`（扫描）→ `factor_db/concept_cards/cards/`（现象卡）
-  - LLM：调 `Skill concept-invent`（读匿名卡 → 提测量问题 → `concept_critic.review()` 程序化批评 → 编译候选）
-  - 同 run 可合并两通道候选（如 通道A 3 个 + 通道B 2 个 = 5 个）一起 persist_candidates。
+调 `Skill concept-invent <故事节点xname?>`，skill 内部走五步：
+1. 选故事节点（任何因子，主观）
+2. 想缺口（隔离算子库，五问穷尽 + 每缺口挖三层：量什么/怎么用/怎么用才独立）
+3. 查算子库匹配（主观：缺口像已有算子→复用换基底；不像→发明新算子）
+4. 实现（实现者本职四问：忠实/方向归属/依赖/多样）→ 具体 .h
+5. 返回候选 factor 对象（name/formula/intuition/hypothesis/tags/params/categories + swap 变体）
 
-### 通道A 流程（变换引擎）
+skill 返回候选数组后：
 
-1. **跑变换引擎产候选骨架**: 调 Bash `python3 factor_db/transform_step1.py --n 3`（从 PARENT_POOL 随机选父, 产 3 候选）。
-   - 产出 JSON: 3 个候选, 每个含 {commands(变换指令, 自然语言), new_label(新标签), param_hints(参数连带提示), factor_skeleton(name=None + name_hint/tags/params/categories)}
-   - factor_skeleton 的 name/formula/intuition 均留空, 待下一步 LLM 填（name_hint 是变换维度提示, 辅助起名）
+1. **persist_candidates**: 调 MCP `persist_candidates {run_id, idea_text: "<concept-invent: 故事节点X → 算子Y(复用/发明) + 基底Z>", factors: [候选]}` 存 state。
 
-2. **LLM 改写描述 + 起名 + 填 factor**: 对每个候选, 主 agent:
-   - 读父因子描述（调 MCP `factor_detail {xname: <父因子名>}` 取 formula_text/intuition）+ 候选的 commands（变换指令）
-   - 按变换指令改写父因子 formula + intuition → 新因子 formula + intuition（注意 param_hints: 涉及参数重定的, 标注占位值 + 说明）
-   - **起 name（必填）**: 据 commands + name_hint 起一个**描述性 PascalCase 类名**——名字体现变换本身的机制（如 lead-lag OI 冲击→`LaggedOiImpulseConfirm`、log差分+代数比值→`LogRatioOiPriceElastic`）, **不复用父因子名**（血缘已在 idea_text/tags, 不靠名字）。可先调 `factor_list` 避开库内已有 xname, 撞名则加变换特征后缀
-   - 合并: factor_skeleton(name=新起的/tags/params/categories) + 新填 formula/intuition → 完整 factor 对象
+2. 回主会话后, `state.factors` 已落盘（候选, 含 formula/intuition/tags/params/hypothesis）。
 
-### 通道B 流程（概念发明）
+> 注：`transform_step1.py`（原变换引擎）已退役——它的"父因子→随机变异→候选"不查算子库、大概率闭包内（值流变换全冗余已验证），被 concept-invent 的"查库主观复用"完全取代且更优。代码保留但 research-loop 不再调用。
 
-调 `Skill concept-invent <phenomenon_id?>`，skill 内部完成：读匿名现象卡 → LLM 提测量问题（禁旧名/禁公式/方向中性/多实现）→ `factor_db/concept_critic.py` 程序化四检查 → ACCEPT 候选编译成 factor 对象（name/formula/intuition/hypothesis/tags/params/categories + swap 变体）→ 返回候选数组。**核心纪律：先有测量问题再有实现；不沿已有算子变异。**
-
-### 合并与落盘
-
-3. **persist_candidates**: 调 MCP `persist_candidates {run_id, idea_text: "<通道A: 变换引擎 父X+commands> | <通道B: 概念发明 现象卡ID→latent_construct>", factors: [全部候选]}` 存 state。
-
-4. 回主会话后, `state.factors` 已落盘（候选, 含 formula/intuition/tags/params）。
-
-**→ 衔接硬规则**：persist_candidates 返回后, **必须立即在同一回合**于一个消息内并行发 3 个 `Task` (run-factor-agent) tool call。禁止输出"候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置, 必须严守。
+**→ 衔接硬规则**：persist_candidates 返回后, **必须立即在同一回合**于一个消息内并行发 N 个 `Task` (run-factor-agent) tool call（N=候选数，≤3）。禁止输出"候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置, 必须严守。
 
 ## Step 2 · 每个 factor 跑 runFactor（Task 子代理，并发 3）
 
