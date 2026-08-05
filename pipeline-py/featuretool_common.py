@@ -150,6 +150,7 @@ def parse_index(html):
     row_pattern = re.compile(
         r'<tr>\s*'
         r'<td>([^<]+)</td>\s*'                                       # Feature
+        r'<td>([^<]*)</td>\s*'                                       # Mode (csv_ic/dailyX, adapt 后新增列)
         r'<td>(?:<a\s+href="([^"]*)"[^>]*>([^<]*)</a>)?</td>\s*'    # Job (link + id)
         r'<td>([^<]+)</td>\s*'                                       # State
         r'<td>(.*?)</td>\s*'                                         # DownloadXs
@@ -157,10 +158,11 @@ def parse_index(html):
     )
     for m in row_pattern.finditer(html):
         feature = m.group(1).strip()
-        job_url = m.group(2) or ""
-        job_id = m.group(3).strip() if m.group(3) else ""
-        state = m.group(4).strip()
-        download_raw = m.group(5).strip()
+        # group2=Mode(csv_ic,忽略); group3/4=Job link/id; group5=State; group6=Download; group7=LastSubmitTime
+        job_url = m.group(3) or ""
+        job_id = m.group(4).strip() if m.group(4) else ""
+        state = m.group(5).strip()
+        download_raw = m.group(6).strip()
 
         dl_match = re.search(r'href="(/featuretool/default_test/download_ic\?[^"]*)"', download_raw)
         download_url = dl_match.group(1) if dl_match else ""
@@ -178,7 +180,7 @@ def parse_index(html):
             "download_url": download_url,
             "download_label": dl_label,
             "run_id": run_id,
-            "submit_time": m.group(6).strip(),
+            "submit_time": m.group(7).strip(),
         })
 
     return username, factors
