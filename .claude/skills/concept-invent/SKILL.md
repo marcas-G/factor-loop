@@ -1,129 +1,86 @@
 ---
 name: concept-invent
-description: 测量概念发明（通道B候选源）。触发 `/concept-invent <phenomenon_id?>` 或被 research-loop Step1 嵌套调用。现象卡 → 新测量问题 → 测量契约 → 候选因子。复用现有 persist_candidates → run-factor-agent → assess 全链路。
+description: 算子驱动的因子挖掘（通道B）。触发 `/concept-invent <故事节点xname?>` 或被 research-loop Step1 嵌套调用。故事节点→想缺口→查算子库（复用or发明）→实现→评估→抽算子入库。算子为主体，因子为应用实例。
 ---
 
-# Concept-Invent — 测量概念发明
+# Concept-Invent — 算子驱动的因子挖掘
 
-基于现象分歧和闭包验证的非典型算子提案（通道B：算子发明，区别于通道A：算子演化）。
-
-**核心方法论**：不沿已有算子变异，而是——发现当前测量语言无法区分的市场状态（现象卡）→ 提出新的测量问题 → 定义潜在量 → 用已有数学工具实现。新算子不是旧算子的远亲，而是此前没被问过、但能被数据回答的新问题。
-
-## 输入
-
-- `phenomenon_id`（可选）：从 `factor_db/concept_cards/cards/index.json` 取卡。未提供则先跑 `python3 factor_db/phenomenon_miner.py` 重新扫描生成卡。
-- `registry_path`（可选）：问题注册表 `factor_db/concept_cards/question_registry.json`（批评器去重基准，未批注则跳过问题级去重）。
-- `run_id`（被 research-loop 嵌套调用时传入）：用于写 state.factors。
+**核心认知**：
+- **因子是产品，算子是资产。** 挖因子的真正产出是算子（可复用测量方法），不是那个因子。
+- **故事是生长的树。** 四个基底（Imbalance/Mom/Activity/OiChange）是根，每个已挖因子是新故事节点，任何节点都能继续挖。
+- **算子要复用也要发明，由 AI 主观判断**（不套客观规则）。但判断前提是脑子里有算子库（记忆）。
+- **缺口判断和算子匹配必须两步分离。** 先独立想缺口（不看库）→ 再拿缺口查库。一起给会生搬硬套。
 
 ## 工作环境
 
-- 纯程序模块（factor_db/）：
-  - `phenomenon_miner.py` — factor_ic_daily → 高置信检测（尺度失配/镜像不对称/regime翻转）
-  - `phenomenon_cards.py` — 检测 → 方向中性现象卡（匿名 inventor_view / 溯源 memory_view）
-  - `concept_critic.py` — 四检查（问题级去重/概念不可约/多实现/方向性质）→ `review()`
-  - `question_registry.py` — 272 因子 → 问题族（批评器去重基准）
-- 中间产物：`factor_db/concept_cards/`（detections.json / cards/ / question_registry.json）
+- **算子库**（主体，v12 新建）：`operators` 表 + `operator_family_edges`（撞族边界）。查库用 SQL 或 `factor_db/concept_query.py`。
+- **故事树**：`iterations` 表（from→to + op_id）。任何因子的故事节点都能当挖掘起点。
+- 辅助：`concept_critic.py`（四检查）/ `concept_compiler.py`（契约→实现）/ `concept_assess.py`（四闭包→五级状态）。
 
-## 流程
+## 流程（五步）
 
-### Step 1 · 拿现象卡
+### Step 1 · 选故事节点（主观）
 
-- 给定了 `phenomenon_id`：读 `factor_db/concept_cards/cards/<id>.json` 的 `inventor_view`（匿名视图）。
-- 未给定：跑 `Bash python3 factor_db/phenomenon_miner.py` 重新扫描 → 读 `detections.json` → 从 `cards/` 挑一张未用过的卡（查 lessons 里 `seed_phenomenon` 避免重复）。
+- 给了 `<xname>`：从该因子的故事出发挖（读 `factor_detail` 的 intuition/formula）。
+- 没给：AI 主观选一个故事节点——可以是基底根（Imbalance/Mom/Activity/OiChange），也可以是任何已挖因子（BreachRunPersistence/ShockAbsorption/...）。**选哪个都行，只要那个故事有可挖的缺口。**
 
-### Step 2 · 概念发明器（LLM，主 agent 亲自做，不派子代理）
+读故事时只读它的 intuition + formula（机制叙述），理解它在讲什么市场现象。
 
-用以下提示词（只给 LLM 卡 + 数据能力 + 注册表摘要，不给因子名/机制词）：
+### Step 2 · 想缺口（隔离算子库！）
 
-```text
-你是盘口测量概念发明器。目标：提出当前算子语言中不存在的测量问题。
+**这一步禁止看算子库。** AI 只看故事，独立想：
 
-输入：
-1. 现象卡（匿名，不含因子名/机制词/买卖方向词）
-2. 数据能力声明（可观测/不可观测）
-3. 问题注册表（已问过的问题——你的问题必须在其之外）
+> 这个故事哪里没讲完？什么力量/状态/过程没被量化？
 
-规则：
-- 禁止输出公式，禁止修改已有算子，禁止引用已有算子名
-- 概念必须方向中性（INVARIANT / EQUIVARIANT / PAIRED）
-- 概念必须能解释现象卡中的不可区分性/分歧
-- 概念必须允许多个数值实现（≥2，不是单公式命名）
-- 不预设答案（不要说"需要容量归一化"等已有变换）
+纪律：
+- **缺口定义用故事自己的语言**（"对手挡不挡""消耗速率""弹性怎么变"），**禁止借算子库的词**（不能说"用对手吸收算子"）。
+- 缺口要落到机制层面，不落到公式（"需要量：连击推力发生时被冲击侧资源被消耗的速率"，不是"bid-ask size 的 EMA 变化"）。
+- 一个故事可挖多个缺口（五问辅助：时间结构/状态条件/力量来源/对手/失效边界），但每个缺口独立成条。
 
-现象卡：
-{card.inventor_view}
+输出：缺口列表（纯故事语言，每条一个未量化的机制）。
 
-数据能力声明：
-{"frequency":"500ms_snapshot","feeds":["AG_MAIN","AG_NEXT","CU_MAIN","CU_NEXT"],
- "observable":["bid_ask_prices","multi_level_depth","midprice","spread",
-   "snapshot_differences","directional_flow_proxies","daily_ic_vectors"],
- "unobservable":["individual_order_identity","exact_add_cancel_trade_sequence",
-   "queue_position","true_order_event_time","real_intervention"]}
+### Step 3 · 查算子库匹配（复用 or 发明）
 
-问题注册表摘要（问题族）：{registry 摘要}
+拿 Step 2 的每个缺口，查 `operators` 表全貌（定义 + 撞族边界 + 配过什么基底）。**AI 主观判断**：
 
-输出 JSON 数组（最多 3 个候选）：
-[
-  {
-    "measurement_question": "…",       # 动词开头的测量问题
-    "latent_construct": "…",           # 潜在量命名
-    "why_needed": "…",                 # 该概念为何解释卡中现象
-    "direction_property": "INVARIANT|EQUIVARIANT|PAIRED",
-    "expected_distinction": "…",       # 期望区分卡中哪两类
-    "falsification": ["…"],            # 若成立应观察到什么，否则拒绝
-    "candidate_implementations": ["…", "…"]  # ≥2 种估计思路（描述，非公式）
-  }
-]
-只输出 JSON，不要其他文字。
-```
+- **缺口像某个已有算子？** → **复用**：用该算子，但换一个**未试过 / 未撞族**的基底。
+  - 查该算子的 `operator_family_edges`：× 哪些基底撞过哪个族，避开已撞的。
+  - 例：缺口像"对手吸收"算子 → 查它的撞族边界 → ×size 撞了 imbalance → 换 ×成交量 / ×spread / ×OI 基底。
+- **缺口不像任何已有算子？** → **发明**：定义新算子（纯抽象，方向中性，多实现，可证伪）。来源任选：五问挖强因子 / 失败教训反推 / 市场微观结构理论。
 
-### Step 3 · 程序化批评（concept_critic.py）
+这一步的判断全由 AI 主观，不套饱和度阈值、不套连续失败计数。看着库，自己判断像不像。
 
-对每个候选调 `python3 factor_db/concept_critic.py --candidate <json>` 或主 agent 内嵌调用 `concept_critic.review(candidate)`：
+### Step 4 · 实现成因子（算子 × 基底 × 参数）
 
-- **问题级去重**：measured_object 是否已被注册表族占用
-- **概念不可约**：latent_construct 是否命中旧概念词（imbalance/order_flow/depth/cancel/spread/impact/recovery/...）
-- **多实现**：candidate_implementations ≥ 2 且实质不同
-- **方向性质**：direction_property 合法且描述一致
+把选定的（算子 + 基底）编译成具体因子：
+- 复用路径：已有算子的 abstract_structure + 新基底字段 → 具体 .h
+- 发明路径：新算子定义 → 用 500ms 快照可观测数据写出实现（事件时间/订单级依赖禁止）
+- 调 `write-factor` skill 生成 .h（复用现有流程）
+- 约束：≤2 实现、1 组固定参数、swap 变体验证方向性质（最小实现门）
 
-`decision == "ACCEPT"` 的候选进入下一步；REJECT 的丢弃（不重试改参数——那是演化不是发明）。
+### Step 5 · 评估 + 抽算子入库（反馈）
 
-### Step 4 · 编译成候选因子（对齐 brainstorm 格式）
+跑 `platform_submit_factor` → `platform_check_factor` → `assess`（复用全链路）。
 
-每个 ACCEPT 候选编译成 factor 对象（persist_candidates 格式）：
+**无论因子 pass/fail，都要回写算子库**（这是资产沉淀）：
+1. **新算子** → 入 `operators` 表（主体：纯抽象定义 + input_roles + abstract_structure + direction_property）
+2. **撞族边界** → 入 `operator_family_edges`（本次算子×基底 → 撞了哪个族 / 闭包外）
+   - 撞族判定：`factor_ic_correlate` 最高 |pearson| ≥0.7 + `factor_residual_ic_strength` 残差 <0.5
+   - 记 base_type / family / pearson / residual / tested_on / verdict
+3. **应用实例** → `iteration_open/realize` 时带 `op_id`（iterations.op_id 记本次迭代用了哪个算子）
 
-- `name`：PascalCase 类名，由 latent_construct + 实现序号组成（如 `StateMaintenanceBurdenA`）；swap 变体加 `_sw` 后缀（方向行为验证用，同 run 提交）
-- `formula`：用 500ms 快照可观测数据（bid/ask 深度、midprice、spread、成交流代理）写出计算描述——事件时间/订单级依赖禁止
-- `intuition`：测量问题 + 为何解释现象卡
-- `hypothesis`：**可证伪声明**（"若 <概念> 成立应观察到 X；若观察到 Y 则拒绝"——assess 忠实度用它）
-- `tags`：从 latent_construct + direction_property 派生
-- `params`：1 组固定参数，禁止窗口/阈值/档位自动遍历（最小实现门）
-- `categories`：["AG"]
+## 判定尺子（assess 时用）
 
-约束（最小实现门）：每卡最多 2 个候选 × 每个实现 1 个主版本 + 1 个 swap 变体。不做参数扫描。
-
-### Step 5 · persist_candidates
-
-调 MCP `persist_candidates {run_id, idea_text: "概念发明: <现象卡ID> → <latent_construct>", factors: [编译好的候选]}`。
-
-**→ 衔接硬规则**：persist_candidates 返回后，必须立即在同一回合进入 research-loop Step 2（并行发 run-factor-agent）——概念发明是 research-loop Step1 通道B，候选与变换引擎候选合并后走同一流水线。
-
-## 评估（交 assess skill，附加概念级验收）
-
-候选因子跑完 check_done 后，走 `assess` skill（忠实度 + 闸门 + 冗余度）。概念发明的附加验收（四闭包→五级状态）用 `factor_db/concept_assess.py`：
-
-- 问题闭包：问题是否已在注册表（发明时已查，复核）
-- 结构闭包：实现是否只是现有变换词组合
-- IC行为闭包：滚动 OOS 残差 ≥0.5 或 OOS 残差相关 ≥0.5 且最高 pearson <0.7
-- 方向行为闭包：swap 变体 IC 与主实现关系是否符合 direction_property
-
-五级状态：`IMPLEMENTATION_NOVEL → REPRESENTATION_CANDIDATE → BEHAVIOR_OUTSIDE_CLOSURE → SIGNAL_OUTSIDE_CLOSURE → FULL_NON_TYPICAL_PASS`
-（信号闭包当前数据源不可得，最高状态 = BEHAVIOR_OUTSIDE_CLOSURE + SIGNAL PENDING）
+- **IC 门槛**：ICIR≥0.3 + |rank_ic|≥0.01（过闸门才能谈闭包外）
+- **闭包外**：滚动残差≥0.5 或 OOS 残差相关≥0.5，且最高 |pearson|<0.7
+- **撞族**：最高 |pearson|≥0.7 → 该算子×该基底撞族，记边界
+- 五级状态（`concept_assess.py`）：IMPLEMENTATION_NOVEL → REPRESENTATION_CANDIDATE → BEHAVIOR_OUTSIDE_CLOSURE → SIGNAL_OUTSIDE_CLOSURE → FULL_NON_TYPICAL_PASS
 
 ## 不要做的事
 
-- 不要让 LLM 直接生成公式（先有测量问题，再有实现）
-- 不要沿已有算子变异（改窗口/换字段/加门控 = 通道A，不是本 skill）
-- 不要用买卖方向词定义概念（方向中性是硬约束）
-- 不要给概念发明器看因子名/公式（会锚定旧概念）
-- 不要在现象卡里预设答案（"需要容量归一化"之类是污染）
+- **不要 Step 2 看算子库**（会生搬硬套：看到库就反向构造能套上的缺口）
+- **不要把算子定义绑死因子**（"BreachRun 的吸收"不对，"对手吸收"才对——算子纯抽象）
+- **不要撞了族就放弃算子**（撞族 = 这个算子×这个基底失效，换基底复用，算子本身没死）
+- **不要只复用不发明**（算子库饱和后必须发明扩边界，AI 自己判断何时该发明）
+- **不要凭空发明**（发明来源：强因子五问 / 失败教训 / 市场理论，三选一，有依据）
+- **不要让缺口定义借算子库的词**（Step 2 的纯度决定 Step 3 匹配的真实性）

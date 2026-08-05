@@ -15,6 +15,9 @@
   v9 angle_candidates angle_candidates 表(angle 自发现候选记录,防归纳循环)
   v10 ideas_angle_code ideas.angle_code(信息角度血缘,因子回灌从这继承)
   v11 iterations_status_iterable iterations.status/iterable(迭代建议状态机,JS 早有 py 补齐)
+  v12 operators_library  算子库(operators 算子主体 + operator_family_edges 撞族边界
+                  + iterations.op_id)。算子=从因子故事抽取的可复用测量方法(主体,定义纯抽象);
+                  因子=算子的应用实例;撞族边界=算子×基底→撞族(复用/发明避让依据)
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -34,7 +37,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 11
+CURRENT_VERSION = 12
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -100,6 +103,13 @@ def _add_iterations_columns(conn: sqlite3.Connection) -> None:
     db.ensure_iterations_columns(conn)
 
 
+def _add_operators_library(conn: sqlite3.Connection) -> None:
+    """v12 算子库：算子为主体（operators）+ 撞族边界（operator_family_edges）+ iterations.op_id。
+    算子 = 从因子故事抽取的可复用测量方法（主体，定义纯抽象，不绑因子/基底）。
+    因子是算子的应用实例（iterations.op_id）。撞族边界 = 算子×基底→撞族（复用避让依据）。"""
+    db.ensure_operators_library(conn)
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -113,6 +123,7 @@ MIGRATIONS = [
     (9, "angle_candidates", _add_angle_candidates),
     (10, "ideas_angle_code", _add_ideas_angle_code),
     (11, "iterations_status_iterable", _add_iterations_columns),
+    (12, "operators_library", _add_operators_library),
 ]
 
 

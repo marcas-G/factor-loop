@@ -146,14 +146,17 @@ CREATE TABLE IF NOT EXISTS iterations (
     ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status      TEXT NOT NULL DEFAULT 'realized',
     iterable    INTEGER NOT NULL DEFAULT 1,
+    op_id       INTEGER,                 -- v12: 本次迭代用的算子(算子库主体)。可空=非算子迭代(参数调整等)
     FOREIGN KEY (from_xname) REFERENCES factors(xname),
     FOREIGN KEY (to_xname)   REFERENCES factors(xname),
-    FOREIGN KEY (idea_id)    REFERENCES ideas(id)
+    FOREIGN KEY (idea_id)    REFERENCES ideas(id),
+    FOREIGN KEY (op_id)      REFERENCES operators(op_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_iter_from ON iterations(from_xname);
 CREATE INDEX IF NOT EXISTS idx_iter_to   ON iterations(to_xname);
 CREATE INDEX IF NOT EXISTS idx_iter_idea ON iterations(idea_id);
+CREATE INDEX IF NOT EXISTS idx_iter_op   ON iterations(op_id);
 
 -- ============ lessons（仅 check_done 实验结果：dead_end 或 success_pattern）============
 CREATE TABLE IF NOT EXISTS lessons (
@@ -359,6 +362,44 @@ CREATE TABLE IF NOT EXISTS angle_candidates (
     tried_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status);
+
+-- ============ 算子库 v12（算子为主体，因子为应用实例）============
+-- 算子 = 从因子故事里抽取的可复用测量方法（如"对手吸收"/"弹性变化"）。
+-- 算子是主体：定义纯抽象（不绑具体因子/基底），可配任何基底复用。
+-- 因子是算子的应用实例（记在 iterations.op_id：在故事节点 from 上用算子 op 产出 to）。
+-- 撞族边界 = 算子×基底类型 → 撞了哪个族（复用/发明的避让依据）。
+CREATE TABLE IF NOT EXISTS operators (
+    op_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL UNIQUE,        -- 算子名（如 "对手吸收"）
+    definition         TEXT NOT NULL,               -- 机制描述（纯抽象，禁止出现具体因子名/基底名）
+    input_roles        TEXT,                        -- JSON：需要什么角色（如 ["thrust_direction","opposing_resource"]）
+    abstract_structure TEXT,                        -- 抽象计算骨架（参数化，不绑基底，如 "consump=(ema_res-res_now)/ema_res"）
+    direction_property TEXT CHECK(direction_property IN ('INVARIANT','EQUIVARIANT','PAIRED')),
+    source             TEXT,                        -- 来源：strong_factor_5q / failed_lesson / market_theory
+    source_ref         TEXT,                        -- 来源因子 xname（从哪挖出的）
+    created_ts         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 撞族边界：算子 × 基底类型 → 撞族结果（pearson/residual/tested_on）
+-- 每条 = 该算子在该基底类型上测过一次。family=NULL 表示未撞族（闭包外/空白）。
+CREATE TABLE IF NOT EXISTS operator_family_edges (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    op_id       INTEGER NOT NULL,
+    base_type   TEXT NOT NULL,                       -- 基底类型：size/flow/spread/oi/price/cancel/...
+    family      TEXT,                                 -- 撞的族（imbalance/ofi/cancel/...），NULL=闭包外
+    pearson     REAL,                                 -- 与库内最高 |pearson|
+    residual    REAL,                                 -- 残差 IC 强度
+    tested_on   TEXT,                                 -- 测试因子 xname
+    verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
+    note        TEXT,
+    ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (op_id)     REFERENCES operators(op_id),
+    FOREIGN KEY (tested_on)  REFERENCES factors(xname)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id);
+CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type);
+CREATE INDEX IF NOT EXISTS idx_ofe_fam  ON operator_family_edges(family);
 
 -- ============ schema_version（schema 版本追踪）============
 -- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。

@@ -1197,6 +1197,57 @@ def ensure_iterations_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE iterations ADD COLUMN iterable INTEGER NOT NULL DEFAULT 1")
 
 
+def ensure_operators_library(conn: sqlite3.Connection) -> None:
+    """v12 算子库：operators（算子主体）+ operator_family_edges（撞族边界）+ iterations.op_id。
+    算子 = 从因子故事抽取的可复用测量方法（主体，定义纯抽象）。
+    因子 = 算子的应用实例（iterations.op_id：在故事节点 from 上用算子 op 产出 to）。
+    撞族边界 = 算子×基底类型→撞族（复用/发明的避让依据）。
+    schema.sql 新库已含 operators/operator_family_edges 表 + iterations.op_id 列；
+    此函数给既有 Python 库幂等补建。"""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    # operators 表
+    if "operators" not in tables:
+        conn.execute("""
+            CREATE TABLE operators (
+                op_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name               TEXT NOT NULL UNIQUE,
+                definition         TEXT NOT NULL,
+                input_roles        TEXT,
+                abstract_structure TEXT,
+                direction_property TEXT CHECK(direction_property IN ('INVARIANT','EQUIVARIANT','PAIRED')),
+                source             TEXT,
+                source_ref         TEXT,
+                created_ts         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    # operator_family_edges 表
+    if "operator_family_edges" not in tables:
+        conn.execute("""
+            CREATE TABLE operator_family_edges (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                op_id       INTEGER NOT NULL,
+                base_type   TEXT NOT NULL,
+                family      TEXT,
+                pearson     REAL,
+                residual    REAL,
+                tested_on   TEXT,
+                verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
+                note        TEXT,
+                ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (op_id)     REFERENCES operators(op_id),
+                FOREIGN KEY (tested_on)  REFERENCES factors(xname)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_fam  ON operator_family_edges(family)")
+    # iterations.op_id 列
+    iter_cols = {r[1] for r in conn.execute("PRAGMA table_info(iterations)")}
+    if iter_cols and "op_id" not in iter_cols:
+        conn.execute("ALTER TABLE iterations ADD COLUMN op_id INTEGER REFERENCES operators(op_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_iter_op ON iterations(op_id)")
+
+
 def _map_monthly_icir(x: float | None) -> float:
     """monthly_icir 固定阈值归一(不依赖库)。≥2→1, ≥1→0.7, ≥0.5→0.4, ≥0.2→0.2, 否则0。"""
     if x is None:
