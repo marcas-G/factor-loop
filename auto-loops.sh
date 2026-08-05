@@ -133,7 +133,7 @@ run_lane() {
       before=$(latest_run)
     fi
     tmux kill-session -t "$sess" 2>/dev/null
-    tmux new-session -d -s "$sess" -c "$WORKDIR" "claude --permission-mode bypassPermissions"
+    tmux new-session -d -s "$sess" -c "$WORKDIR" "claude --permission-mode bypassPermissions --dangerously-skip-permissions"
     sleep 5
     if [ -n "$resume" ]; then
       tmux send-keys -t "$sess" "/research-loop $resume" Enter        # 续传同 run
