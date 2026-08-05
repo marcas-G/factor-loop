@@ -1966,8 +1966,22 @@ def cmd_run(args):
             to_download = [f for f in factors if f["state"] == "success" and f["download_url"]]
 
         if not to_download:
-            print("  没有可下载的因子")
-            sys.exit(1)
+            # 非阻塞协议(--skip-wait 模式): 区分 running/failed 给上层(MCP check_factor)轮询信号。
+            # exit 2 = 平台仍在 running/queued(上层稍后重试);exit 3 = 全 failed/找不到(上层走失败处理)。
+            target_set = set(target_names) if target_names else None
+            states = []
+            for f in factors:
+                if target_set is None or f["feature"] in target_set or any(
+                    f["feature"].startswith(t + "_") for t in (target_set or set())
+                ):
+                    states.append(f["state"])
+            if any(s in ("running", "queued", None) for s in states) or not states:
+                pending = [s for s in states if s not in ("success", "failed")]
+                print(f"  平台计算中(running/queued), 剩余 {len(pending)} —— 非阻塞返回 exit 2")
+                sys.exit(2)
+            else:
+                print(f"  无可下载(全 failed 或找不到): {states} —— exit 3")
+                sys.exit(3)
 
         processes = []
         for f in to_download:

@@ -75,9 +75,20 @@ export async function checkFactorProgrammatic(factor, submitResult, checkOutput)
 
   const result = await runPy(
     FACTOR_CHECK_PY,
-    ["run", "--skip-submit", "--names", featureKey, "--dir", checkOutput, "--mode", "none", "--force"],  // adapt/default-test: csv_ic 无 dailyX tick, 跳过 feval/pearson/deep
-    { timeoutSec: 86400 }
+    ["run", "--skip-submit", "--skip-wait", "--names", featureKey, "--dir", checkOutput, "--mode", "none", "--force"],  // 非阻塞: --skip-wait 查一次状态就返回, success 才下载. 调用方轮询直到非 running
+    { timeoutSec: 600 }
   );
+
+  // 非阻塞协议: exit 2 = 平台 running(调用方稍后重试), exit 3 = 全 failed(走失败处理)
+  if (result.exitCode === 2) {
+    return {
+      ok: false,
+      failureLayer: "running",
+      checkOutput,
+      summary: `[平台计算中] ${factor.name} 仍 running/queued, 稍后重试 platform_check_factor`,
+      evidence: { reason: "platform_running", note: "非阻塞: 平台未跑完, 调用方轮询本工具直到 failureLayer != running" },
+    };
+  }
 
   // adapt/default-test: success 判据改 csv_ic_summary.csv(替代 daily_ic_results.txt)
   const dailyIcPath = findCsvIcSummary(checkOutput, featureKey);
