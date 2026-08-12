@@ -18,7 +18,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = Path.home() / ".quant-runs"
 DEFAULT_DB = ROOT / "factors.db"
 

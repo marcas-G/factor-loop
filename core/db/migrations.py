@@ -32,8 +32,8 @@
   - CURRENT_VERSION 与 mjs(pipeline-mcp/lib/factor-db.mjs)一致,由 test_migrations 断言
 
 用法:
-    import sys; sys.path.insert(0, "factor_db")
-    from migrations import migrate, CURRENT_VERSION
+    import sys; sys.path.insert(0, "<项目根>")
+    from core.db.migrations import migrate, CURRENT_VERSION
     with db.get_conn(path) as conn:
         migrate(conn)   # 幂等:从当前版本补齐到 CURRENT
 """
@@ -41,9 +41,9 @@ from __future__ import annotations
 
 import sqlite3
 
-import db
+from core.db import db
 
-# 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
+# 与 runtime/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
 CURRENT_VERSION = 15
 
 

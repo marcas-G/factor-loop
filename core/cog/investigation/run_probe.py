@@ -19,12 +19,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "factor_db"))
+sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
 
-from cog_protocol.investigation import xycache, evidence_card
+from core.cog.investigation import xycache, evidence_card
 
 SIGNAL_F = "BsiDepthWeightedImbalanceRank"
 GATE_F = "CancelPrecursorDerivSignGate"

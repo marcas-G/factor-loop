@@ -16,11 +16,11 @@ import sys
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "factors.db"
+DEFAULT_DB = Path(__file__).resolve().parents[2] / "factors.db"
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import migrations  # noqa: E402  同目录;init 后调 migrate 记录版本链
-import seed_axioms  # noqa: E402  新库建后预填 23 条 axiom
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.db import migrations  # noqa: E402  init 后调 migrate 记录版本链
+from core.tools import seed_axioms  # noqa: E402  新库建后预填 23 条 axiom
 
 
 def load_sqlite_vec(conn: sqlite3.Connection) -> None:

@@ -28,12 +28,12 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factor_db import db
-from factor_db.parse_frontmatter import (
+from core.db import db
+from core.tools.parse_frontmatter import (
     extract_class_name,
     extract_template_default_param,
     inject_frontmatter,

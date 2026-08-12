@@ -17,9 +17,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "factor_db"))
-import db  # noqa: E402
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from core.db import db  # noqa: E402
 
 PY = sys.executable  # 复用当前解释器(需 venv:residual_ic_strength 依赖 numpy)
 
@@ -27,7 +27,7 @@ PY = sys.executable  # 复用当前解释器(需 venv:residual_ic_strength 依�
 def residual_mean(xname: str) -> float | None:
     """调 residual_ic_strength.py CLI 算 mean residual across scenes。"""
     r = subprocess.run(
-        [PY, str(ROOT / "factor_db" / "residual_ic_strength.py"), "--target", xname],
+        [PY, str(ROOT / "core" / "tools" / "residual_ic_strength.py"), "--target", xname],
         capture_output=True, text=True,
     )
     try:

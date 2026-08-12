@@ -20,11 +20,11 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factor_db import db
+from core.db import db
 
 
 def _get_vector(conn, factor_xname: str, symbol: str, freq: str, y_horizon: int) -> bytes | None:
@@ -179,7 +179,7 @@ def precise_corr(
     freq_a / freq_b 各自从因子本身取（不同因子 freq 标识不同）。
     """
     from scipy.stats import spearmanr
-    from factor_db.refresh_factor_ic_vectors import (
+    from core.tools.refresh_factor_ic_vectors import (
         CACHE_DIR, download_factor, load_ic_series,
     )
 

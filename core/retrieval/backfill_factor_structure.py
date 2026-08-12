@@ -6,9 +6,9 @@
   2. 提取它们的结构指纹写入 factor_structure 表
 
 调用:
-  python3 factor_db/cog_protocol/backfill_factor_structure.py
-  python3 factor_db/cog_protocol/backfill_factor_structure.py --files factors/X.h factors/Y.h
-  python3 factor_db/cog_protocol/backfill_factor_structure.py --ensure-factors  # 同时入 factors 表
+  python3 core/retrieval/backfill_factor_structure.py
+  python3 core/retrieval/backfill_factor_structure.py --files factors/X.h factors/Y.h
+  python3 core/retrieval/backfill_factor_structure.py --ensure-factors  # 同时入 factors 表
 """
 from __future__ import annotations
 
@@ -18,12 +18,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import db
-from factor_structure_extractor import extract_structure, upsert_structure, parse_frontmatter
+from core.db import db
+from core.retrieval.factor_structure_extractor import extract_structure, upsert_structure, parse_frontmatter
 
-DB_PATH = "/home/lgao/work/factor-autoloop/factors.db"
+DB_PATH = str(Path(__file__).resolve().parents[2] / "factors.db")
 
 # 默认基底(第 1 步提取范围 — 用户确认)
 DEFAULT_BASES = [

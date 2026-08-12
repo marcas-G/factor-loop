@@ -23,11 +23,11 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factor_db import db
+from core.db import db
 
 # GLM-5.1(大写:代理 claudeaggr 认;小写 glm-5.1 代理报 unknown provider)
 DEFAULT_MODEL = "GLM-5.1"

@@ -9,13 +9,13 @@ ingest_daily_ts（csv_ic_adapter）已把 csv_ic_ts 写入 factor_ic_daily。
 """
 import sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import numpy as np
 from datetime import datetime, timezone
-from factor_db import db
+from core.db import db
 
 MIN_SAMPLES = 30
 WINDOW_SIZE = 250

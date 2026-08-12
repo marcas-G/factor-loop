@@ -25,12 +25,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "factor_db"))
+sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
 
-from cog_protocol.investigation import xycache
+from core.cog.investigation import xycache
 
 PROBE = "probe_T-A"
 SIG, GATE, PROD = "sig_coord", "gate_coord", "prod_coord"

@@ -14,8 +14,8 @@ from __future__ import annotations
 import sys, json, os, tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from core.db import db
 
 
 def test_loader_reads_shared_file():
@@ -23,7 +23,7 @@ def test_loader_reads_shared_file():
     c = db.graph_constants()
     assert "resolved_clause" in c and "resolved_by" in c["resolved_clause"], "resolved_clause 缺失"
     assert "saturation" in c, "saturation 缺失"
-    file_c = json.loads((Path(__file__).resolve().parent / "graph_constants.json").read_text(encoding="utf-8"))
+    file_c = json.loads((Path(__file__).resolve().parents[2] / "core" / "db" / "graph_constants.json").read_text(encoding="utf-8"))
     assert c["resolved_clause"] == file_c["resolved_clause"], "loader 与文件不一致"
     assert c["saturation"] == file_c["saturation"], "loader saturation 与文件不一致"
     print("✓ loader 读 graph_constants.json 正确(单一真相)")

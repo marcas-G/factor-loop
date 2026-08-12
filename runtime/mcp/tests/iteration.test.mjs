@@ -7,7 +7,7 @@ import os from "node:os";
 import * as factorDb from "../../lib/factor-db.mjs";
 
 const SCHEMA = fs.readFileSync(
-  path.resolve(import.meta.dirname, "../../../factor_db/schema.sql"),
+  path.resolve(import.meta.dirname, "../../../core/db/schema.sql"),
   "utf8"
 );
 

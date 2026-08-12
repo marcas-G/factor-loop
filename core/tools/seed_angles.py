@@ -7,8 +7,8 @@
 from __future__ import annotations
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from core.db import db
 
 # 本体:数据→信息角度字典(基于 BookSnapshotInfo 46列字段族×提取结构枚举)
 ANGLES = [

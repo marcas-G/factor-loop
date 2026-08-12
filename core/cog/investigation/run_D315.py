@@ -10,9 +10,9 @@ A2: matched(dir=+1, sym_inst 窄带, vol 层) — 同瞬时对称化但过程不
 import json, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "factor_db"))
+sys.path.insert(0, str(ROOT))
 import numpy as np, pandas as pd
-from cog_protocol.investigation import xycache
+from core.cog.investigation import xycache
 
 OUT_DIR = ROOT / "logs" / "cog_protocol" / "investigation"
 PROBE = "probe_T-D"

@@ -12,10 +12,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from factor_db import db  # noqa: E402
-from factor_db import init_db  # noqa: E402
+from core.db import db  # noqa: E402
+from core.db import init_db  # noqa: E402
 
 # 各 migrateXxxSchema / ensure_* 给表补的列。schema.sql 新库直建必须含(不能靠 migrate 掩盖)。
 EXPECTED_COLS = {

@@ -9,8 +9,8 @@ from __future__ import annotations
 import sys, os, tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from core.db import db
 
 _BASE_DDLS = [
     "CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, parent_idea_id INTEGER, status TEXT, argument_chain TEXT, necessity_grade TEXT)",

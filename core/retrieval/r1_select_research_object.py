@@ -23,11 +23,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import db
+from core.db import db
 
-DB_PATH = "/home/lgao/work/factor-autoloop/factors.db"
+DB_PATH = str(Path(__file__).resolve().parents[2] / "factors.db")
 
 # 默认权重(可外部调)
 DEFAULT_WEIGHTS = {

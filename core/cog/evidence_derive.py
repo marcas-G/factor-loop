@@ -11,11 +11,12 @@
 基于 TRADING_WORLD_MODEL §3(事件语义)/§4(价格形成)/§6(时间结构)。
 """
 import sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, __file__.rsplit("/cog_protocol/", 1)[0])
-from cog_protocol.investigation.xycache import load_multi
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.cog.investigation.xycache import load_multi
 
 
 def load_raw(days=None):

@@ -38,11 +38,10 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import db
+from core.db import db
 
-DB_PATH = "/home/lgao/work/factor-autoloop/factors.db"
+DB_PATH = str(Path(__file__).resolve().parents[2] / "factors.db")
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
 
 # 通道权重(多通道聚合时,加权得分)
@@ -234,7 +233,7 @@ def search_factor_realizations(
             return {"error": "需提供 query_text 或 xname"}
 
         # ── 候选 structural/field 特征(若有 candidate_formula)──
-        from factor_structure_extractor import formula_hashes, scan_field_signature
+        from core.retrieval.factor_structure_extractor import formula_hashes, scan_field_signature
         cand_prims = None
         cand_fields = None
         cand_template_hash = None

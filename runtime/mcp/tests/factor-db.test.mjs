@@ -7,7 +7,7 @@ import os from "node:os";
 import * as factorDb from "../../lib/factor-db.mjs";
 import * as tools from "../tools/factor-db.mjs";
 
-const SCHEMA_SQL_PATH = path.resolve(import.meta.dirname, "../../../factor_db/schema.sql");
+const SCHEMA_SQL_PATH = path.resolve(import.meta.dirname, "../../../core/db/schema.sql");
 
 // 用临时 sqlite 做隔离测试。
 // factor-db.mjs 的 _db 是 module-level 单例（init 短路），所以首个 init 决定 dbPath；

@@ -7,13 +7,13 @@ import sys
 import os
 import struct
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
-from factor_db.gen_embeddings import get_embedder, build_text
-from factor_db.db import get_conn
+from core.tools.gen_embeddings import get_embedder, build_text
+from core.db.db import get_conn
 
 model = get_embedder("BAAI/bge-small-zh-v1.5")
 

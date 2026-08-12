@@ -27,11 +27,10 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import db
+from core.db import db
 
-DB_PATH = "/home/lgao/work/factor-autoloop/factors.db"
+DB_PATH = str(Path(__file__).resolve().parents[2] / "factors.db")
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
 
 # ── 内置 N1/N2 标准闭包(程序常量,不入库)──────────────────────────────

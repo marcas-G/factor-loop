@@ -1,4 +1,4 @@
-// Factor DB Node.js 客户端（镜像 factor_db/db.py）
+// Factor DB Node.js 客户端（镜像 core/db/db.py）
 //
 // 用法:
 //   import { init, addFactorFromHFile, addEval, addLesson } from "./factor-db.mjs";
@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 // 仓库根 = pipeline-mcp 的上一级(自动跟随 clone 位置)
-const CWD = path.resolve(import.meta.dirname, "../..");  // 项目根(对齐 Python db.py DB_PATH + factor_db/ 脚本目录)
+const CWD = path.resolve(import.meta.dirname, "../..");  // 项目根(对齐 Python db.py DB_PATH + core/ 脚本目录)
 const DB_PATH = path.join(CWD, "factors.db");
 // 所有 python 调用统一走独立 venv（系统 python3 缺 sqlite_vec）
 const VENV_PY = process.env.QUANT_VENV_PY || "/home/lgao/quant-venv/bin/python";
@@ -51,9 +51,9 @@ function inferAngleCode(formula, tags, xname) {
 
 let _CONSTANTS = null;
 function graphConstants() {
-  // db.py 与 factor-db.mjs 共读 factor_db/graph_constants.json → 判据一处,防双端漂移
+  // db.py 与 factor-db.mjs 共读 core/db/graph_constants.json → 判据一处,防双端漂移
   if (_CONSTANTS === null) {
-    _CONSTANTS = JSON.parse(fs.readFileSync(path.join(CWD, "factor_db", "graph_constants.json"), "utf-8"));
+    _CONSTANTS = JSON.parse(fs.readFileSync(path.join(CWD, "core", "db", "graph_constants.json"), "utf-8"));
   }
   return _CONSTANTS;
 }
@@ -79,7 +79,7 @@ function findVec0So() {
   throw new Error("找不到 sqlite_vec/vec0.so，请先 pip install sqlite-vec");
 }
 
-// schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
+// schema 版本追踪(与 core/db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
 const CURRENT_SCHEMA_VERSION = 15;
 const SCHEMA_MILESTONES = [
@@ -349,7 +349,7 @@ export function addFactorFromHFile(hFilePath, ideaId = null, opts = {}) {
   try {
     const json = execSync(
       `${PY} -c "import json,sys; sys.path.insert(0,'${CWD}');
-from factor_db.parse_frontmatter import parse_frontmatter, extract_class_name, extract_template_default_param;
+from core.tools.parse_frontmatter import parse_frontmatter, extract_class_name, extract_template_default_param;
 text = open(sys.argv[1]).read()
 m = parse_frontmatter(text) or {}
 if 'class_name' not in m:
@@ -477,7 +477,7 @@ export function ensureFormulaTags(xname, formula, tags) {
 export async function generateEmbedding(xname) {
   if (!xname) return { ok: false, error: "xname 为空" };
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "gen_embeddings.py");
+  const script = path.join(CWD, "core", "tools", "gen_embeddings.py");
   const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
   return {
     ok: result.exitCode === 0,
@@ -492,7 +492,7 @@ export async function generateEmbedding(xname) {
 export async function generateAnchorText(xname) {
   if (!xname) return { ok: false, error: "xname 为空" };
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "ai_generate_anchor.py");
+  const script = path.join(CWD, "core", "tools", "ai_generate_anchor.py");
   const result = await runPy(script, ["--xname", String(xname)], { timeoutSec: 120 });
   return {
     ok: result.exitCode === 0,
@@ -1093,7 +1093,7 @@ export async function semanticSearchFactors(queryText, k = 10) {
   const trimmed = String(queryText || "").trim();
   if (!trimmed) return [];
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "embed_query.py");
+  const script = path.join(CWD, "core", "tools", "embed_query.py");
   const result = await runPy(script, ["--text", trimmed], { timeoutSec: 60 });
   if (result.exitCode !== 0) {
     throw new Error(`embed_query.py exit=${result.exitCode}: ${(result.stderr || "").slice(0, 200)}`);
@@ -1113,7 +1113,7 @@ export async function semanticSearchFactors(queryText, k = 10) {
 export async function icCorrelateFactors(targetFactor, opts = {}) {
   const { symbol, freq, yHorizon, k = 20, minAbsPearson = 0.6, top = 15 } = opts;
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "ic_correlate.py");
+  const script = path.join(CWD, "core", "tools", "ic_correlate.py");
   const args = [
     "--target", String(targetFactor),
     "--k", String(k),
@@ -1137,7 +1137,7 @@ export async function icCorrelateFactors(targetFactor, opts = {}) {
 // 失败（下载/计算）返回 ok:false，调用方应降级跳过冗余检查（不阻塞主 verdict）。
 export async function icRefreshFactor(xname, force = false) {
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "refresh_factor_ic_vectors.py");
+  const script = path.join(CWD, "core", "tools", "refresh_factor_ic_vectors.py");
   const args = ["--xname", String(xname)];
   if (force) args.push("--force");
   const result = await runPy(script, args, { timeoutSec: 900 });
@@ -1151,12 +1151,12 @@ export async function icRefreshFactor(xname, force = false) {
 
 // 残差 IC 强度:新因子日级 IC 序列在库内基底 IC 张成空间的残差比例(预测能力不被已有因子线性解释的程度)。
 // 高=真新颖,低=冗余。补 factor_ic_correlate 的 pairwise(那个查"和某个最像",这个给"相对全库基底的新颖性标量")。
-// spawn factor_db/residual_ic_strength.py(numpy 岭回归正交),模式同 icCorrelateFactors。
+// spawn core/tools/residual_ic_strength.py(numpy 岭回归正交),模式同 icCorrelateFactors。
 // 数据依赖 factor_ic_daily(refresh_factor_ic_vectors.py 入库);库空/无基底 → strength=1.0(残差=target 自身)。
 export async function residualIcStrength(targetFactor, opts = {}) {
   const { symbol, freq, yHorizon, ridge = 1e-3, maxBase = 30 } = opts;
   const { runPy } = await import("../infra/run-py.mjs");
-  const script = path.join(CWD, "factor_db", "residual_ic_strength.py");
+  const script = path.join(CWD, "core", "tools", "residual_ic_strength.py");
   const args = ["--target", String(targetFactor), "--ridge", String(ridge), "--max-base", String(maxBase)];
   if (symbol) args.push("--symbol", String(symbol));
   if (freq) args.push("--freq", String(freq));

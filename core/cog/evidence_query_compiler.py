@@ -17,12 +17,10 @@ evidence_card / probe 结果绝不进 operator registry。
 dry-run 程序版: 规则映射(collapsed_dim → 代理因子注册表)。
 后续可换 LLM agent (cog-evidence-query-designer) 选 primitive。
 """
-try:
-    from .investigation import probe_compiler, evidence_card, xycache
-except ImportError:
-    import sys
-    sys.path.insert(0, __file__.rsplit("/cog_protocol/", 1)[0])
-    from cog_protocol.investigation import probe_compiler, evidence_card, xycache
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.cog.investigation import probe_compiler, evidence_card, xycache
 
 # collapsed_dim → 缓存代理因子(Explore 分类结果)
 # None = 当前缓存无合适代理(scale/size/sign 需另写 raw 因子)

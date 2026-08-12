@@ -2,7 +2,7 @@
 """cog-protocol 数据输入 CLI —— 纯数据层,跑一次输出 representation + N dead_end JSON。
 
 不调 LLM。供 cog-protocol skill 用 Bash 调用取输入:
-  python factor_db/cog_protocol/inputs.py --seed 42 --n 5
+  python core/cog/inputs.py --seed 42 --n 5
 
 observation_view 的保守抽取(从 text 分离事实 vs 解释)由 skill 主会话(Claude)做,
 不在此处——那是认知任务,该由 Claude 执行,不是 python 规则。
@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # factor-autoloop 根
-sys.path.insert(0, str(ROOT / "factor_db"))
-from cog_protocol import representation  # noqa: E402
+sys.path.insert(0, str(ROOT))
+from core.cog import representation  # noqa: E402
 
 DB = ROOT / "factors.db"
 

@@ -14,9 +14,9 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from factor_db import db  # noqa: E402
+from core.db import db  # noqa: E402
 
 _NODE = ("axioms", "ideas", "factors", "lessons")
 

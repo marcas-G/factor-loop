@@ -17,10 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db          # noqa: E402
-import migrations  # noqa: E402
-import init_db     # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.db import db          # noqa: E402
+from core.db import migrations  # noqa: E402
+from core.db import init_db     # noqa: E402
 
 
 def _table_names(conn) -> list[str]:
@@ -97,8 +97,8 @@ def test_ideas_necessity_fields_migrated():
 
 def test_py_mjs_version_in_sync():
     """py CURRENT_VERSION == mjs CURRENT_SCHEMA_VERSION(双端防漂移核心断言)。"""
-    mjs = (Path(__file__).resolve().parent.parent /
-           "pipeline-mcp" / "lib" / "factor-db.mjs").read_text(encoding="utf-8")
+    mjs = (Path(__file__).resolve().parents[2] /
+           "runtime" / "lib" / "factor-db.mjs").read_text(encoding="utf-8")
     m = re.search(r"CURRENT_SCHEMA_VERSION\s*=\s*(\d+)", mjs)
     assert m, "mjs 未找到 CURRENT_SCHEMA_VERSION 常量"
     mjs_ver = int(m.group(1))

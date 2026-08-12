@@ -1,7 +1,7 @@
 """SQLite 因子库访问层（封装 §8.6 API）。
 
 用法:
-    from factor_db.db import get_conn, add_factor, add_eval, update_embedding
+    from core.db.db import get_conn, add_factor, add_eval, update_embedding
 
 所有写入都用事务（get_conn 是 contextmanager），调用方负责 with 块边界。
 """
@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
-DB_PATH = Path(__file__).resolve().parent.parent / "factors.db"
+DB_PATH = Path(__file__).resolve().parents[2] / "factors.db"   # 阶段7 改 data/factors.db
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 
@@ -413,7 +413,7 @@ _GRAPH_CONSTANTS = None
 
 
 def graph_constants() -> dict:
-    """加载共享图常量(判据/阈值)。db.py 与 factor-db.mjs 共读 factor_db/graph_constants.json
+    """加载共享图常量(判据/阈值)。db.py 与 factor-db.mjs 共读 core/db/graph_constants.json
     → 判据一处,防双端漂移(has_resolved / 饱和度阈值等)。"""
     global _GRAPH_CONSTANTS
     if _GRAPH_CONSTANTS is None:

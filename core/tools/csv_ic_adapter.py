@@ -19,7 +19,7 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -136,7 +136,7 @@ def ingest_daily_ts(csv_path, factor_xname, symbol='SHFE-AG', freq='default', y_
     """
     import csv
     import re
-    from factor_db import db
+    from core.db import db
 
     with open(csv_path, 'r', encoding='utf-8') as fh:
         reader = csv.DictReader(fh)

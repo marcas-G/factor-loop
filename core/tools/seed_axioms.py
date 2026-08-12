@@ -5,8 +5,8 @@
 from __future__ import annotations
 import argparse, sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from core.db import db
 
 AXIOMS = [
     ('basis_reversion', 'cross_contract', '跨合约价差(基差)受套利约束,偏离统计均衡后均值回归', 'spread(t)=p_main-p_sub; spread 均值回复(负自相关)', {'mean_reversion': '价差偏离→回归(负自相关显著)'}, '统计套利/基差交易'),

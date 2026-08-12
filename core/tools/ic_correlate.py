@@ -17,12 +17,12 @@ import json
 import argparse
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factor_db import db
-from factor_db.factor_ic_vec_query import find_correlated_factors
+from core.db import db
+from core.tools.factor_ic_vec_query import find_correlated_factors
 
 
 def main() -> None:

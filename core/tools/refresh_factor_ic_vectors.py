@@ -40,11 +40,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factor_db import db
+from core.db import db
 
 CACHE_DIR = Path("/home/lgao/tmp/factor-vec-cache")  # 持久缓存(89% 命中);/tmp 重启会丢
 CACHE_MAX = 20  # 缓存上限(LRU):超限删最旧 dailyX,控制磁盘(~6G);factor_ic_daily 不受影响

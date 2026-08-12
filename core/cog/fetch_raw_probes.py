@@ -10,8 +10,9 @@
 未就绪(success 但打包中 / 还在 running)的跳过, 不报错。
 """
 import sys, re, os, tarfile, io, subprocess
-sys.path.insert(0, "pipeline-py")
-from featuretool_common import ensure_cookie, fetch, base_url, HOST
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.platform.featuretool_common import ensure_cookie, fetch, base_url, HOST
 
 CACHE_ROOT = "/home/lgao/tmp/factor-vec-cache"
 PROBES = ["RawBidSize0", "RawAskSize0", "RawBidPrice0", "RawAskPrice0"]

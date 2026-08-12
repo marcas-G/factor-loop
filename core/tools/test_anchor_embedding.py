@@ -11,11 +11,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from factor_db import db  # noqa: E402
-from factor_db.gen_embeddings import build_text  # noqa: E402
-from factor_db import init_db  # noqa: E402
+from core.db import db  # noqa: E402
+from core.tools.gen_embeddings import build_text  # noqa: E402
+from core.db import init_db  # noqa: E402
 
 
 def test_build_text_uses_anchor_text():
