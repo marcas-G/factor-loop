@@ -17,7 +17,7 @@ from core.db.db import get_conn
 
 model = get_embedder("BAAI/bge-small-zh-v1.5")
 
-with get_conn("factors.db") as c:
+with get_conn("data/factors.db") as c:
     rows = c.execute("SELECT xname, anchor_text FROM factors").fetchall()
     texts = [build_text(r) for r in rows]
     print(f"[INFO] {len(rows)} 个因子,batch encode...", flush=True)

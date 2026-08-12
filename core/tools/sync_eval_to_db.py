@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = Path.home() / ".quant-runs"
-DEFAULT_DB = ROOT / "factors.db"
+DEFAULT_DB = ROOT / "data" / "factors.db"
 
 
 def sync_one(conn, fac) -> dict:

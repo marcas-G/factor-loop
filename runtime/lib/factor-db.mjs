@@ -14,7 +14,7 @@ import path from "node:path";
 
 // 仓库根 = pipeline-mcp 的上一级(自动跟随 clone 位置)
 const CWD = path.resolve(import.meta.dirname, "../..");  // 项目根(对齐 Python db.py DB_PATH + core/ 脚本目录)
-const DB_PATH = path.join(CWD, "factors.db");
+const DB_PATH = path.join(CWD, "data", "factors.db");
 // 所有 python 调用统一走独立 venv（系统 python3 缺 sqlite_vec）
 const VENV_PY = process.env.QUANT_VENV_PY || "/home/lgao/quant-venv/bin/python";
 const PY = fs.existsSync(VENV_PY) ? VENV_PY : "python3";

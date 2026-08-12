@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-DEFAULT_DB = Path(__file__).resolve().parents[2] / "factors.db"
+DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "factors.db"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
 from core.db import migrations  # noqa: E402  init 后调 migrate 记录版本链

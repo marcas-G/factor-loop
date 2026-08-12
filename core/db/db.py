@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
-DB_PATH = Path(__file__).resolve().parents[2] / "factors.db"   # 阶段7 改 data/factors.db
+DB_PATH = Path(__file__).resolve().parents[2] / "data" / "factors.db"
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 

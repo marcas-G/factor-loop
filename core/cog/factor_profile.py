@@ -15,7 +15,7 @@ import json
 import sqlite3
 from collections import defaultdict
 
-DB = "/home/lgao/work/factor-autoloop/factors.db"
+import os; DB = str(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "factors.db"))
 
 
 def _parse_json(s):

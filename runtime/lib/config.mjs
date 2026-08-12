@@ -11,7 +11,7 @@ export const STATE_PATH = path.join(RUN_DIR, "state.json");
 // 路径常量集中管理(目录重构 factor_db→core, pipeline-py→core/platform)
 export const FEATURETOOL_PY  = path.join(CWD, "core", "platform", "featuretool.py");
 export const FACTOR_CHECK_PY = path.join(CWD, "core", "platform", "factor_check.py");
-export const FACTORS_DB      = path.join(CWD, "factors.db");   // 阶段7 改 data/factors.db
+export const FACTORS_DB      = path.join(CWD, "data", "factors.db");
 export const SCHEMA_SQL_PATH = path.join(CWD, "core", "db", "schema.sql");
 export const GRAPH_CONSTANTS = path.join(CWD, "core", "db", "graph_constants.json");
 export const CORE_TOOLS_DIR  = path.join(CWD, "core", "tools");

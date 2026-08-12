@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.db import db
 
-DB_PATH = str(Path(__file__).resolve().parents[2] / "factors.db")
+DB_PATH = str(Path(__file__).resolve().parents[2] / "data" / "factors.db")
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
 
 # ── 内置 N1/N2 标准闭包(程序常量,不入库)──────────────────────────────

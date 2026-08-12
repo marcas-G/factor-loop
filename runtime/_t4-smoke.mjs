@@ -48,7 +48,7 @@ console.log("写入 factor_evals + 更新 latest_*");
 console.log("\n=== 5. addIteration（模拟 retry 改代码后重 submit）===");
 // fromXname 必须先存在（FK 约束）：手动插入一个父因子
 import { DatabaseSync as _DB } from "node:sqlite";
-const _db = new _DB(path.join(CWD, "factors.db"));
+const _db = new _DB(path.join(CWD, "data", "factors.db"));
 _db.prepare("INSERT INTO factors (xname, status) VALUES (?, 'dead_end')").run("T4SmokeTest_v0");
 factorDb.addIteration("T4SmokeTest_v0", xname, ideaId, "fix deque init", "improved", 0.5);
 console.log(`写入 iterations: T4SmokeTest_v0 → ${xname}`);
@@ -69,7 +69,7 @@ console.log("lessons 总数:", factorDb.countLessons());
 
 // 查询校验
 import { DatabaseSync } from "node:sqlite";
-const db = new DatabaseSync(path.join(CWD, "factors.db"), { allowExtension: true });
+const db = new DatabaseSync(path.join(CWD, "data", "factors.db"), { allowExtension: true });
 db.loadExtension(process.env.QUANT_VEC0_SO || "/home/lgao/.local/lib/python3.9/site-packages/sqlite_vec/vec0.so");
 const f = db.prepare("SELECT status, latest_icir, latest_ic FROM factors WHERE xname = ?").get(xname);
 console.log(`factors.${xname}: status=${f.status} IC=${f.latest_ic} ICIR=${f.latest_icir}`);

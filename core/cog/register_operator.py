@@ -15,7 +15,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-DB = "/home/lgao/work/factor-autoloop/factors.db"
+import os; DB = str(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "factors.db"))
 
 
 def register_operator(conn, contract: dict, gates: dict = None, source_ref: str = "") -> dict:
