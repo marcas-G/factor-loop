@@ -180,7 +180,7 @@ calculateX()                → 【框架自动调用】在 onEndBook() 之后�
 
 ## 4. Standard Factor Template（标准因子模板）
 
-**【硬规则】.h 必须在 `#pragma once` 前含 frontmatter**（`// ---` YAML 块），字段：`xname` / `class_name` / `formula`（多行用 `|`）/ `tags`（数组）/ `params`（dict）/ `created_ts`。格式严格按 `factor_db/parse_frontmatter.py`（每行 `// ` 前缀，`// ---` 边界）。**这是入库时 `addFactorFromHFile` 提取 formula_text/tags 的源头——漏写会导致三件套（formula_text/tags/emb）缺失**。字段来源：xname/class_name/params 从因子 spec；formula 从 spec.formula；tags 从 spec.tags；created_ts 当天。rewrite 改公式后同步更新 `formula` 字段、保留 frontmatter。
+**【硬规则】.h 必须在 `#pragma once` 前含 frontmatter**（`// ---` YAML 块），字段：`xname` / `class_name` / `formula`（多行用 `|`）/ `tags`（数组）/ `params`（dict）/ `created_ts`。格式严格按 `core/tools/parse_frontmatter.py`（每行 `// ` 前缀，`// ---` 边界）。**这是入库时 `addFactorFromHFile` 提取 formula_text/tags 的源头——漏写会导致三件套（formula_text/tags/emb）缺失**。字段来源：xname/class_name/params 从因子 spec；formula 从 spec.formula；tags 从 spec.tags；created_ts 当天。rewrite 改公式后同步更新 `formula` 字段、保留 frontmatter。
 
 ```cpp
 // ---

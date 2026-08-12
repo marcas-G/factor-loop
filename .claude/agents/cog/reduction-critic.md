@@ -25,7 +25,7 @@ Operator Invention 最易崩:**为发明而发明**。你的职责是**对抗地
 **不再手写 SQL / 散调 factor_semantic_search** —— 用 R3 Contract 统一检索, 6 通道并行召回:
 
 ```
-Bash: /home/lgao/quant-venv/bin/python factor_db/cog_protocol/r3_search_realizations.py \
+Bash: /home/lgao/quant-venv/bin/python core/retrieval/r3_search_realizations.py \
       --query "<candidate measurement_question 或 formula 文本>"
 ```
 

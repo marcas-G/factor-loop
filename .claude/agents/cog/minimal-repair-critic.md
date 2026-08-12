@@ -60,7 +60,7 @@ N2 标准静态闭包 = linear/nonlinear/interaction/normalization + **operators
 **不再手写 SQL 查 operators 表** —— 用 R2 Contract `search_operator_closure` 统一检索:
 
 ```
-Bash: /home/lgao/quant-venv/bin/python factor_db/cog_protocol/r2_search_operator_closure.py \
+Bash: /home/lgao/quant-venv/bin/python core/retrieval/r2_search_operator_closure.py \
       --distinction "<supported_distinction Layer1 文本>" \
       [--object "<measurement_object>"] \
       [--temporal static|ordered|cross_section|event_driven] \

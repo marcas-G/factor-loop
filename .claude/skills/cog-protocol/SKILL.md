@@ -21,7 +21,7 @@ description: 认知协议 — 统一链路(因子表示审查 → 新算子发�
 ## S1 · 选 Research Object + 构造 Factor Profile
 
 ```
-Bash: python3 factor_db/cog_protocol/inputs.py --factor <xname>
+Bash: python3 core/cog/inputs.py --factor <xname>
 ```
 → factor_profile(identity + construction_view + evidence_view + provenance)
 
@@ -35,7 +35,7 @@ Bash: python3 factor_db/cog_protocol/inputs.py --factor <xname>
 ```
 Task({ subagent_type: "cog-assumption-extractor",
   prompt: "construction_view:\n" + <construction_view>
-        + "\n必读: logs/cog_protocol/investigation/TRADING_WORLD_MODEL.md"
+        + "\n必读: core/cog/investigation/TRADING_WORLD_MODEL.md"
 })
 ```
 → assumptions[](拆前置假设 + 认知盲区, 遍历输入/参与者/结构三维度, 不锚定公式单一方向)
@@ -139,7 +139,7 @@ operator + 原 Factor binding → 能表达 supported_distinction? → PASS
 
 认知协议对某 Factor 跑完、确定产出类型后, **立即**更新该 Factor 的 research_state(R1 下一轮选对象靠它):
 ```
-Bash: /home/lgao/quant-venv/bin/python factor_db/cog_protocol/derived_tables.py \
+Bash: /home/lgao/quant-venv/bin/python core/retrieval/derived_tables.py \
       --record-attempt <xname> <OUTCOME>
 ```
 OUTCOME 按产出类型:
