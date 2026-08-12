@@ -78,12 +78,12 @@
 | `platform_*` | submit_factor / check_factor |
 | — | health |
 
-**双端实现**:Python(`factor_db/db.py`,研究脚本用)+ Node(`pipeline-mcp/lib/factor-db.mjs`,MCP server 用),共读 `graph_constants.json` 防判据漂移。
+**双端实现**:Python(`core/db/db.py`,研究脚本用)+ Node(`runtime/lib/factor-db.mjs`,MCP server 用),共读 `graph_constants.json` 防判据漂移。
 
 ### 数据层(`factors.db`)
 
 SQLite + sqlite-vec(向量) + FTS5(全文)。
-- **schema 版本化**:`schema_version` 表 + `factor_db/migrations.py` 迁移链(当前 v4:baseline / graph_core / graph_bounds / angle)。新库 schema.sql 直建到最新并标版本;老库 `migrate()` 幂等补齐。双端版本同步(test 断言)。
+- **schema 版本化**:`schema_version` 表 + `core/db/migrations.py` 迁移链(当前 v4:baseline / graph_core / graph_bounds / angle)。新库 schema.sql 直建到最新并标版本;老库 `migrate()` 幂等补齐。双端版本同步(test 断言)。
 - **分层知识图表**:axioms(AXIOM) / ideas(DERIVED+HYPOTHESIS) / graph_edges(跨表语义边) / lessons / factors / factor_evals / iterations / angle_ontology 等。
 
 ### 方法论层(`hypothesis-framework.md`)
@@ -146,9 +146,9 @@ Step4  hypothesis_get support_score + 汇总报告    run_save {status: done}
 | 单因子怎么跑(write→submit→check) | `.claude/agents/executors/run-factor-agent.md` |
 | 结果怎么评估 | `.claude/skills/assess/SKILL.md` |
 | 方法论基底(必然性/论证链/门槛) | `.claude/hypothesis-framework.md` |
-| MCP 工具有哪些/怎么调 | `pipeline-mcp/mcp/tools/*.mjs`(按领域分文件) |
-| 数据库 schema/迁移 | `factor_db/schema.sql` + `factor_db/migrations.py` + `factor_db/db.py` |
-| 双端判据防漂移 | `factor_db/graph_constants.json` |
+| MCP 工具有哪些/怎么调 | `runtime/mcp/tools/*.mjs`(按领域分文件) |
+| 数据库 schema/迁移 | `core/db/schema.sql` + `core/db/migrations.py` + `core/db/db.py` |
+| 双端判据防漂移 | `core/db/graph_constants.json` |
 
 ---
 

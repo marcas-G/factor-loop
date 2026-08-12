@@ -17,26 +17,32 @@ auto-loops.sh                 tmux 单车道循环驱动器(拉起 /research-loo
 .claude/agents/
   run-factor-agent.md         单因子 write→submit→check→rewrite 状态机
 
-pipeline-mcp/                 quant-mcp server(submit/check/run_save/persist 走它)
-pipeline-py/                  featuretool.py + factor_check.py(平台对接)
-factor_db/                    因子库 db.py + schema.sql
+runtime/                      quant-mcp server(submit/check/run_save/persist 走它)
+core/
+  db/                         因子库 db.py + schema.sql + migrations
+  retrieval/                  R1-R4 检索 Contract + 派生表
+  cog/                        cog-protocol 链路(assumption→evidence→发明)
+  platform/                   featuretool.py + factor_check.py(平台对接)
+  tools/                      AI/IC/embedding 工具 + 测试
+factors/                      因子 .h 产物
+data/                         factors.db(运行数据,不入库)
 ```
 
 ## 起循环
 
 ### 1. 装依赖
 ```bash
-cd pipeline-mcp && npm install        # quant-mcp server 依赖
+cd runtime && npm install              # quant-mcp server 依赖
 pip install pandas numpy sqlite-vec sentence-transformers  # 建议装到独立 venv
 
-# pipeline-mcp 调 python 时用此 venv(系统 python3 缺上述部分包,必需)
+# runtime 调 python 时用此 venv(系统 python3 缺上述部分包,必需)
 export QUANT_VENV_PY=/path/to/your/venv/bin/python
 # export QUANT_VEC0_SO=/path/to/vec0.so   # 可选,不设则自动探测
 ```
 
 ### 2. 建空因子库
 ```bash
-python factor_db/init_db.py           # 用 schema.sql 建空 factors.db
+python core/db/init_db.py            # 用 schema.sql 建空 factors.db
 ```
 
 ### 3. 配 MCP
@@ -56,4 +62,4 @@ tail -f logs/loops/auto.out
 ## 数据说明
 
 `factors.db`、`check-output/`、`logs/` 等运行数据与产物均不入库(见 `.gitignore`)。
-clone 后用 `factor_db/schema.sql` / `init_db.py` 重建空库即可。
+clone 后用 `core/db/schema.sql` / `init_db.py` 重建空库即可。

@@ -2,7 +2,7 @@
   "mcpServers": {
     "quant-mcp": {
       "command": "node",
-      "args": ["/home/lgao/work/factor-autoloop/pipeline-mcp/mcp/server.mjs"],
+      "args": ["/home/lgao/work/factor-autoloop/runtime/mcp/server.mjs"],
       "env": {
         "QUANT_MCP_RUNS_ROOT": "/home/lgao/.quant-runs"
       }

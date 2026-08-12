@@ -4,7 +4,7 @@
   "mcpServers": {
     "quant-mcp": {
       "command": "node",
-      "args": ["${CLAUDE_PROJECT_DIR}/pipeline-mcp/mcp/server.mjs"],
+      "args": ["${CLAUDE_PROJECT_DIR}/runtime/mcp/server.mjs"],
       "env": {
         "QUANT_MCP_RUNS_ROOT": "/home/<you>/.quant-runs"
       }
