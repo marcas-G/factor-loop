@@ -39,7 +39,29 @@ if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
 # ==================== 通用工具 ====================
-from featuretool_common import HOST, BASE_URL, COOKIE_FILE, COOKIE_NAME, get_cookie, ensure_cookie, fetch, parse_index, save_cookie
+from featuretool_common import (
+    HOST, BASE_URL, COOKIE_FILE, COOKIE_NAME,
+    base_url, app_of_url,
+    get_cookie, ensure_cookie, fetch, parse_index, save_cookie,
+)
+
+# ==================== 平台按需选择 ====================
+# 双平台分工(自动按需):
+#   default      → .xy 原始数据(download .xy / GenerateXs)
+#   default_test → IC + 残差评估(submit 评估 / download csv_ic)
+# 全局 --app 可显式覆盖; 不给时按子命令推断:
+#   submit  → default_test(评估)
+#   download --xy → default;  download(csv_ic) → default_test
+#   list    → default_test
+def _infer_app(args, default_for_cmd: str) -> str:
+    """按 --app > 命令默认 推断平台。"""
+    app = getattr(args, "app", None)
+    if app and app != "auto":
+        return app
+    # download --xy 强制 default
+    if getattr(args, "xy", False):
+        return "default"
+    return default_for_cmd
 
 import json
 
@@ -66,13 +88,15 @@ def _save_credentials(username, password):
     os.chmod(CREDENTIALS_FILE, 0o600)
 
 
-def _do_login(username, password):
-    """核心登录逻辑。返回 (cookie, logged_in_user) 或 (None, None)。"""
+def _do_login(username, password, app=None):
+    """核心登录逻辑。返回 (cookie, logged_in_user) 或 (None, None)。
+    cookie 跨平台共享, app 只决定登录后校验访问哪个 index。"""
+    bu = base_url(app)
     cookie_jar = tempfile.mktemp(suffix=".jar")
     try:
         r = subprocess.run(
             ["curl", "-s", "-L", "-k", "--max-time", "30", "-c", cookie_jar,
-             f"{BASE_URL}/user/login"],
+             f"{bu}/user/login"],
             capture_output=True, text=True, timeout=60
         )
         m = re.search(r'name="_formkey"\s+type="hidden"\s+value="([^"]*)"', r.stdout)
@@ -84,10 +108,10 @@ def _do_login(username, password):
             "-b", cookie_jar, "-c", cookie_jar,
             "--data-urlencode", f"username={username}",
             "--data-urlencode", f"password={password}",
-            "--data-urlencode", "_next=/featuretool/default_test/index",
+            f"--data-urlencode", f"_next=/featuretool/{app or 'default_test'}/index",
             "--data-urlencode", f"_formkey={m.group(1)}",
             "--data-urlencode", "_formname=login",
-            f"{BASE_URL}/user/login",
+            f"{bu}/user/login",
         ], capture_output=True, text=True, timeout=60)
 
         if not os.path.exists(cookie_jar):
@@ -99,7 +123,7 @@ def _do_login(username, password):
             return None, None
 
         new_cookie = cm.group(1)
-        html = fetch(f"{BASE_URL}/index", new_cookie)
+        html = fetch(f"{bu}/index", new_cookie)
         um = re.search(r'submit\?username=([^"&]+)', html)
         if not um:
             return None, None
@@ -114,12 +138,12 @@ def _do_login(username, password):
             pass
 
 
-def auto_login():
+def auto_login(app=None):
     """用存储的凭证自动登录。返回新 cookie 或 None。"""
     username, password = _read_credentials()
     if not username or not password:
         return None
-    cookie, _ = _do_login(username, password)
+    cookie, _ = _do_login(username, password, app=app)
     if cookie:
         save_cookie(cookie)
         print("[自动重登成功]")
@@ -128,21 +152,23 @@ def auto_login():
 
 def cmd_list(args):
     """列出所有因子任务"""
-    cookie = ensure_cookie(args)
+    app = _infer_app(args, "default_test")
+    bu = base_url(app)
+    cookie = ensure_cookie(args, app=app)
     if not cookie:
-        cookie = auto_login()
+        cookie = auto_login(app=app)
     if not cookie:
         print("错误: 未提供 cookie。请用 --cookie <value> 或先运行 login 命令。")
         sys.exit(1)
 
-    html = fetch(f"{BASE_URL}/index", cookie)
-    username, factors = parse_index(html)
+    html = fetch(f"{bu}/index", cookie)
+    username, factors = parse_index(html, app=app)
 
     if not username:
-        cookie = auto_login()
+        cookie = auto_login(app=app)
         if cookie:
-            html = fetch(f"{BASE_URL}/index", cookie)
-            username, factors = parse_index(html)
+            html = fetch(f"{bu}/index", cookie)
+            username, factors = parse_index(html, app=app)
     if not username:
         print("错误: cookie 无效或已过期，请重新获取。")
         sys.exit(1)
@@ -151,10 +177,10 @@ def cmd_list(args):
     failed = sum(1 for f in factors if f["state"] == "failed")
 
     if getattr(args, "json", False):
-        print(json.dumps({"username": username, "total": len(factors), "success": success, "failed": failed, "factors": factors}))
+        print(json.dumps({"username": username, "app": app, "total": len(factors), "success": success, "failed": failed, "factors": factors}))
         return
 
-    print(f"用户: {username}  |  共 {len(factors)} 个因子任务\n")
+    print(f"平台: {app}  |  用户: {username}  |  共 {len(factors)} 个因子任务\n")
     print(f"{'#':<4} {'Feature':<25} {'State':<10} {'SubmitTime':<22} {'RunID'}")
     print("-" * 110)
     for i, f in enumerate(factors, 1):
@@ -166,22 +192,24 @@ def cmd_list(args):
 
 
 def cmd_download(args):
-    """下载因子计算结果"""
-    cookie = ensure_cookie(args)
+    """下载因子计算结果(.xy 走 default; csv_ic 走 default_test)"""
+    app = _infer_app(args, "default_test")
+    bu = base_url(app)
+    cookie = ensure_cookie(args, app=app)
     if not cookie:
-        cookie = auto_login()
+        cookie = auto_login(app=app)
     if not cookie:
         print("错误: 未提供 cookie。请用 --cookie <value> 或先运行 login 命令。")
         sys.exit(1)
 
-    html = fetch(f"{BASE_URL}/index", cookie)
-    username, factors = parse_index(html)
+    html = fetch(f"{bu}/index", cookie)
+    username, factors = parse_index(html, app=app)
 
     if not username:
-        cookie = auto_login()
+        cookie = auto_login(app=app)
         if cookie:
-            html = fetch(f"{BASE_URL}/index", cookie)
-            username, factors = parse_index(html)
+            html = fetch(f"{bu}/index", cookie)
+            username, factors = parse_index(html, app=app)
     if not username:
         print("错误: cookie 无效或已过期，请重新获取。")
         sys.exit(1)
@@ -206,7 +234,8 @@ def cmd_download(args):
     output_dir = Path(args.output or ".")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"准备下载 {len(to_download)} 个因子到: {output_dir}\n")
+    kind = "dailyX/.xy" if app == "default" else "csv_ic"
+    print(f"平台: {app} ({kind})  |  准备下载 {len(to_download)} 个因子到: {output_dir}\n")
 
     for f in to_download:
         fname = f["feature"]
@@ -241,7 +270,7 @@ def cmd_download(args):
             # 清理 tar.gz
             tar_path.unlink()
 
-            # 验证
+            # 验证(default 平台验 dailyX; default_test 验 csv_ic)
             dailyx = extract_dir / "dailyX"
             if dailyx.exists():
                 file_count = len(list(dailyx.iterdir()))
@@ -273,10 +302,12 @@ def cmd_download(args):
 
 
 def cmd_submit(args):
-    """提交因子计算任务"""
-    cookie = ensure_cookie(args)
+    """提交因子计算任务(默认 default_test 跑 IC; --app default 生 .xy)"""
+    app = _infer_app(args, "default_test")
+    bu = base_url(app)
+    cookie = ensure_cookie(args, app=app)
     if not cookie:
-        cookie = auto_login()
+        cookie = auto_login(app=app)
     if not cookie:
         print("错误: 未提供 cookie。请用 --cookie <value> 或先运行 login 命令。")
         sys.exit(1)
@@ -294,15 +325,15 @@ def cmd_submit(args):
         sys.exit(1)
 
     # 1. 获取 submit 页面，提取 formkey
-    print("获取提交页面...")
-    html = fetch(f"{BASE_URL}/submit?username=", cookie)
+    print(f"获取提交页面(平台: {app})...")
+    html = fetch(f"{bu}/submit?username=", cookie)
 
     # cookie 过期时页面可能重定向到登录页，检查并自动重登
     if 'login' in html.lower() or '_formkey' not in html:
-        new_cookie = auto_login()
+        new_cookie = auto_login(app=app)
         if new_cookie:
             cookie = new_cookie
-            html = fetch(f"{BASE_URL}/submit?username=", cookie)
+            html = fetch(f"{bu}/submit?username=", cookie)
         else:
             print("错误: cookie 已过期且自动重登失败，请手动运行 login 命令。")
             sys.exit(1)
@@ -320,10 +351,12 @@ def cmd_submit(args):
     generate_xs = args.generate_xs
 
     print(f"提交因子: {args.features}")
+    print(f"平台: {app} ({'IC+残差评估' if app == 'default_test' else '生 .xy'})")
     print(f"文件: {file_path.name}")
     print(f"品种: {feeds}")
     print(f"日期: {start_date} ~ {end_date}")
-    print(f"生成Xs: {'是' if generate_xs else '否'}")
+    if app == "default":
+        print(f"生成Xs: {'是' if generate_xs else '否'}")
 
     try:
         curl_cmd = [
@@ -335,13 +368,17 @@ def cmd_submit(args):
             "-F", f"start_date={start_date}",
             "-F", f"end_date={end_date}",
         ]
-        # adapt/default-test: 新平台删 GenerateXs; ComputeCsvIc 默认 on(平台端算 csv_ic 替代 dailyX 本地算)
-        curl_cmd += ["-F", "ComputeCsvIc=on"]
+        # 平台差异: default_test 用 ComputeCsvIc(生 csv_ic); default 用 GenerateXs(生 dailyX/.xy)
+        if app == "default_test":
+            curl_cmd += ["-F", "ComputeCsvIc=on"]
+        elif generate_xs:
+            curl_cmd += ["-F", "GenerateXs=on"]
+        _next = f"/featuretool/{app}/index"
         curl_cmd += [
-            "-F", "_next=/featuretool/default_test/index",
+            "-F", f"_next={_next}",
             "-F", f"_formkey={formkey}",
             "-F", "_formname=default",
-            f"{BASE_URL}/submit",
+            f"{bu}/submit",
         ]
 
         result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=120)
@@ -356,6 +393,7 @@ def cmd_submit(args):
                 from factor_logger import append_submission_log
                 append_submission_log("featuretool", "提交", {
                     "因子": args.features,
+                    "平台": app,
                     "文件": str(file_path),
                     "品种": feeds,
                     "日期": f"{start_date} ~ {end_date}",
@@ -363,7 +401,7 @@ def cmd_submit(args):
             except Exception:
                 pass
             if getattr(args, "json", False):
-                print(json.dumps({"ok": True, "features": args.features, "feeds": feeds, "file": str(file_path)}))
+                print(json.dumps({"ok": True, "app": app, "features": args.features, "feeds": feeds, "file": str(file_path)}))
             else:
                 print("\n提交成功！")
         else:
@@ -375,13 +413,13 @@ def cmd_submit(args):
             else:
                 err_msg = "已发送但未确认（无重定向也无报错），请到网页确认"
             if getattr(args, "json", False):
-                print(json.dumps({"ok": False, "error": err_msg, "stage": "submit", "features": args.features}))
+                print(json.dumps({"ok": False, "error": err_msg, "stage": "submit", "app": app, "features": args.features}))
                 sys.exit(2)
             else:
                 print(f"\n提交失败: {err_msg}")
     except Exception as e:
         if getattr(args, "json", False):
-            print(json.dumps({"ok": False, "error": str(e), "stage": "submit_exception", "features": getattr(args, "features", None)}))
+            print(json.dumps({"ok": False, "error": str(e), "stage": "submit_exception", "app": app, "features": getattr(args, "features", None)}))
             sys.exit(2)
         else:
             print(f"\n提交失败: {e}")
@@ -406,7 +444,7 @@ def cmd_login(args):
 
     print(f"登录成功! 用户: {logged_in_user}")
     print(f"Cookie 已保存到 {COOKIE_FILE}")
-    print("凭证已保存，下次 cookie 过期将自动重登")
+    print("凭证已保存，下次 cookie 过期将自动重登(cookie 跨平台共享)")
 
 
 def cmd_save_cookie(args):
@@ -456,23 +494,26 @@ def build_parser():
 
     # 全局选项
     p.add_argument("--cookie", help="session cookie 值（也可通过 FEATURETOOL_COOKIE 环境变量设置）")
+    p.add_argument("--app", choices=["default", "default_test", "auto"], default="auto",
+                   help="平台: default(.xy 原始数据) | default_test(IC+残差评估) | auto(按子命令推断, 默认)")
 
     sub = p.add_subparsers(dest="command")
 
     # login
-    lg = sub.add_parser("login", help="通过用户名密码登录（自动保存 cookie）")
+    lg = sub.add_parser("login", help="通过用户名密码登录（自动保存 cookie, 跨平台共享）")
     lg.add_argument("--username", "-u", required=True, help="用户名")
     lg.add_argument("--password", "-p", required=True, help="密码")
 
     # list
-    lp = sub.add_parser("list", help="查看所有因子任务状态")
+    lp = sub.add_parser("list", help="查看所有因子任务状态（默认 default_test 平台）")
     lp.add_argument("--json", action="store_true", help="输出 JSON（便于程序化解析）")
 
     # download
-    dl = sub.add_parser("download", help="下载因子计算结果")
+    dl = sub.add_parser("download", help="下载因子计算结果（默认 csv_ic/default_test; --xy 走 default 下 dailyX）")
     dl.add_argument("--names", help="指定因子名，逗号分隔（如 hawkes_oc,hawkes_oc_freq）")
     dl.add_argument("--all", action="store_true", help="下载全部成功的因子")
     dl.add_argument("--output", "-o", help="输出目录（默认当前目录）")
+    dl.add_argument("--xy", action="store_true", help="下载 .xy 原始数据(走 default 平台); 默认下 csv_ic(default_test)")
 
     # submit
     sb = sub.add_parser("submit", help="提交新因子计算任务")

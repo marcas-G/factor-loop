@@ -25,7 +25,20 @@ CREATE TABLE IF NOT EXISTS factors (
     quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
     quality_grade    TEXT,         -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
     intuition        TEXT,         -- 语义意图描述(研究用,带 idea#/上下文;人看)
-    anchor_text      TEXT          -- embedding 锚定文本(固定四要素模板生成,检索专用)
+    anchor_text      TEXT,         -- embedding 锚定文本(固定四要素模板生成,检索专用)
+    -- Phase 2.1 cohort 元数据（operator_planner 冻结 cohort 因子专用；普通因子 NULL）
+    origin_type              TEXT,        -- 因子来源(OPERATOR_PLANNER / BRAINSTORM / ...)
+    cohort_tag               TEXT,        -- cohort 标签(PHASE2_FIRST_REAL_COHORT)
+    need_id                  TEXT,        -- NeedCard id（mechanical_control 产）
+    plan_id                  TEXT,        -- chain_planner plan id（确定性 plan0）
+    program_id               TEXT,        -- plan_to_program program id
+    operator_chain           TEXT,        -- 算子链 JSON（与 angleontology 血缘）
+    field_bindings           TEXT,        -- 字段绑定 JSON（冻结，后验搜索守卫）
+    parameter_hash           TEXT,        -- 参数冻结 hash（sha16）
+    kernel_hash              TEXT,        -- kernel hash（sha16）
+    decision_available_at    TIMESTAMP,   -- 入库时刻（证明早于 5C 评价，未看后续结果）
+    evaluation_status        TEXT,        -- 5C 评价状态（PENDING_PLATFORM_FEVAL / 分层摘要）
+    posterior_search_forbidden INTEGER    -- 0/1 冻结标记（看 5C 结果后禁改公式/参数/绑定）
 );
 
 CREATE INDEX IF NOT EXISTS idx_factors_status       ON factors(status);
@@ -400,6 +413,158 @@ CREATE TABLE IF NOT EXISTS operator_family_edges (
 CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id);
 CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type);
 CREATE INDEX IF NOT EXISTS idx_ofe_fam  ON operator_family_edges(family);
+
+-- ============ factor_structure（因子结构指纹, R3 查重主体）============
+-- 双源提取(避免 C++ 完整 AST 成本黑洞):
+--   源1 frontmatter formula 伪代码归一化 → canonical_text/canonical_hash/template_hash
+--       canonical: 字段名归一(size→SIZE/价格→PRICE)+ 去注释 + 去空白;template: 在 canonical 基础上参数占位化
+--   源2 C++ 静态扫描(正则/词法) → field_signature/operator_primitives/complexity
+-- R3 search_factor_realizations 的 structural channel 主力:
+--   exact_hash 精确撞 / template_hash 换参撞 / operator_primitives 结构族聚类
+-- xname 与 factors.xname 对齐(可独立存在,不强 FK — 含未入库的 Base/Probe 锚点)
+CREATE TABLE IF NOT EXISTS factor_structure (
+    xname              TEXT PRIMARY KEY,
+    canonical_text     TEXT,        -- formula 伪代码归一化后文本(字段归一+去注释去空白)
+    canonical_hash     TEXT,        -- sha1(canonical_text) — 精确结构撞
+    template_hash      TEXT,        -- sha1(canonical_text 参数占位化) — 换参撞
+    tree_depth         INTEGER,     -- 公式嵌套深度(主输出表达式)
+    node_count         INTEGER,     -- 公式节点数
+    field_signature    TEXT,        -- JSON: 用到的原始字段归一名 + 频次 {bid_size,ask_size,oi,...}
+    operator_primitives TEXT,       -- JSON: 用到的算子原语 + 频次 {ratio,diff,rank,log,tanh,ring,ewma,...}
+    complexity         TEXT,        -- 粗档: trivial/simple/moderate/complex(按 node_count+primitives 种类)
+    source_formula     TEXT,        -- 原始 frontmatter formula(原始保留,审计用)
+    source_file        TEXT,        -- .h 文件路径
+    extracted_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fs_canonical_hash ON factor_structure(canonical_hash);
+CREATE INDEX IF NOT EXISTS idx_fs_template_hash  ON factor_structure(template_hash);
+CREATE INDEX IF NOT EXISTS idx_fs_complexity     ON factor_structure(complexity);
+
+-- ============ factor_operator_usage（因子用到的算子, R3 operator 通道）============
+-- 因子级 × 算子级交叉表:某因子用到了哪些 operators 表里的算子(role + 次数)。
+-- R3 search_factor_realizations 的 operator 通道:同 operator family = 撞族信号。
+-- 数据源:factor_structure 提取后(或人工/agent 标注)回填。xname/op_id 都不强 FK(含未入库)。
+CREATE TABLE IF NOT EXISTS factor_operator_usage (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    xname       TEXT NOT NULL,
+    op_id       INTEGER,
+    op_role     TEXT,                  -- 算子在因子里扮演的角色(主变换/门控/归一化/...)
+    use_count   INTEGER DEFAULT 1,
+    note        TEXT,
+    UNIQUE(xname, op_id, op_role),
+    FOREIGN KEY (xname) REFERENCES factors(xname),
+    FOREIGN KEY (op_id)  REFERENCES operators(op_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fou_xname ON factor_operator_usage(xname);
+CREATE INDEX IF NOT EXISTS idx_fou_opid  ON factor_operator_usage(op_id);
+
+-- ============ operator_capability_index（算子能力索引, R2 检索主体）============
+-- 算子级 capability 派生索引:从 operators 抽 carrier/measurement_object/temporal_requirement 等。
+-- R2 search_operator_closure:SQL 硬过滤(carrier/temporal/observable)+ vec rerank(distinction)。
+-- 一算子一行。operators 空时此表空(R2 降级为"仅标准静态闭包")。
+CREATE TABLE IF NOT EXISTS operator_capability_index (
+    op_id                       INTEGER PRIMARY KEY,
+    op_name                     TEXT,
+    carrier_type                TEXT,    -- scalar_field/event_sequence/book_shape/episode/phase/...
+    measurement_object          TEXT,    -- 被测对象(episode/phase/depth_shape/imbalance/...)
+    measurement_property        TEXT,    -- 被测属性(concentration/asymmetry/persistence/...)
+    input_role_signature        TEXT,    -- JSON: 输入语义角色 [thrust_direction, opposing_resource,...]
+    output_role                 TEXT,    -- 输出语义角色
+    temporal_requirement        TEXT,    -- static/ordered/cross_section/event_driven
+    cross_section_requirement   TEXT,
+    pair_requirement            TEXT,
+    observable_requirements     TEXT,    -- JSON: 需要的可观测能力 [timestamped_scalar_sequence,...]
+    invariance                  TEXT,    -- JSON: 不变性属性
+    updated_ts                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (op_id) REFERENCES operators(op_id)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS operator_capability_vec USING vec0(
+    op_id    INTEGER PRIMARY KEY,
+    embedding FLOAT[768]
+);
+CREATE INDEX IF NOT EXISTS idx_oci_carrier  ON operator_capability_index(carrier_type);
+CREATE INDEX IF NOT EXISTS idx_oci_object  ON operator_capability_index(measurement_object);
+CREATE INDEX IF NOT EXISTS idx_oci_temporal ON operator_capability_index(temporal_requirement);
+
+-- ============ factor_research_state（因子研究态, R1 检索主体）============
+-- 一因子一行:这个 Factor 作为 Research Object 被认知协议研究过多少次。
+-- 区分 Factor Product State(factors.status) vs Factor Research State(本表)。
+-- 数据源:从 ideas/iterations/lessons 聚合。R1 select_research_object 用 exhaustion_score 选下一只。
+CREATE TABLE IF NOT EXISTS factor_research_state (
+    xname                       TEXT PRIMARY KEY,
+    times_selected              INTEGER NOT NULL DEFAULT 0,
+    last_selected_ts            TIMESTAMP,
+    cognitive_attempts          INTEGER NOT NULL DEFAULT 0,
+    contradicticts_count        INTEGER NOT NULL DEFAULT 0,
+    consistent_count            INTEGER NOT NULL DEFAULT 0,
+    insufficient_count          INTEGER NOT NULL DEFAULT 0,
+    out_of_domain_count         INTEGER NOT NULL DEFAULT 0,
+    factor_iteration_count      INTEGER NOT NULL DEFAULT 0,
+    operator_gap_count          INTEGER NOT NULL DEFAULT 0,
+    new_operator_count          INTEGER NOT NULL DEFAULT 0,
+    successful_child_count      INTEGER NOT NULL DEFAULT 0,
+    dead_end_child_count        INTEGER NOT NULL DEFAULT 0,
+    open_idea_count             INTEGER NOT NULL DEFAULT 0,
+    research_exhaustion_score   REAL NOT NULL DEFAULT 0.0,  -- 0-1, 越高越耗尽
+    last_outcome                TEXT,    -- NEW_OPERATOR/FACTOR_ITERATION/INSUFFICIENT/CONSISTENT/OOD
+    last_updated_ts             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (xname) REFERENCES factors(xname)
+);
+CREATE INDEX IF NOT EXISTS idx_frs_exhaustion ON factor_research_state(research_exhaustion_score);
+CREATE INDEX IF NOT EXISTS idx_frs_last_sel   ON factor_research_state(last_selected_ts);
+
+-- ============ factor_evidence_rollup（因子证据聚合, R4 + S1 evidence_view）============
+-- factor_ic_daily → Agent readable summary(几十行,非几千行 raw IC)。
+-- R4 search_behavior_neighbors + S1 evidence_view(rollup 替代逐日 IC JOIN)。
+-- 多 slice_type:FULL/RECENT/SYMBOL/REGIME/FEED。
+CREATE TABLE IF NOT EXISTS factor_evidence_rollup (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    factor_xname        TEXT NOT NULL,
+    symbol              TEXT,
+    freq                TEXT,
+    y_horizon           INTEGER,
+    slice_type          TEXT NOT NULL CHECK(slice_type IN ('FULL','RECENT','YEAR','SYMBOL','REGIME','FEED')),
+    slice_key           TEXT,            -- 具体键(RECENT=最近N天 / REGIME=regime名 / FEED=main|sub)
+    n                   INTEGER,
+    ic_mean             REAL,
+    ic_std              REAL,
+    icir                REAL,
+    positive_ratio      REAL,
+    ic_median           REAL,
+    ic_q10              REAL,
+    ic_q90              REAL,
+    start_date          TEXT,
+    end_date            TEXT,
+    source_eval_id      INTEGER,
+    computed_ts         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(factor_xname, symbol, freq, y_horizon, slice_type, slice_key),
+    FOREIGN KEY (factor_xname) REFERENCES factors(xname),
+    FOREIGN KEY (source_eval_id) REFERENCES factor_evals(id)
+);
+CREATE INDEX IF NOT EXISTS idx_fer_factor ON factor_evidence_rollup(factor_xname);
+CREATE INDEX IF NOT EXISTS idx_fer_scene  ON factor_evidence_rollup(symbol, freq, y_horizon);
+
+-- ============ library_map（全库聚合视图, R1 选 Research Object 用）============
+-- 全库 coverage 索引:按 status/angle/field_family/structure_family 聚合因子数 + dead_end/success 密度。
+-- 不是 prompt 背景,是 Step 0 检索索引——让 selector 对 100% 因子库有覆盖意识。
+-- 普通因子 angle_code 推断后可用;structure_family 从 factor_structure.complexity 粗分(细粒度待结构族聚类)。
+CREATE VIEW IF NOT EXISTS library_map AS
+SELECT
+    f.status                                              AS status,
+    f.angle_code                                          AS angle_code,
+    COALESCE(fs.complexity, 'unknown')                    AS structure_family,
+    COUNT(DISTINCT f.xname)                               AS total_factors,
+    COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END)  AS dead_end_count,
+    COUNT(DISTINCT CASE WHEN f.status='evaluated' THEN f.xname END) AS evaluated_count,
+    COUNT(DISTINCT l_de.id)                               AS dead_end_lesson_count,
+    COUNT(DISTINCT l_su.id)                               AS success_lesson_count
+FROM factors f
+LEFT JOIN factor_structure fs ON fs.xname = f.xname
+LEFT JOIN lessons l_de ON l_de.factor_xname = f.xname AND l_de.type='dead_end' AND l_de.deprecated_at IS NULL
+LEFT JOIN lessons l_su ON l_su.factor_xname = f.xname AND l_su.type='success_pattern' AND l_su.deprecated_at IS NULL
+WHERE f.deprecated_at IS NULL
+GROUP BY f.status, f.angle_code, COALESCE(fs.complexity, 'unknown');
 
 -- ============ schema_version（schema 版本追踪）============
 -- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。

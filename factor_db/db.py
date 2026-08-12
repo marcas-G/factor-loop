@@ -1127,6 +1127,32 @@ def ensure_anchor_text_field(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE factors ADD COLUMN anchor_text TEXT")
 
 
+def ensure_cohort_meta_fields(conn: sqlite3.Connection) -> None:
+    """补 factors cohort 元数据列(Phase 2.1 operator_planner 冻结 cohort 因子专用)。v13 cohort_meta。
+
+    spec §3：A/B 入 factors 表保留血缘 + 冻结 hash。普通因子这些列 NULL（不影响）。
+    幂等：PRAGMA 检查列存在才 ALTER。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    additions = {
+        "origin_type": "TEXT",
+        "cohort_tag": "TEXT",
+        "need_id": "TEXT",
+        "plan_id": "TEXT",
+        "program_id": "TEXT",
+        "operator_chain": "TEXT",
+        "field_bindings": "TEXT",
+        "parameter_hash": "TEXT",
+        "kernel_hash": "TEXT",
+        "decision_available_at": "TIMESTAMP",
+        "evaluation_status": "TEXT",
+        "posterior_search_forbidden": "INTEGER",
+    }
+    for col, decl in additions.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE factors ADD COLUMN {col} {decl}")
+
+
 def ensure_angle_candidates_table(conn: sqlite3.Connection) -> None:
     """建 angle_candidates 表(angle 自发现候选记录,防归纳循环)。v9 angle_candidates。"""
     tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -1246,6 +1272,148 @@ def ensure_operators_library(conn: sqlite3.Connection) -> None:
     if iter_cols and "op_id" not in iter_cols:
         conn.execute("ALTER TABLE iterations ADD COLUMN op_id INTEGER REFERENCES operators(op_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_iter_op ON iterations(op_id)")
+
+
+def ensure_factor_structure_table(conn: sqlite3.Connection) -> None:
+    """v14 factor_structure 表(因子结构指纹, R3 查重主体)。
+
+    双源提取(避免 C++ 完整 AST 成本黑洞):
+      - 源1 frontmatter formula 伪代码归一化 → canonical_hash/template_hash
+      - 源2 C++ 静态扫描 → field_signature/operator_primitives/complexity
+    xname 与 factors.xname 对齐,但不强 FK(含未入库 Base/Probe 锚点)。
+    schema.sql 新库直建;此函数给既有库幂等补建。"""
+    tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "factor_structure" not in tabs:
+        conn.execute("""
+            CREATE TABLE factor_structure (
+                xname              TEXT PRIMARY KEY,
+                canonical_text     TEXT,
+                canonical_hash     TEXT,
+                template_hash      TEXT,
+                tree_depth         INTEGER,
+                node_count         INTEGER,
+                field_signature    TEXT,
+                operator_primitives TEXT,
+                complexity         TEXT,
+                source_formula     TEXT,
+                source_file        TEXT,
+                extracted_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX idx_fs_canonical_hash ON factor_structure(canonical_hash)")
+        conn.execute("CREATE INDEX idx_fs_template_hash  ON factor_structure(template_hash)")
+        conn.execute("CREATE INDEX idx_fs_complexity     ON factor_structure(complexity)")
+
+
+def ensure_retrieval_tables(conn: sqlite3.Connection) -> None:
+    """v15 检索层派生表:R1/R2/R3/R4 检索 Contract 的数据基础。
+
+    5 张:
+      - factor_operator_usage  R3 operator 通道(因子×算子交叉)
+      - operator_capability_index + operator_capability_vec  R2 算子能力索引(SQL 过滤+vec rerank)
+      - factor_research_state  R1 因子研究态(被研究次数/exhaustion)
+      - factor_evidence_rollup  R4 + S1 IC 聚合(替代逐日 IC JOIN)
+      - library_map VIEW  R1 全库覆盖聚合
+    """
+    tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "factor_operator_usage" not in tabs:
+        conn.execute("""
+            CREATE TABLE factor_operator_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                xname TEXT NOT NULL, op_id INTEGER, op_role TEXT,
+                use_count INTEGER DEFAULT 1, note TEXT,
+                UNIQUE(xname, op_id, op_role)
+            )
+        """)
+        conn.execute("CREATE INDEX idx_fou_xname ON factor_operator_usage(xname)")
+        conn.execute("CREATE INDEX idx_fou_opid  ON factor_operator_usage(op_id)")
+    if "operator_capability_index" not in tabs:
+        conn.execute("""
+            CREATE TABLE operator_capability_index (
+                op_id INTEGER PRIMARY KEY, op_name TEXT,
+                carrier_type TEXT, measurement_object TEXT, measurement_property TEXT,
+                input_role_signature TEXT, output_role TEXT,
+                temporal_requirement TEXT, cross_section_requirement TEXT,
+                pair_requirement TEXT, observable_requirements TEXT,
+                invariance TEXT,
+                updated_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX idx_oci_carrier  ON operator_capability_index(carrier_type)")
+        conn.execute("CREATE INDEX idx_oci_object  ON operator_capability_index(measurement_object)")
+        conn.execute("CREATE INDEX idx_oci_temporal ON operator_capability_index(temporal_requirement)")
+    # operator_capability_vec(vec0 虚拟表,768 维 bge-small embedding)
+    vec_tabs = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%vec0%'"
+    )}
+    if "operator_capability_vec" not in vec_tabs:
+        try:
+            conn.execute(
+                "CREATE VIRTUAL TABLE operator_capability_vec USING vec0("
+                "op_id INTEGER PRIMARY KEY, embedding FLOAT[768])"
+            )
+        except sqlite3.OperationalError:
+            pass  # sqlite-vec 未加载,跳过(查询时降级)
+    if "factor_research_state" not in tabs:
+        conn.execute("""
+            CREATE TABLE factor_research_state (
+                xname TEXT PRIMARY KEY,
+                times_selected INTEGER NOT NULL DEFAULT 0,
+                last_selected_ts TIMESTAMP,
+                cognitive_attempts INTEGER NOT NULL DEFAULT 0,
+                contradicticts_count INTEGER NOT NULL DEFAULT 0,
+                consistent_count INTEGER NOT NULL DEFAULT 0,
+                insufficient_count INTEGER NOT NULL DEFAULT 0,
+                out_of_domain_count INTEGER NOT NULL DEFAULT 0,
+                factor_iteration_count INTEGER NOT NULL DEFAULT 0,
+                operator_gap_count INTEGER NOT NULL DEFAULT 0,
+                new_operator_count INTEGER NOT NULL DEFAULT 0,
+                successful_child_count INTEGER NOT NULL DEFAULT 0,
+                dead_end_child_count INTEGER NOT NULL DEFAULT 0,
+                open_idea_count INTEGER NOT NULL DEFAULT 0,
+                research_exhaustion_score REAL NOT NULL DEFAULT 0.0,
+                last_outcome TEXT,
+                last_updated_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX idx_frs_exhaustion ON factor_research_state(research_exhaustion_score)")
+        conn.execute("CREATE INDEX idx_frs_last_sel   ON factor_research_state(last_selected_ts)")
+    if "factor_evidence_rollup" not in tabs:
+        conn.execute("""
+            CREATE TABLE factor_evidence_rollup (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                factor_xname TEXT NOT NULL, symbol TEXT, freq TEXT, y_horizon INTEGER,
+                slice_type TEXT NOT NULL CHECK(slice_type IN ('FULL','RECENT','YEAR','SYMBOL','REGIME','FEED')),
+                slice_key TEXT, n INTEGER,
+                ic_mean REAL, ic_std REAL, icir REAL, positive_ratio REAL,
+                ic_median REAL, ic_q10 REAL, ic_q90 REAL,
+                start_date TEXT, end_date TEXT, source_eval_id INTEGER,
+                computed_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(factor_xname, symbol, freq, y_horizon, slice_type, slice_key)
+            )
+        """)
+        conn.execute("CREATE INDEX idx_fer_factor ON factor_evidence_rollup(factor_xname)")
+        conn.execute("CREATE INDEX idx_fer_scene  ON factor_evidence_rollup(symbol, freq, y_horizon)")
+    # library_map VIEW
+    views = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='view'")}
+    if "library_map" not in views:
+        conn.execute("""
+            CREATE VIEW library_map AS
+            SELECT
+                f.status AS status, f.angle_code AS angle_code,
+                COALESCE(fs.complexity, 'unknown') AS structure_family,
+                COUNT(DISTINCT f.xname) AS total_factors,
+                COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END) AS dead_end_count,
+                COUNT(DISTINCT CASE WHEN f.status='evaluated' THEN f.xname END) AS evaluated_count,
+                COUNT(DISTINCT l_de.id) AS dead_end_lesson_count,
+                COUNT(DISTINCT l_su.id) AS success_lesson_count
+            FROM factors f
+            LEFT JOIN factor_structure fs ON fs.xname = f.xname
+            LEFT JOIN lessons l_de ON l_de.factor_xname=f.xname AND l_de.type='dead_end' AND l_de.deprecated_at IS NULL
+            LEFT JOIN lessons l_su ON l_su.factor_xname=f.xname AND l_su.type='success_pattern' AND l_su.deprecated_at IS NULL
+            WHERE f.deprecated_at IS NULL
+            GROUP BY f.status, f.angle_code, COALESCE(fs.complexity, 'unknown')
+        """)
 
 
 def _map_monthly_icir(x: float | None) -> float:

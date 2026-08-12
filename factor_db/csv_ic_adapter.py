@@ -167,16 +167,20 @@ def ingest_daily_ts(csv_path, factor_xname, symbol='SHFE-AG', freq='default', y_
             except ValueError:
                 h = y_horizon or 1
             sym = symbol
+            freq_contract = freq
             xcol_val = (row.get(xcol_col) or '') if xcol_col else ''
             if xcol_val:
                 m = re.search(r'X\.(SHFE-\w+?)[@\.]', xcol_val)
                 if m:
                     sym = m.group(1)
+                # 合约分流: x_col 含 @N@(如 X.SHFE-AG@1@sqy0_xxx) 是次主力, 否则主力。
+                # 主力/次主力共用 symbol, 靠 freq 区分, 避免 INSERT OR REPLACE 同 date 互覆盖。
+                freq_contract = freq + (':sub' if re.search(r'@\d+@', xcol_val) else ':main')
             conn.execute(
                 "INSERT OR REPLACE INTO factor_ic_daily "
                 "(factor_xname, symbol, freq, y_horizon, date, ic) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (factor_xname, sym, freq, h, date, ic)
+                (factor_xname, sym, freq_contract, h, date, ic)
             )
             written += 1
 

@@ -7,8 +7,30 @@ import { extractClassNameFromH, isTemplateClass } from "./write-factor.mjs";
 
 const SUBMIT_TIMEOUT_SEC = 120;
 
+// 合法品种代码白名单(沪金银铜铝镍, 5 品种)。
+// categories 必须是这些代码之一, 不是 angle 标签(oi_anomaly/regime_gate 等)。
+// 防 P0: categories 填错(填成 angle 标签)→ 拼出 SHFE-oi_anomaly 畸形 feeds → DAG failed。
+export const VALID_CATEGORIES = ["AG", "AU", "CU", "AL", "NI"];
+
+/** 校验 categories 是合法品种代码。返回 {valid, invalid, error}。 */
+export function validateCategories(categories) {
+  if (!Array.isArray(categories)) {
+    return { valid: false, invalid: [], error: `categories 必须是数组, 得到 ${typeof categories}` };
+  }
+  const invalid = categories.filter((c) => !VALID_CATEGORIES.includes(c));
+  if (invalid.length > 0) {
+    return {
+      valid: false,
+      invalid,
+      error: `categories 必须是品种代码 ${VALID_CATEGORIES.join("/")} 之一(如 ["AG"]), 不是 angle 标签或 tags。非法值: ${invalid.join(", ")}`,
+    };
+  }
+  return { valid: true, invalid: [] };
+}
+
 // categories: ["CU","AL","NI"] → "SHFE-CU,SHFE-CU@1,SHFE-AL,SHFE-AL@1,..."
 // 不传或为空 → 返回 null（让 featuretool 用默认 SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1）
+// 调用前必须先 validateCategories(防畸形 feeds)。
 function categoriesToFeeds(categories) {
   if (!Array.isArray(categories) || categories.length === 0) return null;
   return categories.flatMap((c) => [`SHFE-${c}`, `SHFE-${c}@1`]).join(",");
@@ -17,6 +39,20 @@ function categoriesToFeeds(categories) {
 export async function submitFactorProgrammatic(factor, factorFile) {
   if (DRY_RUN) {
     return { ok: true, features: factor.name, raw: "[DRY-RUN] submit skipped", dry: true, attempts: 1 };
+  }
+
+  // P0 防御: categories 必须是合法品种代码(AG/AU/CU/AL/NI), 不是 angle 标签。
+  // 拦在这里, 避免拼出 SHFE-oi_anomaly 畸形 feeds 发到平台导致 DAG failed。
+  const catCheck = validateCategories(factor.categories || []);
+  if (!catCheck.valid) {
+    return {
+      ok: false,
+      features: factor.name,
+      error: `[categories 语义错误] ${catCheck.error}`,
+      raw: `非法 categories: ${JSON.stringify(factor.categories)}`,
+      attempts: 1,
+      failure_layer: "config_error",
+    };
   }
 
   const className = extractClassNameFromH(factorFile) || factor.name;

@@ -16,10 +16,40 @@ import subprocess
 from pathlib import Path
 
 HOST = "https://tools.xyz.abc"
-BASE_URL = f"{HOST}/featuretool/default_test"  # adapt/default-test: 新平台应用前缀(default_test),产物 csv_ic 非 dailyX
+# 双平台分工:
+#   default      → 下载 .xy 原始数据(dailyX, GenerateXs=on, download_file)
+#   default_test → 跑 IC + 残差评估(csv_ic, ComputeCsvIc=on, download_ic)
+# 按需使用: 调用 base_url(app) 取 URL; CLI 按子命令推断(submit→default_test, xy→default)。
+# 环境变量 FEATURETOOL_APP 仍可全局覆盖(向后兼容)。
+VALID_APPS = ("default", "default_test")
+DEFAULT_APP = os.environ.get("FEATURETOOL_APP", "default_test")
+
+# 向后兼容: 暴露 BASE_URL 常量(= 默认 app)。新代码用 base_url(app)。
+BASE_URL = f"{HOST}/featuretool/{DEFAULT_APP}"
 COOKIE_FILE = os.path.expanduser("~/.featuretool_cookie")
 COOKIE_NAME = "session_id_featuretool"
 CREDS_FILE = "/home/lgao/featuretool_creds.json"  # 自动登录用的账号密码 {username, password}
+
+
+def base_url(app: str | None = None) -> str:
+    """返回指定 app 的 BASE_URL。app=None 用环境变量/默认(default_test)。
+
+    app 语义:
+      'default'      → .xy 原始数据平台(download_file, GenerateXs)
+      'default_test' → IC/残差评估平台(download_ic, ComputeCsvIc)
+    """
+    if app is None:
+        app = DEFAULT_APP
+    if app not in VALID_APPS:
+        raise ValueError(f"app 必须是 {VALID_APPS} 之一, 得到 {app!r}")
+    return f"{HOST}/featuretool/{app}"
+
+
+def app_of_url(url: str) -> str:
+    """从 URL 反推 app(default / default_test)。供 cmd_submit 判断平台用。"""
+    if "/featuretool/default_test/" in url:
+        return "default_test"
+    return "default"
 
 
 def get_cookie(cookie_arg=None):
@@ -56,10 +86,13 @@ def save_cookie(cookie):
     print(f"Cookie 已保存到 {COOKIE_FILE}")
 
 
-def do_login(username, password):
-    """账号密码登录，返回有效 cookie 或 None。移植自 factor-pipeline/factor_pipeline.py。"""
+def do_login(username, password, app=None):
+    """账号密码登录，返回有效 cookie 或 None。移植自 factor-pipeline/factor_pipeline.py。
+
+    cookie 跨平台共享(session 同一个), app 只决定登录后校验访问哪个 index。"""
     import tempfile
-    login_url = f"{BASE_URL}/user/login"  # BASE_URL 含 /featuretool/default 应用前缀；HOST/user/login 会 404 invalid application
+    bu = base_url(app)
+    login_url = f"{bu}/user/login"  # BASE_URL 含 /featuretool/<app> 应用前缀；HOST/user/login 会 404 invalid application
     jar = tempfile.mktemp(suffix=".jar")
     try:
         r = subprocess.run(
@@ -72,7 +105,7 @@ def do_login(username, password):
             ["curl", "-s", "-L", "-k", "--max-time", "30", "-b", jar, "-c", jar,
              "--data-urlencode", f"username={username}",
              "--data-urlencode", f"password={password}",
-             "--data-urlencode", "_next=/featuretool/default_test/index",
+             f"--data-urlencode", f"_next=/featuretool/{app or DEFAULT_APP}/index",
              "--data-urlencode", f"_formkey={m.group(1)}",
              "--data-urlencode", "_formname=login", login_url],
             capture_output=True, text=True, timeout=60)
@@ -82,7 +115,7 @@ def do_login(username, password):
         if not cm:
             return None
         cookie = cm.group(1)
-        html = fetch(f"{BASE_URL}/index", cookie)
+        html = fetch(f"{bu}/index", cookie)
         if not re.search(r'submit\?username=([^"&]+)', html):
             return None
         return cookie
@@ -95,18 +128,20 @@ def do_login(username, password):
             pass
 
 
-def ensure_cookie(cookie_arg=None):
+def ensure_cookie(cookie_arg=None, app=None):
     """确保返回有效 cookie：当前 cookie 失效则用 CREDS_FILE 自动登录刷新。
 
     替代 get_cookie 用于所有需要鉴权的入口（submit/check）。cookie 过期自动
     读 /home/lgao/featuretool_creds.json 登录，无需 agent/人工介入。
+    cookie 跨平台共享, app 只决定校验时访问哪个 index。
     返回有效 cookie 或 None（creds 缺失/登录失败）。
     """
     import sys
     cookie = get_cookie(cookie_arg)
+    bu = base_url(app)
     if cookie:
         try:
-            html = fetch(f"{BASE_URL}/index", cookie)
+            html = fetch(f"{bu}/index", cookie)
             if re.search(r'submit\?username=([^"&]+)', html):
                 return cookie
         except Exception:
@@ -116,7 +151,7 @@ def ensure_cookie(cookie_arg=None):
         return None
     try:
         creds = json.load(open(CREDS_FILE))
-        new_cookie = do_login(creds["username"], creds["password"])
+        new_cookie = do_login(creds["username"], creds["password"], app=app)
         if new_cookie:
             save_cookie(new_cookie)
             print(f"[ensure_cookie] cookie 已自动刷新（登录用户 {creds['username']}）")
@@ -136,8 +171,13 @@ def fetch(url, cookie):
     return result.stdout
 
 
-def parse_index(html):
+def parse_index(html, app=None):
     """解析 featuretool 主页 HTML，提取用户名和因子任务列表。
+
+    app 决定 download_url 解析方式:
+      default_test → /featuretool/default_test/download_ic (csv_ic)
+      default      → /featuretool/default/download_file    (dailyX/.xy)
+    app=None 时自动从 URL 前缀推断。
 
     返回:
         (username, factors) 其中 factors 是 dict 列表，每个 dict 包含:
@@ -156,16 +196,28 @@ def parse_index(html):
         r'<td>(.*?)</td>\s*'                                         # DownloadXs
         r'<td>([^<]+)</td>'                                          # LastSubmitTime
     )
+    # download_url 正则: 兼容两种平台(default_test/download_ic | default/download_file)
+    dl_re_test = re.compile(r'href="(/featuretool/default_test/download_ic\?[^"]*)"')
+    dl_re_default = re.compile(r'href="(/featuretool/default/download_file\?[^"]*)"')
+
     for m in row_pattern.finditer(html):
         feature = m.group(1).strip()
-        # group2=Mode(csv_ic,忽略); group3/4=Job link/id; group5=State; group6=Download; group7=LastSubmitTime
         job_url = m.group(3) or ""
         job_id = m.group(4).strip() if m.group(4) else ""
         state = m.group(5).strip()
         download_raw = m.group(6).strip()
 
-        dl_match = re.search(r'href="(/featuretool/default_test/download_ic\?[^"]*)"', download_raw)
-        download_url = dl_match.group(1) if dl_match else ""
+        # 按 app 选正则; app=None 时两个都试, 谁匹配用谁
+        download_url = ""
+        if app == "default_test" or app is None:
+            dlm = dl_re_test.search(download_raw)
+            if dlm:
+                download_url = dlm.group(1)
+        if not download_url and (app == "default" or app is None):
+            dlm = dl_re_default.search(download_raw)
+            if dlm:
+                download_url = dlm.group(1)
+
         run_id_match = re.search(r'run_id=([^&"]+)', download_url)
         run_id = run_id_match.group(1) if run_id_match else ""
 

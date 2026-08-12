@@ -18,6 +18,13 @@
   v12 operators_library  算子库(operators 算子主体 + operator_family_edges 撞族边界
                   + iterations.op_id)。算子=从因子故事抽取的可复用测量方法(主体,定义纯抽象);
                   因子=算子的应用实例;撞族边界=算子×基底→撞族(复用/发明避让依据)
+  v14 factor_structure  因子结构指纹表(R3 查重主体)。双源提取:
+                  frontmatter formula 归一化(canonical_hash/template_hash)+
+                  C++ 静态扫描(field_signature/operator_primitives/complexity)。
+                  xname 与 factors.xname 对齐但不强 FK(含未入库 Base/Probe 锚点)
+  v15 retrieval_tables  检索层派生表(R1-R4 Contract 数据基础):
+                  factor_operator_usage(R3 op 通道)/ operator_capability_index+vec(R2)/
+                  factor_research_state(R1)/ factor_evidence_rollup(R4+S1)/ library_map VIEW(R1)
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -37,7 +44,7 @@ import sqlite3
 import db
 
 # 与 pipeline-mcp/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 12
+CURRENT_VERSION = 15
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -110,6 +117,29 @@ def _add_operators_library(conn: sqlite3.Connection) -> None:
     db.ensure_operators_library(conn)
 
 
+def _add_cohort_meta(conn: sqlite3.Connection) -> None:
+    """v13 factors cohort 元数据（Phase 2.1 operator_planner 冻结 cohort 因子专用）。
+
+    spec §3：A/B 入 factors 表保留血缘(need_id/plan_id/program_id/operator_chain/field_bindings)
+    + 冻结 hash(parameter_hash/kernel_hash) + decision_available_at（证明入库早于 5C 评价）。
+    普通因子这些列 NULL。
+    """
+    db.ensure_cohort_meta_fields(conn)
+
+
+def _add_factor_structure(conn: sqlite3.Connection) -> None:
+    """v14 factor_structure 表(因子结构指纹, R3 查重主体)。双源提取:
+    formula 归一化(canonical/template hash)+ C++ 静态扫描(field/primitives/complexity)。"""
+    db.ensure_factor_structure_table(conn)
+
+
+def _add_retrieval_tables(conn: sqlite3.Connection) -> None:
+    """v15 检索层派生表(R1-R4 Contract 数据基础)。
+    factor_operator_usage / operator_capability_index+vec / factor_research_state /
+    factor_evidence_rollup / library_map VIEW。"""
+    db.ensure_retrieval_tables(conn)
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -124,6 +154,9 @@ MIGRATIONS = [
     (10, "ideas_angle_code", _add_ideas_angle_code),
     (11, "iterations_status_iterable", _add_iterations_columns),
     (12, "operators_library", _add_operators_library),
+    (13, "cohort_meta", _add_cohort_meta),
+    (14, "factor_structure", _add_factor_structure),
+    (15, "retrieval_tables", _add_retrieval_tables),
 ]
 
 

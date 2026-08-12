@@ -167,15 +167,25 @@ Task({
    ⚠️ **metrics.mjs 缓存**: evidence 可能没 csv_ic 字段。**workaround**: Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录。
 
    - **路径 B(主,库间 IC 冗余硬否决)**:抓"公式不同但日级 IC 同涨同跌"的真冗余(如同 run 变体、库内近似因子)。
-     1. 读 `state.factors[i].evidence.eval_metrics.csv_ic.daily_ts`; 没有则 Bash find check 输出目录的 `csv_ic_ts.csv`
+     1. 读 daily_ts(P6 后大字段外存): 优先从 `state.factors[i].evidence_file`(若存在, JSON 里 `daily_ts` 字段)读; state 内 `evidence.eval_metrics.csv_ic.daily_ts` 已外存为空(只剩 `_offloaded` 标记)。两个都没有则 Bash find check 输出目录的 `csv_ic_ts.csv`
      2. Bash `python3 factor_db/csv_ic_adapter.py ingest_daily_ts <ts_file> <xname>` 写入 factor_ic_daily(**因子步骤 3 已入库,不撞 FK**)
      3. Bash `/home/lgao/quant-venv/bin/python3 factor_db/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
-     4. 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}`
+     4. **R4 检索(主)**: 调 R4 Contract `search_behavior_neighbors` 做完整的行为邻居检索(场景对齐 + ANN 召回 + 精确 pearson + residual IC + operator overlap):
+        ```
+        Bash: /home/lgao/quant-venv/bin/python factor_db/cog_protocol/r4_search_behavior_neighbors.py \
+              --xname <xname> --symbol <sym> --horizon <hz>
+        ```
+        读 R4 返回:
+        - `collision_verdict`: COLLIDES(|pearson|>0.7) | WEAK_CORRELATION(>0.4) | INDEPENDENT
+        - `strongest_neighbor` + `strongest_pearson`: 最强撞族邻居
+        - `residual_after_orthogonalization`: 挤掉 top-5 邻居基底后的平均 |IC|(<0.5=冗余零新息)
+        - `scene.scene_sparse`: 同场景因子<5 → 撞族判定置信度降, key_weaknesses 注明
+     - **硬否决**: R4 `collision_verdict=COLLIDES`(pearson>0.7) → 冗余, key_weaknesses 写"IC 行为撞族 vs {strongest_neighbor} |r|={strongest_pearson}"; `residual_after_orthogonalization < 0.5` → 零新息, 写"残差={x}<0.5 预测力被库内线性解释"
+     - **fallback(R4 无数据时)**: 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}`(MCP 工具, 与 R4 同源但接口较旧)。两者都无数据 → key_weaknesses 注"库间 IC 冗余未检", verdict 谨慎
      5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景(symbol 从 screening.pair 解析、y_horizon=screening.horizon)的 `icir/mean_ic/std_ic` → `run_save` 写 `factors.<i>.evidence.eval_metrics.daily_icir`,供步骤5 在稀疏因子(zero_rate≥0.5)时替代 pooled screening.icir 作判据。查不到(此场景未算)→ 稀疏因子降级:key_weaknesses 注"daily ICIR 未检",verdict 谨慎倾向 fail。查询:
         ```
         python3 -c "import sqlite3;r=sqlite3.connect('factors.db').execute('SELECT icir,mean_ic,std_ic,n_samples FROM factor_ic_vec_meta WHERE factor_xname LIKE ? AND symbol=? AND y_horizon=?',('<xname>%','<sym>',<hz>)).fetchone();print(r)"
         ```
-     - **硬否决**:`factor_ic_correlate` 最高 `|pearson_approx| ≥ 0.6` → 冗余,`key_weaknesses` 写"IC 行为冗余 vs {factor} |r|={x}";`factor_residual_ic_strength` 最低 `< 0.5` → 冗余,写"残差={x}<0.5 零新息"
    - **路径 A(辅,因子内部一致性,非库间冗余)**:`csv_ic_xcorr.md` 是**该因子自身**的 X↔X 矩阵(5品种×2horizon 互相关),**查不出与库内因子的冗余**——`find_redundant` 只会匹配到自身的不同场景(如 AG main↔AG@1)。仅作泛化/对齐敏感性参考,**不作库间冗余硬否决**。
      - Bash `python3 factor_db/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`,结果只写入 `key_weaknesses`/`key_strengths` 描述内部一致性(如"AG main↔@1 反号=对齐敏感"),不触发否决。
    - **回退(无 csv_ic_ts — 真旧平台)**:`factor_ic_refresh {xname}` 走 dailyX,**dailyX 现已无数据,常 ok:false,直接跳过**;verdict 照常,`key_weaknesses` 注"库间 IC 冗余未检(无 daily_ts/dailyX)"

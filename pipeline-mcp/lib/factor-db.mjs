@@ -81,7 +81,7 @@ function findVec0So() {
 
 // schema 版本追踪(与 factor_db/migrations.py 对齐;双端 CURRENT 一致性由 test_migrations 断言)。
 // 版本里程碑 = py MIGRATIONS 的 name;现有 migrate* 已把结构补齐到最新 → 记录完整版本链。
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 15;
 const SCHEMA_MILESTONES = [
   [1, "baseline"],
   [2, "graph_core"],
@@ -94,6 +94,10 @@ const SCHEMA_MILESTONES = [
   [9, "angle_candidates"],
   [10, "ideas_angle_code"],
   [11, "iterations_status_iterable"],
+  [12, "operators_library"],
+  [13, "cohort_meta"],
+  [14, "factor_structure"],
+  [15, "retrieval_tables"],
 ];
 
 function migrateSchemaVersion() {
@@ -130,6 +134,10 @@ export function init({ dbPath = DB_PATH } = {}) {
   migrateAnchorTextSchema();
   migrateAngleCandidatesSchema();
   migrateIdeasAngleSchema();
+  migrateOperatorsLibrary();
+  migrateCohortMeta();
+  migrateFactorStructure();
+  migrateRetrievalTables();
   return _db;
 }
 
@@ -1429,6 +1437,139 @@ function migrateIdeasAngleSchema() {
   const cols = _db.prepare("PRAGMA table_info(ideas)").all().map((c) => c.name);
   if (cols.length > 0 && !cols.includes("angle_code")) {
     _db.exec("ALTER TABLE ideas ADD COLUMN angle_code TEXT");
+  }
+}
+
+// v12 operators_library:operators 算子主体 + operator_family_edges 撞族 + iterations.op_id
+function migrateOperatorsLibrary() {
+  const tabs = _db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  if (!tabs.includes("operators")) {
+    _db.exec(`CREATE TABLE operators (
+      op_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+      definition TEXT NOT NULL, input_roles TEXT, abstract_structure TEXT,
+      direction_property TEXT CHECK(direction_property IN ('INVARIANT','EQUIVARIANT','PAIRED')),
+      source TEXT, source_ref TEXT,
+      created_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+  }
+  if (!tabs.includes("operator_family_edges")) {
+    _db.exec(`CREATE TABLE operator_family_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, op_id INTEGER NOT NULL, base_type TEXT NOT NULL,
+      family TEXT, pearson REAL, residual REAL, tested_on TEXT,
+      verdict TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
+      note TEXT, ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_ofe_fam  ON operator_family_edges(family)");
+  }
+  const iterCols = _db.prepare("PRAGMA table_info(iterations)").all().map((c) => c.name);
+  if (iterCols.length > 0 && !iterCols.includes("op_id")) {
+    _db.exec("ALTER TABLE iterations ADD COLUMN op_id INTEGER");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_iter_op ON iterations(op_id)");
+  }
+}
+
+// v13 cohort_meta:factors cohort 元数据列(Phase 2.1 operator_planner 冻结 cohort 因子专用)
+function migrateCohortMeta() {
+  const cols = _db.prepare("PRAGMA table_info(factors)").all().map((c) => c.name);
+  if (cols.length === 0) return; // 空库跳过
+  const additions = {
+    origin_type: "TEXT", cohort_tag: "TEXT", need_id: "TEXT", plan_id: "TEXT",
+    program_id: "TEXT", operator_chain: "TEXT", field_bindings: "TEXT",
+    parameter_hash: "TEXT", kernel_hash: "TEXT", decision_available_at: "TIMESTAMP",
+    evaluation_status: "TEXT", posterior_search_forbidden: "INTEGER",
+  };
+  for (const [col, decl] of Object.entries(additions)) {
+    if (!cols.includes(col)) _db.exec(`ALTER TABLE factors ADD COLUMN ${col} ${decl}`);
+  }
+}
+
+// v14 factor_structure:因子结构指纹(R3 查重主体,双源提取)
+function migrateFactorStructure() {
+  const tabs = _db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  if (!tabs.includes("factor_structure")) {
+    _db.exec(`CREATE TABLE factor_structure (
+      xname TEXT PRIMARY KEY, canonical_text TEXT, canonical_hash TEXT, template_hash TEXT,
+      tree_depth INTEGER, node_count INTEGER, field_signature TEXT, operator_primitives TEXT,
+      complexity TEXT, source_formula TEXT, source_file TEXT,
+      extracted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fs_canonical_hash ON factor_structure(canonical_hash)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fs_template_hash  ON factor_structure(template_hash)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fs_complexity     ON factor_structure(complexity)");
+  }
+}
+
+// v15 retrieval_tables:R1-R4 检索 Contract 数据基础
+function migrateRetrievalTables() {
+  const tabs = _db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  if (!tabs.includes("factor_operator_usage")) {
+    _db.exec(`CREATE TABLE factor_operator_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, xname TEXT NOT NULL, op_id INTEGER,
+      op_role TEXT, use_count INTEGER DEFAULT 1, note TEXT,
+      UNIQUE(xname, op_id, op_role))`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fou_xname ON factor_operator_usage(xname)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fou_opid  ON factor_operator_usage(op_id)");
+  }
+  if (!tabs.includes("operator_capability_index")) {
+    _db.exec(`CREATE TABLE operator_capability_index (
+      op_id INTEGER PRIMARY KEY, op_name TEXT,
+      carrier_type TEXT, measurement_object TEXT, measurement_property TEXT,
+      input_role_signature TEXT, output_role TEXT,
+      temporal_requirement TEXT, cross_section_requirement TEXT,
+      pair_requirement TEXT, observable_requirements TEXT, invariance TEXT,
+      updated_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_oci_carrier  ON operator_capability_index(carrier_type)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_oci_object  ON operator_capability_index(measurement_object)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_oci_temporal ON operator_capability_index(temporal_requirement)");
+  }
+  // operator_capability_vec(vec0 虚拟表,需 sqlite-vec 已加载)
+  const vecTabs = _db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%vec0%'").all().map((r) => r.name);
+  if (!vecTabs.includes("operator_capability_vec")) {
+    try {
+      _db.exec("CREATE VIRTUAL TABLE operator_capability_vec USING vec0(op_id INTEGER PRIMARY KEY, embedding FLOAT[768])");
+    } catch (e) { /* sqlite-vec 未加载则跳过,查询降级 */ }
+  }
+  if (!tabs.includes("factor_research_state")) {
+    _db.exec(`CREATE TABLE factor_research_state (
+      xname TEXT PRIMARY KEY, times_selected INTEGER NOT NULL DEFAULT 0,
+      last_selected_ts TIMESTAMP, cognitive_attempts INTEGER NOT NULL DEFAULT 0,
+      contradicticts_count INTEGER NOT NULL DEFAULT 0, consistent_count INTEGER NOT NULL DEFAULT 0,
+      insufficient_count INTEGER NOT NULL DEFAULT 0, out_of_domain_count INTEGER NOT NULL DEFAULT 0,
+      factor_iteration_count INTEGER NOT NULL DEFAULT 0, operator_gap_count INTEGER NOT NULL DEFAULT 0,
+      new_operator_count INTEGER NOT NULL DEFAULT 0, successful_child_count INTEGER NOT NULL DEFAULT 0,
+      dead_end_child_count INTEGER NOT NULL DEFAULT 0, open_idea_count INTEGER NOT NULL DEFAULT 0,
+      research_exhaustion_score REAL NOT NULL DEFAULT 0.0, last_outcome TEXT,
+      last_updated_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_frs_exhaustion ON factor_research_state(research_exhaustion_score)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_frs_last_sel   ON factor_research_state(last_selected_ts)");
+  }
+  if (!tabs.includes("factor_evidence_rollup")) {
+    _db.exec(`CREATE TABLE factor_evidence_rollup (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, factor_xname TEXT NOT NULL,
+      symbol TEXT, freq TEXT, y_horizon INTEGER,
+      slice_type TEXT NOT NULL CHECK(slice_type IN ('FULL','RECENT','YEAR','SYMBOL','REGIME','FEED')),
+      slice_key TEXT, n INTEGER, ic_mean REAL, ic_std REAL, icir REAL, positive_ratio REAL,
+      ic_median REAL, ic_q10 REAL, ic_q90 REAL, start_date TEXT, end_date TEXT, source_eval_id INTEGER,
+      computed_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(factor_xname, symbol, freq, y_horizon, slice_type, slice_key))`);
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fer_factor ON factor_evidence_rollup(factor_xname)");
+    _db.exec("CREATE INDEX IF NOT EXISTS idx_fer_scene  ON factor_evidence_rollup(symbol, freq, y_horizon)");
+  }
+  const views = _db.prepare("SELECT name FROM sqlite_master WHERE type='view'").all().map((r) => r.name);
+  if (!views.includes("library_map")) {
+    _db.exec(`CREATE VIEW library_map AS
+      SELECT f.status AS status, f.angle_code AS angle_code,
+        COALESCE(fs.complexity, 'unknown') AS structure_family,
+        COUNT(DISTINCT f.xname) AS total_factors,
+        COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END) AS dead_end_count,
+        COUNT(DISTINCT CASE WHEN f.status='evaluated' THEN f.xname END) AS evaluated_count,
+        COUNT(DISTINCT l_de.id) AS dead_end_lesson_count,
+        COUNT(DISTINCT l_su.id) AS success_lesson_count
+      FROM factors f
+      LEFT JOIN factor_structure fs ON fs.xname = f.xname
+      LEFT JOIN lessons l_de ON l_de.factor_xname=f.xname AND l_de.type='dead_end' AND l_de.deprecated_at IS NULL
+      LEFT JOIN lessons l_su ON l_su.factor_xname=f.xname AND l_su.type='success_pattern' AND l_su.deprecated_at IS NULL
+      WHERE f.deprecated_at IS NULL
+      GROUP BY f.status, f.angle_code, COALESCE(fs.complexity, 'unknown')`);
   }
 }
 

@@ -1,7 +1,7 @@
 ---
 name: reviewer-agent
-description: 必然假设的对抗式审稿子代理。session 隔离——只接收论证链 artifact，不接收作者推理过程。被 hypothesize 通过 Task 工具派出(模式一假设审稿;模式二忠实度由 assess 派)。
-tools: Read, mcp__quant-mcp__hypothesis_get, mcp__quant-mcp__graph_angle_coverage
+description: 必然假设的对抗式审稿子代理。session 隔离——只接收论证链 artifact，不接收作者推理过程。被 cog-protocol 通过 Task 派出(模式一假设审稿;模式二忠实度由 assess 派)。
+tools: Read, mcp__quant-mcp__hypothesis_get
 ---
 
 # Reviewer Agent — 对抗式假设审稿
@@ -203,33 +203,6 @@ fail 不是"打回重做"。必须区分根因（决定生成机怎么修）：
 
 ---
 
-## 审稿模式三 · Angle 审(新角度是否真新维度)
-
-被 hypothesize 的 angle_discovery 分支派出(meta-angle-discoverer 产候选角度后)。审候选角度是否"真新维度",防换皮/无支撑/不可落地。**这是系统突破预定义语言边界(12 角度)的守门人**——放过换皮会让"自发现"沦为重命名,放过无支撑会让语言膨胀。
-
-### 审稿对象
-
-Task prompt 含候选角度 JSON(code/name/field_family/extraction/signal_target/theory_axiom/description/novelty_argument)+ 现有 12 角度清单。必要时用 `graph_angle_coverage` 复核清单。
-
-### 审稿三维度(逐条攻,任一不过 → reject)
-
-1. **非换皮**:候选 (field_family, extraction) 和现有 12 角度逐一对比。若和任一现有的 (field_family, extraction) 二元组完全相同 → 换皮(如 book_imbalance→order_asym 同 size+截面差)。必须所有现有的二元组都不同才算新维度。code 撞现有也是换皮。
-2. **有支撑**:novelty_argument 声称的"dead_end 聚簇共享该维度"是否真共享(不是牵强)?有无 axiom 锚(theory_axiom 指向现有 axiom code,或 null 但有数据论证)?牵强附会/无数据无锚 → reject。
-3. **可落地**:field_family 必须对应 BookSnapshotInfo 实有字段族(size/add_cancel/volume/oi/mid/price/turnover/time),extraction 可计算(截面差/分布矩/时序存活/时间聚类/游程)。发明不存在的字段族 → reject。
-
-### 返回值(angle 审模式)
-
-```json
-{
-  "verdict": "accept" | "reject",
-  "nearest_existing_angle": "<最近邻现有角度 code(最像的),或 null>",
-  "novelty": "true_new" | "reskin" | "weak_support" | "ungrounded",
-  "field_groundable": "yes" | "no",
-  "reason": "<accept/reject 的具体理由>"
-}
-```
-
-accept = 真新维度(非换皮 + 有支撑 + 可落地)。reject = 换皮/无支撑/不可落地。novelty 给分类(reskin=换皮,weak_support=支撑弱,ungrounded=字段不落地)。
 
 ## 不要做
 

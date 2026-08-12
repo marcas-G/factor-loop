@@ -18,7 +18,11 @@ export const submitFactorSchema = {
     properties: {
       xname: { type: "string", description: "因子类名" },
       factorFile: { type: "string", description: ".h 文件绝对路径" },
-      categories: { type: "array", items: { type: "string" } },
+      categories: {
+        type: "array",
+        items: { type: "string" },
+        description: "品种代码数组, 必须是 [\"AG\",\"AU\",\"CU\",\"AL\",\"NI\"] 的子集(沪金银铜铝镍)。⚠️ 不是 angle 标签(oi_anomaly/book_imbalance 等)、不是 tags、不是 xname。空数组=用默认 SHFE-AG,SHFE-CU。填错会被拦截返回 config_error。",
+      },
       params: { type: "object" },
     },
     required: ["xname", "factorFile"],
@@ -30,6 +34,64 @@ export async function submitFactorHandler({ xname, factorFile, categories = [], 
   }
   const factor = { name: xname, categories, params };
   return submitFactorProgrammatic(factor, factorFile);
+}
+
+// P6: evidence 大字段外存, 防 state.json 膨胀致 run_load 爆 token。
+// 完整 evidence(daily_ts 全序列/xcorr_md 矩阵/daily_ic_preview)写到 <run_dir>/<xname>_evidence.json,
+// state 里只留: 聚合指标(eval_metrics 核心: screening/deep_best/core_metrics/factor_level/failure_reasons)+
+//              reason/stdout_tail(诊断必需)+ evidence_file 引用。
+// 评估消费方(assess/csv_ic_adapter)读 evidence_file 取大字段; state 保持小。
+const LARGE_EVIDENCE_KEYS = ["daily_ic_preview"];  // evidence 顶层大字段
+const LARGE_EVAL_KEYS = ["daily_ts", "xcorr_md"];  // eval_metrics.csv_ic 内大字段
+
+export function offloadLargeEvidence(evidence, runDir, xname) {
+  if (!evidence || typeof evidence !== "object") return { evidence, evidence_file: null };
+  const slimmed = { ...evidence };
+
+  // 分离 eval_metrics.csv_ic 里的大字段(daily_ts 全序列 / xcorr_md 矩阵)
+  if (slimmed.eval_metrics && slimmed.eval_metrics.csv_ic) {
+    const csvIc = { ...slimmed.eval_metrics.csv_ic };
+    const offloaded = {};
+    let changed = false;
+    for (const k of LARGE_EVAL_KEYS) {
+      if (csvIc[k] != null) {
+        offloaded[k] = csvIc[k];
+        delete csvIc[k];
+        changed = true;
+      }
+    }
+    if (changed) {
+      slimmed.eval_metrics = { ...slimmed.eval_metrics, csv_ic: { ...csvIc, _offloaded: Object.keys(offloaded) } };
+      slimmed._offloaded_eval = offloaded;  // 暂存, 稍后写到外存文件
+    }
+  }
+
+  // 分离 evidence 顶层大字段(daily_ic_preview 30 行)
+  const offloadedTop = {};
+  for (const k of LARGE_EVIDENCE_KEYS) {
+    if (slimmed[k] != null) {
+      offloadedTop[k] = slimmed[k];
+      delete slimmed[k];
+    }
+  }
+
+  const fullOffload = { ...offloadedTop, ...(slimmed._offloaded_eval || {}) };
+  delete slimmed._offloaded_eval;
+  const offloadKeys = Object.keys(fullOffload);
+  if (offloadKeys.length === 0) return { evidence: slimmed, evidence_file: null };
+
+  // 写外存文件
+  const evidenceFile = path.join(runDir, `${xname}_evidence.json`);
+  try {
+    fs.writeFileSync(evidenceFile, JSON.stringify(fullOffload, null, 2));
+    slimmed.evidence_file = evidenceFile;
+    slimmed.evidence_offloaded_keys = offloadKeys;
+  } catch (e) {
+    // 外存失败 → 保留原 evidence(state 会大, 但不丢数据)
+    console.error(`[check] evidence 外存失败(${xname}): ${e.message}`);
+    return { evidence, evidence_file: null };
+  }
+  return { evidence: slimmed, evidence_file: evidenceFile };
 }
 
 export const checkFactorSchema = {
@@ -92,12 +154,27 @@ export async function checkFactorHandler({ xname, submitRef, checkOutput, run_id
     }
   }
 
-  // 关键：完整 evidence 原样落 state，不经 agent 手——避免 LLM 二次加工导致 stdout_tail 丢失/字段被改
+  // 完整 evidence 落 state 前先 offload 大字段(P6: 防 state.json 膨胀致 run_load 爆 token)。
+  // 仍不经 agent 手——offload 是程序化分离, evidence 内容不丢(大字段写 run_dir 外存文件, state 留引用+聚合)。
   if (run_id && factor_index != null) {
+    let slimEvidence = result.evidence;
+    let evidenceFile = null;
+    try {
+      const state = await runLoad(run_id);
+      const runDir = state.run_dir;
+      if (runDir) {
+        const off = offloadLargeEvidence(result.evidence, runDir, xname);
+        slimEvidence = off.evidence;
+        evidenceFile = off.evidence_file;
+      }
+    } catch (e) {
+      // runLoad 失败 → 保留原 evidence(state 会大但不丢数据)
+    }
     const patch = {
       [`factors.${factor_index}.failure_layer`]: result.failureLayer,
-      [`factors.${factor_index}.evidence`]: result.evidence,
+      [`factors.${factor_index}.evidence`]: slimEvidence,
     };
+    if (evidenceFile) patch[`factors.${factor_index}.evidence_file`] = evidenceFile;
     // 换名成功 → 更新 name/xname/factor_file + retry_trace 追加 dag_cache_rename 记录
     if (result._renameInfo) {
       const ri = result._renameInfo;

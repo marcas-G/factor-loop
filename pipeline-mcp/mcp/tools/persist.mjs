@@ -88,13 +88,60 @@ export const persistCandidatesSchema = {
       idea_text: { type: "string", description: "研究 idea 文本" },
       factors: {
         type: "array",
-        description: "候选因子数组，每项含 name/formula/intuition/diff_check/coord_usage/categories/params/db_research",
+        description: "候选因子数组，每项必含 name/formula/intuition/tags(缺任一会被整批拒绝)。可选 diff_check/coord_usage/categories/params/db_research",
       },
     },
     required: ["run_id", "idea_text", "factors"],
   },
 };
+
+// P5 防御: 校验每个 factor 必填字段。任一不合规 → 整批拒绝(防半残 state: factor[0] 正常但 [1/2/3] 空对象)。
+// 必填: name(因子类名)、formula(公式)、intuition(语义意图,或 hypothesis 兜底)、tags(标签)。
+function validateCandidates(factors) {
+  if (!Array.isArray(factors)) {
+    return { ok: false, error: `factors 必须是数组, 得到 ${typeof factors}` };
+  }
+  if (factors.length === 0) {
+    return { ok: false, error: "factors 为空数组(至少 1 个候选)" };
+  }
+  const required = ["name", "formula", "intuition", "tags"];
+  const errors = [];
+  factors.forEach((f, i) => {
+    if (!f || typeof f !== "object" || Array.isArray(f)) {
+      errors.push(`factor[${i}]: 不是对象(得到 ${Array.isArray(f) ? "数组" : typeof f})`);
+      return;
+    }
+    // hypothesis 可兜底 intuition(持久化时 hypothesis = intuition + diff_check + coord_usage 拼接)
+    const hasHypothesis = f.hypothesis || f.diff_check || f.coord_usage;
+    const missing = required.filter((k) => {
+      const v = f[k];
+      if (k === "intuition") return !v && !hasHypothesis;
+      if (k === "tags") return !Array.isArray(v) || v.length === 0;
+      return !v || (typeof v === "string" && v.trim() === "");
+    });
+    if (missing.length > 0) {
+      errors.push(`factor[${i}](${f.name || "无name"}): 缺 ${missing.join("/")}`);
+    }
+    // name 不能含空格/特殊字符(因子类名)
+    if (f.name && !/^[A-Za-z][A-Za-z0-9_]*$/.test(f.name)) {
+      errors.push(`factor[${i}] name="${f.name}" 非合法类名(须字母开头+字母数字下划线)`);
+    }
+  });
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      error: `候选校验失败(${errors.length} 处, 整批拒绝防止半残 state):\n  - ${errors.join("\n  - ")}`,
+    };
+  }
+  return { ok: true };
+}
+
 export async function persistCandidatesHandler({ run_id, idea_text, factors }) {
+  // P5: 必填校验 — 整批原子(任一不合规全部拒绝, 不落半残 state)
+  const validation = validateCandidates(factors);
+  if (!validation.ok) {
+    return { ok: false, error: validation.error, n_factors: 0 };
+  }
   const ideaId = factorDb.addIdea(idea_text);
   const fullFactors = (factors || []).map((f) => ({
     name: f.name,
