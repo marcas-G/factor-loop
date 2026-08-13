@@ -229,20 +229,15 @@ def check_factor_programmatic(factor: dict, submit_result: dict, check_output: s
     if not factor.get("factor_file") and not stem_from_db:
         pass  # 回退 class 名,平台若用 stem 注册将永久 pending(与 mjs 一致)
 
+    # 阻塞等待:factor_check.py 内部 60s 轮询 + max-wait 兜底。
+    # agent 只调 1 次,平台没跑完就在 subprocess 里等(不占 agent token)。
+    # max-wait=540s(9 分钟,留 60s 给下载分析),run_py timeout=600s 兜底。
     result = run_py(
         FACTOR_CHECK_PY,
-        ["run", "--skip-submit", "--skip-wait", "--names", feature_key, "--dir", check_output,
-         "--mode", "none", "--force"],
+        ["run", "--skip-submit", "--names", feature_key, "--dir", check_output,
+         "--mode", "none", "--force", "--max-wait", "540"],
         timeout_sec=600,
     )
-
-    # 非阻塞协议:exit 2 = running, exit 3 = 全 failed
-    if result["exit_code"] == 2:
-        return {
-            "ok": False, "failureLayer": "running", "checkOutput": check_output,
-            "summary": f"[平台计算中] {factor.get('name')} 仍 running/queued, 稍后重试 platform_check_factor",
-            "evidence": {"reason": "platform_running", "note": "非阻塞: 平台未跑完, 调用方轮询本工具直到 failureLayer != running"},
-        }
 
     daily_ic_path = find_csv_ic_summary(check_output, feature_key)
     daily_ic_exists = Path(daily_ic_path).exists()

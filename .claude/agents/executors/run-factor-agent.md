@@ -64,7 +64,7 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 - `budget = 3`：因子代码重试（submit 编译错、`compile_failed`、`factor_runtime_crash`、`factor_runtime_error`）——每次 read evidence.cause_text + evidence.diagnosis 定向修代码
 - `transient_budget = 3`：`platform_transient` 重 check 等 DAG 完成/平台恢复，**独立计数**（已从旧的 8×30min≈4h 降下来——快速因子崩溃不再被当 timeout 空等）
 - `quality_budget = 3`：因子质量失败重试（`check_output_too_small` / `check_failed`），**独立计数**
-- `running_budget = 10`：`failureLayer == "running"` 时 sleep 60 秒后重 check,**独立计数**。10 次 × 60 秒 = 10 分钟上限——超过说明平台真的卡了,give_up（10 次内正常 DAG 一定能跑完）。running 不扣 transient_budget,因为它是正常等待不是失败。
+- platform running 由 check 工具内部阻塞等待(factor_check.py `--wait --max-wait=540`),agent 只调 1 次,**无需轮询**。
 
 ```
 初始 step = "write"
@@ -106,12 +106,6 @@ while True:
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
     3. 如 result.failureLayer == "check_done":
          返回成功结果
-       elif result.failureLayer == "running":
-         # 平台仍在计算,退避等待后重 check(扣 running_budget,不扣 transient)
-         running_budget -= 1
-         如 running_budget <= 0：give_up(平台 10 分钟内没跑完,可能真卡了)
-         Bash: sleep 60   # 等 60 秒(平台 DAG 通常 2-10 分钟完成)
-         step = "check"   # 重试 check
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：
            "compile_failed" / "factor_runtime_crash" / "factor_runtime_error"
@@ -181,6 +175,22 @@ run_save {
 ## STL/运行期陷阱
 
 陷阱清单已归位 **write-factor/SKILL.md §6.5**(single source of truth)。纠错 rewrite 时,Read write-factor/SKILL.md 对照其 STL/运行期陷阱段(编译期 STL 误用 / 框架 API 类型 / 运行期崩溃 per-feed resize 越界),本 agent 不重复维护。
+
+## ⚠️ 职责边界(硬规则)
+
+你是**因子执行代理**,只负责"把一个因子跑到 check_done 或 give_up"。**绝对不做以下事情**:
+
+- ❌ **修改 core/ 下任何源码**(run_store.py / check.py / submit.py / mcp/ 等)。碰到 MCP 工具报错 → 记录 error 信息到 failure_layer + give_up,让主会话处理。你是执行者不是开发者。
+- ❌ **kill MCP server 进程**(stdio server 不自动重连,kill 会导致所有 MCP 工具不可用 → 死循环)。
+- ❌ **重启/reconnect MCP server**(让用户/主会话处理)。
+- ❌ **绕过 MCP 工具直接调 python/Bash 做 DB 操作**(state 读写必须走 run_save/run_load,不允许直接改 state.json)。
+
+碰到 MCP 工具异常(报错/崩溃/返回意外格式):
+1. 把错误信息记到 `factors.<index>.evidence` 的 `_error` 字段(用 run_save)
+2. failure_layer = "agent_crashed"
+3. return,让主会话诊断
+
+**这是硬边界——你越权改基础设施代码会导致连锁故障(之前改 run_store.py + kill server → 死循环 15+ 次浪费)。**
 
 ## 工具使用约束
 
