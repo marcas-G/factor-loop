@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 
 # quant-venv python(有 sqlite_vec/pandas/sentence_transformers)。fallback 当前解释器。
-VENV_PY = "/home/lgao/quant-venv/bin/python"
+from core.config import VENV_PY
+
 PY = VENV_PY if Path(VENV_PY).exists() else sys.executable
 
 

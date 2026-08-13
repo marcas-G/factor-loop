@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from core.db import db  # noqa: E402
+from core.config import DB_PATH  # noqa: E402
 
 PY = sys.executable  # 复用当前解释器(需 venv:residual_ic_strength 依赖 numpy)
 
@@ -39,7 +40,7 @@ def residual_mean(xname: str) -> float | None:
 
 
 def main() -> None:
-    db_path = str(ROOT / "data" / "factors.db")
+    db_path = str(DB_PATH)
     with db.get_conn(db_path) as c:
         evaluated = [r[0] for r in c.execute(
             "SELECT xname FROM factors WHERE status='evaluated' AND deprecated_at IS NULL"

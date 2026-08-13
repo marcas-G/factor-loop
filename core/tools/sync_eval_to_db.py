@@ -20,7 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS_DIR = Path.home() / ".quant-runs"
-DEFAULT_DB = ROOT / "data" / "factors.db"
+from core.config import DB_PATH  # noqa: E402
+DEFAULT_DB = DB_PATH
 
 
 def sync_one(conn, fac) -> dict:

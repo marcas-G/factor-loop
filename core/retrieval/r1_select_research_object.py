@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.db import db
 
-DB_PATH = str(Path(__file__).resolve().parents[2] / "data" / "factors.db")
+from core.config import DB_PATH  # noqa: E402  单一真相路径
 
 # 默认权重(可外部调)
 DEFAULT_WEIGHTS = {

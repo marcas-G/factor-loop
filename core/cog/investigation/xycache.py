@@ -9,7 +9,7 @@
 import pandas as pd
 from pathlib import Path
 
-CACHE_ROOT = Path("/home/lgao/tmp/factor-vec-cache")
+from core.config import CACHE_ROOT  # noqa: E402  单一真相缓存路径
 Y_COLS = ["Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@1", "Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@5",
           "Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@10", "Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@60",
           "Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@300"]

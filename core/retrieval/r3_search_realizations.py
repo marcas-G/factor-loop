@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from core.db import db
 
-DB_PATH = str(Path(__file__).resolve().parents[2] / "data" / "factors.db")
+from core.config import DB_PATH  # noqa: E402  单一真相路径
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"
 
 # 通道权重(多通道聚合时,加权得分)

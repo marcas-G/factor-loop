@@ -13,7 +13,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+# featuretool.py 裸 `from featuretool_common import` 时,core 包不在 path → 补项目根
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from core.config import CREDS_FILE  # noqa: E402  自动登录账号密码,单一真相
 
 HOST = "https://tools.xyz.abc"
 # 双平台分工:
@@ -28,7 +33,6 @@ DEFAULT_APP = os.environ.get("FEATURETOOL_APP", "default_test")
 BASE_URL = f"{HOST}/featuretool/{DEFAULT_APP}"
 COOKIE_FILE = os.path.expanduser("~/.featuretool_cookie")
 COOKIE_NAME = "session_id_featuretool"
-CREDS_FILE = "/home/lgao/featuretool_creds.json"  # 自动登录用的账号密码 {username, password}
 
 
 def base_url(app: str | None = None) -> str:

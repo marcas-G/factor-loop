@@ -16,7 +16,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
-DB_PATH = Path(__file__).resolve().parents[2] / "data" / "factors.db"
+from core.config import DB_PATH
+
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 

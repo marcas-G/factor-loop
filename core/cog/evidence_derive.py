@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.config import CACHE_ROOT  # noqa: E402
 from core.cog.investigation.xycache import load_multi
 
 
@@ -351,7 +352,7 @@ if __name__ == "__main__":
     days = sys.argv[1:4] if len(sys.argv) > 1 else None
     if days and len(days) == 1 and "-" not in days[0]:
         all_days = sorted(__import__("pathlib").Path(
-            "/home/lgao/tmp/factor-vec-cache/RawBidSize0/dailyX").glob("daily-*.xy"))
+            str(CACHE_ROOT / "RawBidSize0" / "dailyX")).glob("daily-*.xy"))
         days = [d.name.replace("daily-", "").replace(".xy", "") for d in all_days[:int(days[0])]]
     print(f"加载 {len(days) if days else '全部'} 天...")
     df = load_raw(days)

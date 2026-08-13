@@ -11,7 +11,7 @@ D. 多尺度矛盾: 同因子跨 horizon 符号翻转/衰减异常
 """
 import sqlite3, json, numpy as np
 
-import os; DB = str(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "factors.db"))
+from core.config import DB_PATH as DB  # noqa: E402
 
 def mine(conn):
     phenomena = []

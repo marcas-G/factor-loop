@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]  # factor-autoloop 根
 sys.path.insert(0, str(ROOT))
 from core.cog import representation  # noqa: E402
 
-DB = ROOT / "data" / "factors.db"
+from core.config import DB_PATH as DB  # noqa: E402
 
 
 def _parse_evidence(raw) -> dict:

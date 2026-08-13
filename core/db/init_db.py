@@ -16,11 +16,13 @@ import sys
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
-DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "factors.db"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
+from core.config import DB_PATH  # noqa: E402  默认库路径(单一真相)
 from core.db import migrations  # noqa: E402  init 后调 migrate 记录版本链
-from core.tools import seed_axioms  # noqa: E402  新库建后预填 23 条 axiom
+from core.db import seed_axioms  # noqa: E402  新库建后预填 23 条 axiom(同层,消除 db→tools 反向依赖)
+
+DEFAULT_DB = DB_PATH
 
 
 def load_sqlite_vec(conn: sqlite3.Connection) -> None:

@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from core.db import db
 from core.retrieval.factor_structure_extractor import extract_structure, upsert_structure, parse_frontmatter
 
-DB_PATH = str(Path(__file__).resolve().parents[2] / "data" / "factors.db")
+from core.config import DB_PATH  # noqa: E402  单一真相路径
 
 # 默认基底(第 1 步提取范围 — 用户确认)
 DEFAULT_BASES = [

@@ -46,7 +46,7 @@ if str(ROOT) not in sys.path:
 
 from core.db import db
 
-CACHE_DIR = Path("/home/lgao/tmp/factor-vec-cache")  # 持久缓存(89% 命中);/tmp 重启会丢
+from core.config import CACHE_ROOT as CACHE_DIR  # noqa: E402  持久缓存(89% 命中)
 CACHE_MAX = 20  # 缓存上限(LRU):超限删最旧 dailyX,控制磁盘(~6G);factor_ic_daily 不受影响
 WINDOW_SIZE = 250
 MIN_SAMPLES = 30               # 至少 30 日 IC 才存向量

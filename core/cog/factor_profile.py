@@ -15,7 +15,7 @@ import json
 import sqlite3
 from collections import defaultdict
 
-import os; DB = str(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "factors.db"))
+from core.config import DB_PATH as DB  # noqa: E402
 
 
 def _parse_json(s):

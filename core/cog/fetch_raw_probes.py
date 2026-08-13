@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
 from core.platform.featuretool_common import ensure_cookie, fetch, base_url, HOST
 
-CACHE_ROOT = "/home/lgao/tmp/factor-vec-cache"
+from core.config import CACHE_ROOT  # noqa: E402  单一真相缓存路径
 PROBES = ["RawBidSize0", "RawAskSize0", "RawBidPrice0", "RawAskPrice0"]
 
 APP = "default"
