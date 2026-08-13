@@ -74,14 +74,15 @@ def submit_restest(factor_file: str, features: str) -> dict:
     _post_submit(cookie, f"{bu}/submit_restest", factor_file, features,
                  {"_formkey": formkey, "_formname": "default"})
 
-    # 提交后从主页找 <factor>_restest_ 开头的任务, 取其完整 feature 名
-    html = fetch(f"{bu}/index", cookie)
+    # 提交后从主页找 <factor>_restest_ 开头的任务(web2py 建 DAG run 需几秒, 重试几次)
     # feature 名形如 ImbalanceBase_restest_SHFE_AG_SHFE_AG.1_SHFE_AU_SHFE_AU.1
-    m = re.search(rf"{re.escape(features)}_restest_[A-Za-z0-9._,]+", html)
-    if not m:
-        return {"ok": False, "error": f"提交后未在主页找到 {features}_restest 任务"}
-
-    return {"ok": True, "feature": m.group(0)}
+    for _ in range(10):
+        html = fetch(f"{bu}/index", cookie)
+        m = re.search(rf"{re.escape(features)}_restest_[A-Za-z0-9._,]+", html)
+        if m:
+            return {"ok": True, "feature": m.group(0)}
+        time.sleep(2)
+    return {"ok": False, "error": f"提交后 20 秒内未在主页找到 {features}_restest 任务"}
 
 
 def _task_state(feature: str) -> str | None:
