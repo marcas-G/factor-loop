@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from core.platform.featuretool_common import (
     base_url, ensure_cookie, fetch, COOKIE_NAME, HOST,
 )
+from core.stages.write_factor import extract_class_name_from_h, is_template_class
 
 APP = "default_test"
 RESTEST_TIMEOUT_SEC = 600   # Ridge-SVD DAG 约 6.5 分钟, 给 10 分钟兜底
@@ -58,7 +59,14 @@ def _post_submit(cookie: str, url: str, factor_file: str, features: str,
 
 
 def submit_restest(factor_file: str, features: str) -> dict:
-    """提交因子到 restest(Ridge-SVD 冗余分析)。返回 {ok, feature?, error?}。"""
+    """提交因子到 restest(Ridge-SVD 冗余分析)。返回 {ok, feature?, error?}。
+
+    features 传类名即可(template 类内部自动加 <>), 与 submit.py 语义一致。
+    """
+    # template 类自动加 <> (与 submit.py 一致, 否则平台编译失败 → DAG failed)
+    class_name = extract_class_name_from_h(factor_file) or features
+    features = f"{class_name}<>" if is_template_class(factor_file) else class_name
+
     bu = base_url(APP)
     cookie = ensure_cookie(app=APP)
     if not cookie:
@@ -76,52 +84,55 @@ def submit_restest(factor_file: str, features: str) -> dict:
 
     # 提交后从主页找 <factor>_restest_ 开头的任务(web2py 建 DAG run 需几秒, 重试几次)
     # feature 名形如 ImbalanceBase_restest_SHFE_AG_SHFE_AG.1_SHFE_AU_SHFE_AU.1
+    # 注意: 主页 feature 名不含 <> (平台用 .h stem), 匹配用裸类名
+    stem = class_name
     for _ in range(10):
         html = fetch(f"{bu}/index", cookie)
-        m = re.search(rf"{re.escape(features)}_restest_[A-Za-z0-9._,]+", html)
+        m = re.search(rf"{re.escape(stem)}_restest_[A-Za-z0-9._,]+", html)
         if m:
             return {"ok": True, "feature": m.group(0)}
         time.sleep(2)
     return {"ok": False, "error": f"提交后 20 秒内未在主页找到 {features}_restest 任务"}
 
 
-def _task_state(feature: str) -> str | None:
-    """从主页 index 找指定 feature 的任务 state。返回 state 或 None(未找到)。"""
+def _latest_task(feature: str) -> dict | None:
+    """从主页 index 找指定 feature 的【最新】任务(同名任务重复提交会并存/覆盖)。
+
+    返回 {run_id, state} 或 None(未找到)。run_id 末尾含 ISO 时间戳, 取时间戳最大的 = 最新。
+    """
     bu = base_url(APP)
     cookie = ensure_cookie(app=APP)
     if not cookie:
         return None
     html = fetch(f"{bu}/index", cookie)
-    # 找含该 feature 的行, 提取 state
+    tasks = []
     for row in re.findall(r"<tr>(.*?)</tr>", html, re.S):
         if feature not in row:
             continue
         tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
         cells = [re.sub(r"<[^>]+>", "", t).strip() for t in tds]
-        # cells = [feature, mode, job, state, download, time]
+        # cells = [feature, mode, job(run_id), state, download, time]
         if len(cells) >= 4:
-            return cells[3]
-    return None
+            run_id = cells[2]
+            state = cells[3]
+            tasks.append({"run_id": run_id, "state": state})
+    if not tasks:
+        return None
+    # run_id 时间戳越大越新(格式 ...-2026-08-13T16-45-00-08-00)
+    return max(tasks, key=lambda t: t["run_id"])
 
 
 def poll_restest(feature: str, timeout_sec: int = RESTEST_TIMEOUT_SEC) -> dict:
     """轮询 restest 任务直到 success/failed/超时。返回 {state, run_id?, error?}。"""
-    bu = base_url(APP)
-    cookie = ensure_cookie(app=APP)
     elapsed = 0
     while elapsed < timeout_sec:
-        state = _task_state(feature)
-        if state == "success":
-            # 抓 run_id(下载需要)
-            html = fetch(f"{bu}/index", cookie)
-            m = re.search(rf"download_ridge_svd\?feature={re.escape(feature)}&run_id=([^&\"]+)", html)
-            run_id = m.group(1) if m else None
-            return {"state": "success", "run_id": run_id}
-        if state == "failed":
-            return {"state": "failed"}
-        if state is None:
-            # 可能任务还没出现在列表, 继续等
-            pass
+        task = _latest_task(feature)
+        if task:
+            if task["state"] == "success":
+                return {"state": "success", "run_id": task["run_id"]}
+            if task["state"] == "failed":
+                return {"state": "failed", "run_id": task["run_id"]}
+        # running / 未找到 → 继续等
         time.sleep(POLL_INTERVAL_SEC)
         elapsed += POLL_INTERVAL_SEC
     return {"state": "timeout"}
