@@ -22,9 +22,9 @@ IC 定义：
   4. 写入 factor_ic_vec + factor_ic_vec_meta
 
 用法:
-    python factor_db/refresh_factor_ic_vectors.py                # 全量 evaluated
-    python factor_db/refresh_factor_ic_vectors.py --xname Foo    # 单个
-    python factor_db/refresh_factor_ic_vectors.py --force        # 强制重算
+    python core/tools/refresh_factor_ic_vectors.py                # 全量 evaluated
+    python core/tools/refresh_factor_ic_vectors.py --xname Foo    # 单个
+    python core/tools/refresh_factor_ic_vectors.py --force        # 强制重算
 """
 
 from __future__ import annotations
@@ -298,7 +298,7 @@ def process_factor(conn, xname: str, cache_dir: Path, force: bool) -> list[dict]
     ).fetchone()
     if not exists:
         print(
-            f"  [skip] {xname} 不在 factors 表，请先跑 factor_db/import_factors.py 登记元信息",
+            f"  [skip] {xname} 不在 factors 表，请先跑 core/tools/import_factors.py 登记元信息",
             file=sys.stderr,
         )
         return []

@@ -4,7 +4,7 @@
 给新老库补掩盖;测试 setup 漏跑 migrate 时暴露)。把"各 migrate 函数补的列"列成清单,
 断言新库 init_db 后各表都含——未来再漏列直接测试挂。
 
-用法: /home/lgao/quant-venv/bin/python factor_db/test_schema_consistency.py
+用法: /home/lgao/quant-venv/bin/python core/tools/test_schema_consistency.py
 """
 from __future__ import annotations
 

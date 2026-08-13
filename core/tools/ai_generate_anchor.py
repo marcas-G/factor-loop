@@ -9,10 +9,10 @@
 幂等:anchor_text 非空跳过;--force 全部重生成。
 
 用法:
-    python factor_db/ai_generate_anchor.py --xname Foo   # 调试
-    python factor_db/ai_generate_anchor.py --limit 3      # 试几个
-    python factor_db/ai_generate_anchor.py                # 全量缺的
-    python factor_db/ai_generate_anchor.py --force        # 全部重生成
+    python core/tools/ai_generate_anchor.py --xname Foo   # 调试
+    python core/tools/ai_generate_anchor.py --limit 3      # 试几个
+    python core/tools/ai_generate_anchor.py                # 全量缺的
+    python core/tools/ai_generate_anchor.py --force        # 全部重生成
 
 依赖: pip install anthropic httpx; export ANTHROPIC_AUTH_TOKEN=xxx
 """

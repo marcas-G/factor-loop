@@ -7,9 +7,9 @@
 - 幂等：emb_generated_at 非空则跳过；--force 强制重算
 
 用法:
-    python factor_db/gen_embeddings.py
-    python factor_db/gen_embeddings.py --force
-    python factor_db/gen_embeddings.py --xname Foo_w21
+    python core/tools/gen_embeddings.py
+    python core/tools/gen_embeddings.py --force
+    python core/tools/gen_embeddings.py --xname Foo_w21
 
 依赖:
     pip install sentence-transformers

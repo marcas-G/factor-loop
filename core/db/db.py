@@ -1067,7 +1067,7 @@ def select_graph_operation(conn: sqlite3.Connection) -> dict:
 
 
 # ============ schema 版本追踪（schema_version 表读写原语）============
-# 版本链定义在 factor_db/migrations.py（CURRENT_VERSION + MIGRATIONS）。
+# 版本链定义在 core/db/migrations.py（CURRENT_VERSION + MIGRATIONS）。
 # 这里只提供低级读写：建表 / 读当前版本 / 记一个版本。migrate(conn) 编排用。
 
 def ensure_schema_version_table(conn: sqlite3.Connection) -> None:
@@ -1212,7 +1212,7 @@ def ensure_ideas_angle_code(conn: sqlite3.Connection) -> None:
 
 def ensure_iterations_columns(conn: sqlite3.Connection) -> None:
     """补 iterations.status/iterable 列(迭代建议状态机)。
-    v11 iterations_status_iterable。与 pipeline-mcp migrateIterationsSchema 对齐——
+    v11 iterations_status_iterable。与 runtime migrateIterationsSchema 对齐——
     schema.sql 新库已含,此函数给既有 Python 库经 migrate 补列(JS 侧靠 init 兜底,py 侧原本漏)。"""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(iterations)")}
     if not cols:

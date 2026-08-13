@@ -1,7 +1,7 @@
 """高效重建 factors_vec:batch encode + 一次性 DELETE ALL + 批量 INSERT。
 替代 gen_embeddings --force 的逐条 DELETE+INSERT(vec0 事务累积慢)。
 
-用法: python factor_db/rebuild_vec.py
+用法: python core/tools/rebuild_vec.py
 """
 import sys
 import os

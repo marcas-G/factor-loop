@@ -1,7 +1,7 @@
 """数据健康检查:rank_ic 域 + 孤儿 + deepbest 完整性。防数据漂移。
 
 对真实 factors.db 跑(数据健康,非 schema 结构):
-  python factor_db/test_data_health.py
+  python core/tools/test_data_health.py
 
 校验:
 - rank_ic 域:abs(latest_rank_ic)>1 = 0(防 metrics 命名错配 rank_ic_max→rank_ic)

@@ -225,10 +225,9 @@
 ## 参考来源
 
 **本地**:
-- `factor_db/concept_invent_prompt.py` DATA_CAPABILITIES
-- `factor_db/operator_planning/data_capability_registry.yaml`(12 数据角色 + 3 禁用)
-- `factors.db` operators 表(op1-11 definition)/ factors.intuition / lessons / angle_ontology
-- `logs/cog_protocol/investigation/data_capability_audit.md` / `order_identity_audit.md` / `observability_boundary_registry.json`
+- `data/factors.db` operators 表(op1-11 definition)/ factors.intuition / lessons / angle_ontology
+- `core/db/graph_constants.json`(判据/阈值)
+- `core/cog/investigation/` 探针与证据卡(evidence 程序化验证)
 
 **互联网**:
 - [SHFE 白银期货品种页](https://www.shfe.com.cn/products/futures/metal/ferrousandpreciousmetal/ag_f/)

@@ -15,8 +15,8 @@
   （最能解释 target 的，残差才有意义；K 上限防共线爆炸），岭回归 t = B·w + resid。
 
 用法:
-    python factor_db/residual_ic_strength.py --target Foo
-    python factor_db/residual_ic_strength.py --target Foo --symbol SHFE-AG --freq ... --y-horizon 1
+    python core/tools/residual_ic_strength.py --target Foo
+    python core/tools/residual_ic_strength.py --target Foo --symbol SHFE-AG --freq ... --y-horizon 1
 """
 
 from __future__ import annotations

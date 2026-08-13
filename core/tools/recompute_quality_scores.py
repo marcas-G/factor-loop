@@ -8,7 +8,7 @@
 
 ICIR 只作 Gate 门槛(evaluated=ICIR≥1.5 强信号),不进 score(边际递减)。
 
-用法: /home/lgao/quant-venv/bin/python factor_db/recompute_quality_scores.py
+用法: /home/lgao/quant-venv/bin/python core/tools/recompute_quality_scores.py
 """
 from __future__ import annotations
 

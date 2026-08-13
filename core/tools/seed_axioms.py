@@ -1,6 +1,6 @@
 """种子 axiom(理论公理,新库初始化时预填)。从 factors.db dump,可复现。
 
-用法: python factor_db/seed_axioms.py [--db PATH]
+用法: python core/tools/seed_axioms.py [--db PATH]
 """
 from __future__ import annotations
 import argparse, sys

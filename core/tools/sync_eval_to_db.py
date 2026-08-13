@@ -8,8 +8,8 @@
   - status         ← factor_level.keep > 0 ? 'evaluated' : 'dead_end'
 
 用法:
-  python factor_db/sync_eval_to_db.py --run-id <run_id>            # 同步该 run 所有 check_done
-  python factor_db/sync_eval_to_db.py --run-id <run_id> --xname Foo
+  python core/tools/sync_eval_to_db.py --run-id <run_id>            # 同步该 run 所有 check_done
+  python core/tools/sync_eval_to_db.py --run-id <run_id> --xname Foo
 """
 from __future__ import annotations
 

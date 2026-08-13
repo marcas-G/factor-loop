@@ -29,7 +29,7 @@
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
   - 迁移链 = 把现有散落的 ensure_* 幂等函数按版本编排(不重复 DDL,无双真相源)
-  - CURRENT_VERSION 与 mjs(pipeline-mcp/lib/factor-db.mjs)一致,由 test_migrations 断言
+  - CURRENT_VERSION 与 mjs(runtime/lib/factor-db.mjs)一致,由 test_migrations 断言
 
 用法:
     import sys; sys.path.insert(0, "<项目根>")

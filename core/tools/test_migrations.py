@@ -1,4 +1,4 @@
-"""schema 版本化迁移测试(factor_db/migrations.py + db.py)。
+"""schema 版本化迁移测试(core/db/migrations.py + db.py)。
 
 验证:
   1. 全新库 init_db → schema_version 标到 CURRENT
@@ -7,7 +7,7 @@
   4. ideas 必然假设字段迁移:老 ideas 表缺列 → migrate → 6 列补齐(py 端历史漂移修复)
   5. py CURRENT_VERSION == mjs CURRENT_SCHEMA_VERSION(双端防漂移)
 
-用法: /home/lgao/quant-venv/bin/python factor_db/test_migrations.py
+用法: /home/lgao/quant-venv/bin/python core/tools/test_migrations.py
       (需 quant-venv:init_db 依赖 sqlite-vec)
 """
 from __future__ import annotations

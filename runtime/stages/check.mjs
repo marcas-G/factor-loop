@@ -1,4 +1,4 @@
-// Step 2C: check（程序化路径：调 pipeline-py/factor_check.py run）。
+// Step 2C: check（程序化路径：调 core/platform/factor_check.py run）。
 // 评估分层（failureLayer）+ Airflow 通用失败分诊 + daily_ic 抓取。
 //
 // 分层原则：按【根因 task 的 locus + 信号】分层，不再凭 dag_state 猜。

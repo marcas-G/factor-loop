@@ -1,6 +1,6 @@
 """图查询常量一致性测试。
 
-验证判据集中(factor_db/graph_constants.json)后:
+验证判据集中(core/db/graph_constants.json)后:
   1. py 端 loader 正确读共享文件
   2. query_contradictions / graph_stats 用 resolved_clause 常量判据(不是硬编码)
   3. query_angle_coverage 用 saturation 常量阈值
@@ -8,7 +8,7 @@
 node 端(factor-db.mjs)共读同一文件 → resolved_clause 天然一致(同文件);
 node 语法由 `node --check` 保证,运行时由 MCP server 调 graph_stats 间接验证。
 
-用法: python3 factor_db/test_graph_constants.py
+用法: python3 core/tools/test_graph_constants.py
 """
 from __future__ import annotations
 import sys, json, os, tempfile

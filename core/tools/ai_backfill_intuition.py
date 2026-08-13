@@ -8,11 +8,11 @@
 幂等:intuition 非空跳过;--force 全部重生成。
 
 用法:
-    python factor_db/ai_backfill_intuition.py --dry-run
-    python factor_db/ai_backfill_intuition.py --xname Foo
-    python factor_db/ai_backfill_intuition.py --limit 5
-    python factor_db/ai_backfill_intuition.py            # 全量缺的
-    python factor_db/ai_backfill_intuition.py --force    # 全部重生成
+    python core/tools/ai_backfill_intuition.py --dry-run
+    python core/tools/ai_backfill_intuition.py --xname Foo
+    python core/tools/ai_backfill_intuition.py --limit 5
+    python core/tools/ai_backfill_intuition.py            # 全量缺的
+    python core/tools/ai_backfill_intuition.py --force    # 全部重生成
 
 依赖: pip install anthropic httpx; export ANTHROPIC_AUTH_TOKEN=xxx
 """

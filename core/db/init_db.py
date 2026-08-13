@@ -1,8 +1,8 @@
 """初始化因子库：建 9 张表 + 3 个虚拟表 + triggers。幂等。
 
 用法:
-    python factor_db/init_db.py                 # 默认 ../factors.db
-    python factor_db/init_db.py --db /tmp/t.db
+    python core/db/init_db.py                 # 默认 ../factors.db
+    python core/db/init_db.py --db /tmp/t.db
 
 依赖:
     pip install sqlite-vec    # 加载 vec0 虚拟表

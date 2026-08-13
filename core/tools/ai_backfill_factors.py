@@ -8,10 +8,10 @@
 幂等：formula_text 非空的因子跳过；--force 可强制重新回填。
 
 用法:
-    python factor_db/ai_backfill_factors.py
-    python factor_db/ai_backfill_factors.py --dry-run
-    python factor_db/ai_backfill_factors.py --xname Foo_w21  # 只跑一个
-    python factor_db/ai_backfill_factors.py --force          # 强制重新回填
+    python core/tools/ai_backfill_factors.py
+    python core/tools/ai_backfill_factors.py --dry-run
+    python core/tools/ai_backfill_factors.py --xname Foo_w21  # 只跑一个
+    python core/tools/ai_backfill_factors.py --force          # 强制重新回填
 
 依赖:
     pip install anthropic

@@ -7,8 +7,8 @@
 幂等：xname 已存在则跳过。
 
 用法:
-    python factor_db/import_factors.py
-    python factor_db/import_factors.py --factors-dir ../factors --dry-run
+    python core/tools/import_factors.py
+    python core/tools/import_factors.py --factors-dir ../factors --dry-run
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 - build_text 直接用 anchor_text(不再 intuition/降级/angle)
 - update_embedding DELETE+INSERT 幂等(vec0 不支持 INSERT OR REPLACE)
 
-用法: /home/lgao/quant-venv/bin/python factor_db/test_anchor_embedding.py
+用法: /home/lgao/quant-venv/bin/python core/tools/test_anchor_embedding.py
 """
 from __future__ import annotations
 

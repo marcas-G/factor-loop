@@ -3,7 +3,7 @@
 防改图函数引入回归(如判据集中、加 BOUNDS 那种改动),顺带抓双端漂移。
 node 端(factor-db.mjs)共读 graph_constants.json + node --check,运行时由 MCP 间接验。
 
-用法: python3 factor_db/test_graph.py
+用法: python3 core/tools/test_graph.py
 """
 from __future__ import annotations
 import sys, os, tempfile

@@ -2,7 +2,7 @@
 
 让 graph-engine 感知"哪些信息角度饱和/未探索",自动换角度(不靠人喂)。
 
-用法: python factor_db/seed_angles.py   # 建表+预填本体+标注因子+打印覆盖度
+用法: python core/tools/seed_angles.py   # 建表+预填本体+标注因子+打印覆盖度
 """
 from __future__ import annotations
 import sys

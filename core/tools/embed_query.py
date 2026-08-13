@@ -1,7 +1,7 @@
 """为任意文本算归一化 embedding，输出 JSON。
 
 用法：
-    python3 factor_db/embed_query.py --text "查询文本"
+    python3 core/tools/embed_query.py --text "查询文本"
 
 输出（stdout 末尾一行 JSON）：
     {"embedding": [...], "dim": 512}
