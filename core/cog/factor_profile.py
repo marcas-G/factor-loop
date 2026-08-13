@@ -13,8 +13,11 @@ adjudicator 才收 assumption + evidence_view。orchestrator 负责视图分派�
 """
 import json
 import sqlite3
+import sys
 from collections import defaultdict
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
 from core.config import DB_PATH as DB  # noqa: E402
 
 
