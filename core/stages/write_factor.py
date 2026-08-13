@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def extract_class_name_from_h(h_file: str | Path) -> str | None:
-    """从 .h 提取 class 名(正则 \bclass\s+([A-Z][A-Za-z0-9_]*)\s*[:{])。"""
+    r"""从 .h 提取 class 名(正则 \bclass\s+([A-Z][A-Za-z0-9_]*)\s*[:{])。"""
     p = Path(h_file)
     if not p.exists():
         return None
