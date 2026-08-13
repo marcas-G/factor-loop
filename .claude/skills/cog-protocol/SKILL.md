@@ -21,9 +21,11 @@ description: 认知协议 — 统一链路(因子表示审查 → 新算子发�
 ## S1 · 选 Research Object + 构造 Factor Profile
 
 ```
-Bash: python3 core/cog/inputs.py --factor <xname>
+Bash: python3 core/cog/factor_profile.py <xname>
 ```
 → factor_profile(identity + construction_view + evidence_view + provenance)
+
+(`inputs.py --seed/--n` 是批量选 N 个 dead_end 的入口,选单因子用 `factor_profile.py <xname>`。)
 
 **视图隔离(硬)**: `construction_view` 只给 assumption-extractor; `evidence_view` 只给 adjudicator。orchestrator(你)负责分派, 不混合。
 
