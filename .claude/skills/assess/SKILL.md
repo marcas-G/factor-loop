@@ -57,7 +57,9 @@ Task({
 
 **双轨本质**:忠实度(因子有没有验证假设)+ 经验(因子有没有效)。忠实度是假设验证的前提——不忠实则因子与假设无关,IC 高也是别的机制的功劳,假设未被验证。
 
-> **🎯 冗余度首要(全局原则)**:因子价值 = 对组合的边际信息贡献,**由冗余度决定,不由 ICIR 强弱决定**。ICIR 仅作过关闸门(可信口径≥0.3,见否决④);过闸门后**冗余度是首要排序键**:真正交(pearson<0.6 且残差≥0.5)= 高价值 pass,哪怕 ICIR 中等;冗余(pearson≥0.6 或残差<0.5)= fail,哪怕 ICIR 强。宁可收正交的中等信号,不要高 ICIR 冗余因子占名额。⚠️ 信噪比<0.3 不过闸门——低信噪比 IC 是噪声,和谁都低相关→假"正交",冗余度判定不可信。
+> **🎯 冗余度首要(全局原则)**:因子价值 = 对组合的边际信息贡献,**由冗余度决定,不由 ICIR 强弱决定**。ICIR 仅作过关闸门(可信口径≥0.3,见否决④);过闸门后**冗余度是首要排序键**。⚠️ 信噪比<0.3 不过闸门——低信噪比 IC 是噪声,和谁都低相关→假"正交",冗余度判定不可信。
+
+> **🔬 冗余主判据 = 平台 dLOOCV_pct(平台优先)**:过闸门后,用平台 Ridge-SVD 的 **dLOOCV_pct**(加入因子后 LOOCV 误差下降%,对线性模型的净增益)作主判据,替代旧的 R4 pearson+残差 IC(那是在 IC 空间做正交化,维度低信息损失大;平台在 X 空间对别人 72 因子大库做正交化,更强)。R4 降为 fallback(restest 无数据时)+ 补充检查(X 独立但 IC 行为冗余)。
 
 ### 第一维 · 预测能力(秩空间,弃 pearson)
 
@@ -112,7 +114,7 @@ Task({
 | **换手率** | 日均换手低;高换手=追微波动 | `tradability.avg_turnover_per_day` |
 | **成本后 Sharpe(8bps)** | 毛 Sharpe vs 成本后(8bps 严格);转负=毛强净亏 | `tradability.sharpe_net_8bps` |
 | 容量 | 日换手>100 → 容量受限(固定代理) | `tradability.capacity_risk` |
-| 正交 | pairwise `\|pearson\|<0.6` **且** 残差 IC 强度不低(`factor_residual_ic_strength` ≥0.5=预测力多为新息,<0.5=被库内线性解释=冗余) | IC 冗余 pearson + 残差 IC 强度(见"二、操作流程·查正交") |
+| 正交 | **平台 dLOOCV_pct ≥ 1%**(对线性模型显著增量,不冗余); dLOOCV<1% 且 R2_X>0.8 = 冗余; dLOOCV<0 = 过拟合 | 平台 restest ridge_svd(见"二、操作流程·查正交"); 无 restest 时 fallback 到 R4 pearson+残差 |
 | **变换族预测力**(新增) | 最强变换 |IC| 显著优于原始(>20%) → 建议改用该变换；ridge_residual 最强=预测力来自新息 | transform_family(orig_ic / delta_ic / impulse_ic / asym_impulse_pos_ic / asym_impulse_neg_ic / ridge_residual_ic) |
 
 **变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;assess 自己从 6 个 |IC| 判最强变换):
@@ -163,37 +165,41 @@ Task({
 3. **入表占位(prepare)**:`persist_factor {run_id, factor_index, mode: "prepare"}` —— 入 factors 表(status=draft),**不写 eval/lesson、不定 verdict**。目的是让因子进表,解锁步骤 4 路径 B 的 ingest(全新因子入库前 ingest 撞外键)。
 4. **查正交(第三维,check_done 必做)**:因子已入表(步骤 3),可查库间冗余。结果作为步骤 5 定 verdict 的正交维度输入。
 
-   ⚠️ **python 环境**: `csv_ic_adapter.py`(ingest/parse) 用系统 `python3`; `vec_refresh_from_daily.py` 用 `/home/lgao/quant-venv/bin/python3`(有sqlite_vec)。不混用。
-   ⚠️ **metrics.mjs 缓存**: evidence 可能没 csv_ic 字段。**workaround**: Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录。
+   - **主判据 = 平台 restest ridge_svd(平台优先)**: run-factor-agent 在 check_done 后已自动跑 restest, 结果在 `state.factors[i].evidence.ridge_svd`(metrics 数组)。读它:
+        ```
+        # metrics = [{x_col, horizon, R2_X, res_IC, n, dLOOCV_pct}, ...]
+        ```
+        聚合: 取主力(非 @1)x_col 中 dLOOCV_pct 最大的那条作主判据。
+        - **dLOOCV_pct < 0** → 过拟合否决(加因子 LOOCV 反升), key_weaknesses 写"restest dLOOCV={x}<0 过拟合"
+        - **dLOOCV_pct < 1% 且 R2_X > 0.8** → 冗余否决(因子值被大库解释 80%+ 且无增量), key_weaknesses 写"restest R2_X={x} dLOOCV={y}% X空间冗余且无增量"
+        - **dLOOCV_pct ≥ 1%** → 显著增量, 正交通过(真正交 pass 的高价值因子)
+        - **无 ridge_svd(restest 没跑/失败)** → fallback 到下方 R4
 
-   - **路径 B(主,库间 IC 冗余硬否决)**:抓"公式不同但日级 IC 同涨同跌"的真冗余(如同 run 变体、库内近似因子)。
+   - **fallback = R4(restest 无数据时)**:抓"公式不同但日级 IC 同涨同跌"的真冗余。
      1. 导 daily_ts(一步 CLI,自动处理 P6 外存 JSON 或 check_output CSV):
         ```
-        # 优先从 evidence_file(P6 外存 JSON)导:
         Bash: /home/lgao/quant-venv/bin/python core/tools/ingest_evidence_ts.py \
               --evidence-file <state.factors[i].evidence_file> --xname <xname>
-        # 或从 check_output CSV 导(无 evidence_file 时):
-        Bash: /home/lgao/quant-venv/bin/python core/tools/ingest_evidence_ts.py \
-              --csv <check_output>/<xname>/csv_ic/csv_ic_ts.csv --xname <xname>
         ```
      2. Bash `/home/lgao/quant-venv/bin/python3 core/tools/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
-     3. **R4 检索(主)**: 调 R4 Contract `search_behavior_neighbors` 做完整的行为邻居检索(场景对齐 + ANN 召回 + 精确 pearson + residual IC + operator overlap):
+     3. **R4 检索**: 调 R4 Contract `search_behavior_neighbors`:
         ```
         Bash: /home/lgao/quant-venv/bin/python core/retrieval/r4_search_behavior_neighbors.py \
               --xname <xname> --symbol <sym> --horizon <hz>
         ```
         读 R4 返回:
         - `collision_verdict`: COLLIDES(|pearson|>0.7) | WEAK_CORRELATION(>0.4) | INDEPENDENT
-        - `strongest_neighbor` + `strongest_pearson`: 最强撞族邻居
-        - `residual_after_orthogonalization`: 挤掉 top-5 邻居基底后的平均 |IC|(<0.5=冗余零新息)
-        - `scene.scene_sparse`: 同场景因子<5 → 撞族判定置信度降, key_weaknesses 注明
-     - **硬否决**: R4 `collision_verdict=COLLIDES`(pearson>0.7) → 冗余, key_weaknesses 写"IC 行为撞族 vs {strongest_neighbor} |r|={strongest_pearson}"; `residual_after_orthogonalization < 0.5` → 零新息, 写"残差={x}<0.5 预测力被库内线性解释"
-     - **fallback(R4 无数据时)**: 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}`(MCP 工具, 与 R4 同源但接口较旧)。两者都无数据 → key_weaknesses 注"库间 IC 冗余未检", verdict 谨慎
-     5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景的 `icir/mean_ic/std_ic` → `run_save` 写 `factors.<i>.evidence.eval_metrics.daily_icir`,供步骤5 在稀疏因子(zero_rate≥0.5)时替代 pooled screening.icir 作判据。查不到(此场景未算)→ 稀疏因子降级:key_weaknesses 注"daily ICIR 未检",verdict 谨慎倾向 fail。查询(用 CLI,不要手写 SQL——DB 在 data/factors.db,列名固定):
+        - `strongest_neighbor` + `strongest_pearson`
+        - `residual_after_orthogonalization`: <0.5=冗余零新息
+     - **硬否决**: R4 `COLLIDES` → 冗余; `residual_after_orthogonalization < 0.5` → 零新息
+
+   - **补充检查(restest 通过但 R4 撞族)**: restest 说 X 空间独立, 但 R4 说 IC 行为 pearson>0.7 → 更隐蔽的"预测行为冗余"(X 独立但预测同涨同跌), key_weaknesses 注明, 倾向 fail。
+
+   5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景的 icir/mean_ic/std_ic(用 CLI,不要手写 SQL):
         ```
         Bash: /home/lgao/quant-venv/bin/python core/tools/factor_ic_vec_query.py meta --xname <xname>
         ```
-        返回 JSON 数组,每元素 {symbol, freq, y_horizon, icir, mean_ic, std_ic, n_samples}。取主场景(symbol=SHFE-AG、y_horizon=screening.horizon)的 icir/mean_ic。
+        返回 JSON 数组,取主场景(symbol=SHFE-AG)的 icir/mean_ic。
    - **路径 A(辅,因子内部一致性,非库间冗余)**:`csv_ic_xcorr.md` 是**该因子自身**的 X↔X 矩阵(5品种×2horizon 互相关),**查不出与库内因子的冗余**——`find_redundant` 只会匹配到自身的不同场景(如 AG main↔AG@1)。仅作泛化/对齐敏感性参考,**不作库间冗余硬否决**。
      - Bash `python3 core/tools/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`,结果只写入 `key_weaknesses`/`key_strengths` 描述内部一致性(如"AG main↔@1 反号=对齐敏感"),不触发否决。
    - **回退(无 csv_ic_ts — 真旧平台)**:`factor_ic_refresh {xname}` 走 dailyX,**dailyX 现已无数据,常 ok:false,直接跳过**;verdict 照常,`key_weaknesses` 注"库间 IC 冗余未检(无 daily_ts/dailyX)"

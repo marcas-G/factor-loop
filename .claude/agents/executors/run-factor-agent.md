@@ -114,6 +114,12 @@ while True:
        # 工具内部已把完整 evidence + failure_layer 落 state（不经你的手，避免你二次加工丢字段）
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
     3. 如 result.failureLayer == "check_done":
+         # 冗余约束主判据: 跑 restest(Ridge-SVD 对别人大库正交化, 约 6.5 分钟阻塞)
+         Bash: /home/lgao/quant-venv/bin/python core/platform/restest.py \
+               --file <factor_file> --features <class_name> 2>/dev/null
+         # 返回 JSON {ok, feature, metrics:[{x_col,horizon,R2_X,res_IC,dLOOCV_pct}], error?}
+         # 若 ok=true: run_save 落 state.factors[index].evidence.ridge_svd = metrics
+         # 若 ok=false: 不落(assess 用 R4 fallback), 不阻塞 check_done
          返回成功结果
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：
