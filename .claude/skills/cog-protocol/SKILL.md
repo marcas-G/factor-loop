@@ -89,6 +89,7 @@ Task({ subagent_type: "cog-hypothesis-generator",
 ```
 Task({ subagent_type: "cog-minimal-repair-critic",
   prompt: "supported_distinction(Layer1):\n" + <Layer1>
+        + "\n原因子 construction_view:\n" + <construction_view>
         + "\nTRADING_WORLD_MODEL.md §4/§6/§7/§11"
         + "\nidentifiability: 判 STRUCTURE 后, 同时判 required_object 能否从当前数据域构造(查 OBS001 order identity 等永久边界)"
 })
@@ -97,8 +98,10 @@ Task({ subagent_type: "cog-minimal-repair-critic",
   - **depth**: STRUCTURE_NOT_REDUCIBLE(N1+N2 不够) / RAW / STATIC_SUFFICIENT
   - **identifiability**(STRUCTURE 才判): DIRECT/DERIVABLE(当前数据可构造) / PROXY_ONLY / UNIDENTIFIABLE(OBS001 等)
 → STRUCTURE + DERIVABLE → **confirmed Operator Gap → S3**
-→ STANDARD_STATIC/RAW → **FACTOR_ITERATION**(有明确修复路径, 产出给 factor loop 实现+验证, 不是 STOP)
+→ STANDARD_STATIC/RAW → **FACTOR_ITERATION**(产出 repair_contract, 见下)
 → UNIDENTIFIABLE → archive(STOP)
+
+**⚠️ FACTOR_ITERATION 产出 repair_contract(结构化修复 spec, 非散文)**: minimal-repair-critic 在 verdict ∈ {RAW, STANDARD_STATIC} 时必填 `repair_contract`(preserved_signals / new_signals / forbidden_drops / gating_logic / output_composition)。主会话校验 repair_contract 完整后, 把它原样传给 write-factor——**write-factor 只能"翻译"这个 contract, 不能自由发挥**。
 
 ---
 

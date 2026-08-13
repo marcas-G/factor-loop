@@ -131,9 +131,47 @@ Task prompt 含:current_representation / challenge witness / hypotheses(看 H �
   "n3_note": "v3 关闭 — 动态统计 sufficiency 移到 Phase 5 G4。本判定只看 N1+N2。",
   "remaining_structure": "<两层后剩什么没表达;空则降级>",
   "is_operator_worthy": "<STRUCTURE_NOT_REDUCIBLE→true(进Phase5); 其余→false>",
-  "reason": "<对照两层的判定理由>"
+  "reason": "<对照两层的判定理由>",
+  "repair_contract": "<见下; 仅 RAW_SUFFICIENT / STANDARD_STATIC_SUFFICIENT 时必填, 否则 null>"
 }
 ```
+
+## repair_contract(缩小推理→实现翻译鸿沟)
+
+**为什么要有它**: FACTOR_ITERATION 路径的最大坑是"推理天衣无缝、代码垃圾"——minimal-repair 给散文修复方向(如"改门控 polarity"),write-factor 自由发挥时**丢信号/改度量/简化逻辑**(实测:price_step 信号被整个删掉,把"换门控"做成了"删信号")。
+
+**repair_contract 把散文修复方向变成结构化 spec,精确到信号级,write-factor 只能"翻译"不能"自由发挥"。**
+
+当 verdict ∈ {RAW_SUFFICIENT, STANDARD_STATIC_SUFFICIENT} 时,**必填** repair_contract:
+
+```json
+{
+  "repair_contract": {
+    "source_factor": "<原因子 xname>",
+    "repair_nature": "<一句话总结修复本质, 供 LLM 理解上下文, 但代码以字段为准>",
+    "preserved_signals": [
+      {"name": "<信号名>", "source_field": "<来源原始字段>",
+       "computation": "<计算方式, 伪代码>", "why_preserve": "<为什么不能丢>"}
+    ],
+    "new_signals": [
+      {"name": "<新信号名>", "source_field": "<来源原始字段>",
+       "computation": "<度量方式>", "why_add": "<为什么加它>"}
+    ],
+    "forbidden_drops": ["<明确禁止丢弃的信号名, 即使看起来冗余也要保留>"],
+    "gating_logic": "<门控伪代码: 哪个信号在什么条件下翻转/归零/延续>",
+    "output_composition": "<输出如何组合信号, 伪代码>"
+  }
+}
+```
+
+**字段语义**:
+- `preserved_signals`: 原因子里**必须原样保留**的信号。从原因子 construction 提取,列出每个信号的名字/来源/计算/保留理由。**这是防"删信号"的第一道闸**。
+- `new_signals`: 本次修复**新增**的信号(regime 维度等)。明确度量方式,不能让 write-factor 自己发明度量(实测:evidence 用 book_thickness 多档求和,代码却用最优档 bid0+ask0)。
+- `forbidden_drops`: 明确列出"看起来能删但其实不能删"的信号。**这是本次 bug 的根因**——price_step 是"台阶检测器",修复方向是"换门控条件",但 write-factor 把 price_step 本身也删了。凡是有独立语义的信号都列进 forbidden_drops。
+- `gating_logic`: 精确到"thin→翻转 / thick→延续 / medium→归零",不能是"改门控 polarity"这种含糊话。
+- `output_composition`: 最终输出怎么组合(如 `regime_sign * (energy - 0.5)`),明确每个信号的乘性/加性/门控角色。
+
+**判据**: repair_contract 填完自问——"如果只给 write-factor 这个 JSON 而不给任何散文,它能否无歧义地写出正确的 .h?" 能 → 通过; 有歧义 → 补字段。
 
 ## 不要做
 

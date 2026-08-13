@@ -65,10 +65,10 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 调 `Skill cog-protocol <xname?>`:
 - **① NEW OPERATOR + contract**: 4 Gate 过 → 立即 register_operator → Step 2
-- **② FACTOR_ITERATION**: minimal-repair 给了修复路径(如"改门控 polarity"/"恢复深档+entropy") → 主会话据此写因子 → Step 2
+- **② FACTOR_ITERATION**: minimal-repair 产出 **repair_contract**(结构化: preserved_signals/new_signals/forbidden_drops/gating_logic/output_composition)→ 主会话把它原样传给 write-factor → Step 2
 - **③ 无产出**: 换 Research Object 重跑
 
-**关键: FACTOR_ITERATION 不是终点, 是 Step 2 的另一个入口。**
+**关键: FACTOR_ITERATION 不是终点, 是 Step 2 的另一个入口。且 repair_contract 是结构化 spec, write-factor 只能翻译不能自由发挥(防"推理天衣无缝、代码垃圾")。**
 
 ## Step 2 · 候选 factor(write-factor)
 
@@ -76,9 +76,11 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 **入口 A (Step 1 ① NEW OPERATOR)**: 认知协议产出 operator contract → 主会话翻译成 formula/intuition/tags/params → write-factor 生成 .h
 
-**入口 B (Step 1 ② FACTOR_ITERATION)**: minimal-repair 给了修复路径 → 主会话据此写因子(如"改门控 polarity"/"恢复深档+entropy")→ write-factor 生成 .h
+**入口 B (Step 1 ② FACTOR_ITERATION)**: minimal-repair 产出 repair_contract → 主会话把 repair_contract **原样**传给 write-factor 作为 spec → write-factor 严格按 preserved_signals/new_signals/forbidden_drops/gating_logic/output_composition 翻译成 .h
 
 两个入口都产出候选 factor 对象(name/formula/intuition/tags/params/categories)。
+
+**⚠️ 入口 B 的忠实度要求**: repair_contract 的 `preserved_signals`(必须保留的信号)和 `forbidden_drops`(禁止丢弃的信号)是硬约束——write-factor 写 .h 时, 每个 preserved_signal 和 forbidden_drop 都必须出现在代码里。主会话在写完后核对: 代码里有没有丢了 forbidden_drops 里的信号? 丢了 → 重写。
 
 **⚠️ categories 语义(易错, P0)**:`categories` = **品种代码数组** `["AG"]` / `["AG","CU"]`,合法值仅 `AG/AU/CU/AL/NI`(沪金银铜铝镍)。**不是 angle 标签**(如 `oi_anomaly`)、**不是 tags**、**不是 xname**。空数组 `[]` = 用默认品种(SHFE-AG,SHFE-CU)。填错会被 `platform_submit_factor` 拦截返回 `config_error`(防拼出 `SHFE-oi_anomaly` 畸形 feeds 导致 DAG failed)。
 - 若 contract 直接给了实现(如算子实现), 按基底换绑定产因子候选

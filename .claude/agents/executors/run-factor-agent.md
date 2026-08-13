@@ -71,17 +71,26 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 
 while True:
   if step == "write":
-    1. Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
+    1. 先 run_load 读 state.factors[index]，重点取：
+         - factor.formula ← 因子伪代码 spec
+         - factor.repair_contract ← 【认知协议 FACTOR_ITERATION 产出的结构化修复 spec，若存在则优先于 formula】
+    2. Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
        （质量/编译重试时：先 run_load 读 evidence.cause_text+diagnosis，再 Read SKILL.md 的 STL/运行期陷阱段对照修）
-    2. 按规范用 Write（首次生成）或 Edit（纠错改现有 .h）写到 ${CLAUDE_PROJECT_DIR}/factors/<name>.h
-    3. 调 mcp__quant-mcp__run_save {
+    3. 按规范用 Write（首次生成）或 Edit（纠错改现有 .h）写到 ${CLAUDE_PROJECT_DIR}/factors/<name>.h
+       ⚠️ 若 factor.repair_contract 存在，必须严格按它翻译（这是硬约束）：
+         - preserved_signals 里的每个信号 → 必须出现在代码里
+         - forbidden_drops 里的每个信号 → 绝对不能删（即使看起来冗余）
+         - new_signals 里的每个信号 → 按 contract 的 computation 精确实现，不得自己发明度量
+         - gating_logic / output_composition → 按伪代码精确翻译，不得改逻辑
+    4. 写完自检（repair_contract 存在时必做）：逐个核对 preserved_signals + forbidden_drops 是否都在代码里，缺一个就重写
+    5. 调 mcp__quant-mcp__run_save {
          run_id,
          patch: {
            "factors.<index>.status": "submitting",
            "factors.<index>.factor_file": "<.h 绝对路径>"
          }
        }
-    4. step = "submit"
+    6. step = "submit"
 
   elif step == "submit":
     1. 调 mcp__quant-mcp__platform_submit_factor {xname, factorFile, categories, params}

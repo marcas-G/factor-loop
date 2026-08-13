@@ -93,6 +93,7 @@ def persist_candidates(run_id: str, idea_text: str, factors: list) -> dict:
             "coord_usage": f.get("coord_usage"),
             "params": f.get("params") or {},
             "db_research": f.get("db_research"),
+            "repair_contract": f.get("repair_contract"),  # 认知协议 FACTOR_ITERATION 产出的结构化修复 spec
             "suggestion_id": f.get("suggestion_id"),
             "iterates_from": f.get("iterates_from"),
             "factor_file": None, "status": "pending", "failure_layer": None,
