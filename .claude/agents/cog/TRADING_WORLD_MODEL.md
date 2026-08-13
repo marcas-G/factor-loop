@@ -2,7 +2,7 @@
 
 > **用途**:所有 cog agent 的共享参考。描述**客观市场机制**(参与者/事件/价格形成/品种环境),不描述系统当前库状态(算子/角度族不在世界模型里,避免限制发散)。
 >
-> **来源**:本地数据(factors.db: 5 品种 factor_ic_daily + factor intuition) + SHFE 规则 + 微观结构理论 + 跨品种联动研究。
+> **来源**:本地数据(data/factors.db: 5 品种 factor_ic_daily + factor intuition) + SHFE 规则 + 微观结构理论 + 跨品种联动研究。
 >
 > **status**:living document,随调研更新。
 

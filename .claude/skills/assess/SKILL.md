@@ -189,10 +189,11 @@ Task({
         - `scene.scene_sparse`: 同场景因子<5 → 撞族判定置信度降, key_weaknesses 注明
      - **硬否决**: R4 `collision_verdict=COLLIDES`(pearson>0.7) → 冗余, key_weaknesses 写"IC 行为撞族 vs {strongest_neighbor} |r|={strongest_pearson}"; `residual_after_orthogonalization < 0.5` → 零新息, 写"残差={x}<0.5 预测力被库内线性解释"
      - **fallback(R4 无数据时)**: 调 `factor_ic_correlate {target: xname}` + `factor_residual_ic_strength {target: xname}`(MCP 工具, 与 R4 同源但接口较旧)。两者都无数据 → key_weaknesses 注"库间 IC 冗余未检", verdict 谨慎
-     5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景(symbol 从 screening.pair 解析、y_horizon=screening.horizon)的 `icir/mean_ic/std_ic` → `run_save` 写 `factors.<i>.evidence.eval_metrics.daily_icir`,供步骤5 在稀疏因子(zero_rate≥0.5)时替代 pooled screening.icir 作判据。查不到(此场景未算)→ 稀疏因子降级:key_weaknesses 注"daily ICIR 未检",verdict 谨慎倾向 fail。查询:
+     5. 【口径切换原料】查 `factor_ic_vec_meta` 主场景的 `icir/mean_ic/std_ic` → `run_save` 写 `factors.<i>.evidence.eval_metrics.daily_icir`,供步骤5 在稀疏因子(zero_rate≥0.5)时替代 pooled screening.icir 作判据。查不到(此场景未算)→ 稀疏因子降级:key_weaknesses 注"daily ICIR 未检",verdict 谨慎倾向 fail。查询(用 CLI,不要手写 SQL——DB 在 data/factors.db,列名固定):
         ```
-        python3 -c "import sqlite3;r=sqlite3.connect('factors.db').execute('SELECT icir,mean_ic,std_ic,n_samples FROM factor_ic_vec_meta WHERE factor_xname LIKE ? AND symbol=? AND y_horizon=?',('<xname>%','<sym>',<hz>)).fetchone();print(r)"
+        Bash: /home/lgao/quant-venv/bin/python core/tools/factor_ic_vec_query.py meta --xname <xname>
         ```
+        返回 JSON 数组,每元素 {symbol, freq, y_horizon, icir, mean_ic, std_ic, n_samples}。取主场景(symbol=SHFE-AG、y_horizon=screening.horizon)的 icir/mean_ic。
    - **路径 A(辅,因子内部一致性,非库间冗余)**:`csv_ic_xcorr.md` 是**该因子自身**的 X↔X 矩阵(5品种×2horizon 互相关),**查不出与库内因子的冗余**——`find_redundant` 只会匹配到自身的不同场景(如 AG main↔AG@1)。仅作泛化/对齐敏感性参考,**不作库间冗余硬否决**。
      - Bash `python3 core/tools/csv_ic_adapter.py find_redundant <xcorr_file> <当前xname> --threshold 0.6`,结果只写入 `key_weaknesses`/`key_strengths` 描述内部一致性(如"AG main↔@1 反号=对齐敏感"),不触发否决。
    - **回退(无 csv_ic_ts — 真旧平台)**:`factor_ic_refresh {xname}` 走 dailyX,**dailyX 现已无数据,常 ok:false,直接跳过**;verdict 照常,`key_weaknesses` 注"库间 IC 冗余未检(无 daily_ts/dailyX)"

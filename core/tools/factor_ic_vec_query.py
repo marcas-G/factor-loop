@@ -302,10 +302,28 @@ def _cli():
     p_precise.add_argument("--symbol", required=True)
     p_precise.add_argument("--y-horizon", type=int, required=True)
 
+    p_meta = sub.add_parser("meta", help="查单因子的 factor_ic_vec_meta(所有场景 daily ICIR/mean_ic/n)")
+    p_meta.add_argument("--xname", required=True)
+
     args = ap.parse_args()
 
     with db.get_conn(args.db) as conn:
-        if args.cmd == "scenes":
+        if args.cmd == "meta":
+            rows = conn.execute(
+                "SELECT symbol, freq, y_horizon, icir, mean_ic, std_ic, n_samples "
+                "FROM factor_ic_vec_meta WHERE factor_xname LIKE ? ORDER BY y_horizon",
+                (args.xname + "%",),
+            ).fetchall()
+            if not rows:
+                print("无数据(该因子未 refresh vec)")
+            else:
+                print(json.dumps(
+                    [{"symbol": r[0], "freq": r[1], "y_horizon": r[2],
+                      "icir": r[3], "mean_ic": r[4], "std_ic": r[5], "n_samples": r[6]}
+                     for r in rows],
+                    ensure_ascii=False, indent=1))
+
+        elif args.cmd == "scenes":
             print(f"{'symbol':14} {'horizon':>8} {'#factors':>8}")
             print("-" * 32)
             for sym, yh, n in list_available_scenes(conn):
