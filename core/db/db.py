@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import struct
 from contextlib import contextmanager
@@ -110,7 +111,7 @@ def add_factor(
         """
         INSERT OR IGNORE INTO factors
             (xname, class_name, file_path, formula_text, params, status, created_ts)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
         """,
         (
             xname,
@@ -214,8 +215,13 @@ def add_eval(
     idea_id: int | None = None,
     mode: str = "full",
     raw_path: str | None = None,
+    status: str | None = None,
 ) -> None:
-    """新增评估快照 + 更新 factors 冗余字段。"""
+    """新增评估快照 + 更新 factors 冗余字段。
+
+    status: 强制设 factors.status("evaluated"/"dead_end")。None = 不动 status(仅更新最新指标)。
+    (对齐 mjs addEval 语义:pass 传 evaluated, fail 传 dead_end, 不传则不碰 status。)
+    """
     conn.execute(
         """
         INSERT INTO factor_evals
@@ -232,19 +238,36 @@ def add_eval(
             mode, int(bool(metrics.get("significant", False))), raw_path,
         ),
     )
-    conn.execute(
-        """
-        UPDATE factors SET
-            latest_ic = ?, latest_icir = ?, latest_sharpe = ?, latest_rank_ic = ?,
-            last_updated_ts = ?, status = 'evaluated'
-        WHERE xname = ?
-        """,
-        (
-            metrics.get("ic_mean"), metrics.get("icir"),
-            metrics.get("sharpe"), metrics.get("rank_ic"),
-            ts, factor_xname,
-        ),
-    )
+    if status is not None:
+        if status not in VALID_STATUS:
+            raise ValueError(f"status must be {VALID_STATUS}, got {status!r}")
+        conn.execute(
+            """
+            UPDATE factors SET
+                latest_ic = ?, latest_icir = ?, latest_sharpe = ?, latest_rank_ic = ?,
+                last_updated_ts = ?, status = ?
+            WHERE xname = ?
+            """,
+            (
+                metrics.get("ic_mean"), metrics.get("icir"),
+                metrics.get("sharpe"), metrics.get("rank_ic"),
+                ts, status, factor_xname,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE factors SET
+                latest_ic = ?, latest_icir = ?, latest_sharpe = ?, latest_rank_ic = ?,
+                last_updated_ts = ?
+            WHERE xname = ?
+            """,
+            (
+                metrics.get("ic_mean"), metrics.get("icir"),
+                metrics.get("sharpe"), metrics.get("rank_ic"),
+                ts, factor_xname,
+            ),
+        )
 
 
 # ============ iterations ============
@@ -270,14 +293,15 @@ def add_iteration(
 
 
 def get_ancestors(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]:
+    # status='realized' 过滤:排除 open/in_progress 的自指占位(to=from),防递归 CTE 无限循环
     return conn.execute(
         """
         WITH RECURSIVE chain AS (
             SELECT from_xname AS ancestor, 1 AS depth
-            FROM iterations WHERE to_xname = ?
+            FROM iterations WHERE to_xname = ? AND status = 'realized'
             UNION ALL
             SELECT i.from_xname, c.depth + 1
-            FROM iterations i JOIN chain c ON i.to_xname = c.ancestor
+            FROM iterations i JOIN chain c ON i.to_xname = c.ancestor AND i.status = 'realized'
         )
         SELECT ancestor, depth FROM chain ORDER BY depth
         """,
@@ -286,14 +310,15 @@ def get_ancestors(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]
 
 
 def get_descendants(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]:
+    # status='realized' 过滤:排除 open/in_progress 的自指占位(to=from),防递归 CTE 无限循环
     return conn.execute(
         """
         WITH RECURSIVE chain AS (
             SELECT to_xname AS descendant, 1 AS depth
-            FROM iterations WHERE from_xname = ?
+            FROM iterations WHERE from_xname = ? AND status = 'realized'
             UNION ALL
             SELECT i.to_xname, c.depth + 1
-            FROM iterations i JOIN chain c ON i.from_xname = c.descendant
+            FROM iterations i JOIN chain c ON i.from_xname = c.descendant AND i.status = 'realized'
         )
         SELECT descendant, depth FROM chain ORDER BY depth
         """,
@@ -320,6 +345,35 @@ def add_lesson(
         raise ValueError(f"type_ must be {VALID_LESSON_TYPE}, got {type_!r}")
     if scope not in VALID_LESSON_SCOPE:
         raise ValueError(f"scope must be {VALID_LESSON_SCOPE}, got {scope!r}")
+    if not factor_xname:
+        raise ValueError("lesson 必须绑 factor_xname")
+    evidence_json = json.dumps(evidence, ensure_ascii=False) if evidence else None
+
+    # 幂等:同 (factor_xname, idea_id, type) 已有 → UPDATE 最新一条;否则 INSERT。
+    # (对齐 mjs addLesson:避免重复 lesson 堆积。)
+    if idea_id is None:
+        existing = conn.execute(
+            """SELECT id FROM lessons
+               WHERE factor_xname = ? AND idea_id IS NULL AND type = ?
+               ORDER BY created_ts DESC LIMIT 1""",
+            (factor_xname, type_),
+        ).fetchone()
+    else:
+        existing = conn.execute(
+            """SELECT id FROM lessons
+               WHERE factor_xname = ? AND idea_id = ? AND type = ?
+               ORDER BY created_ts DESC LIMIT 1""",
+            (factor_xname, idea_id, type_),
+        ).fetchone()
+
+    if existing:
+        conn.execute(
+            """UPDATE lessons SET text = ?, evidence = ?, created_ts = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (text, evidence_json, existing[0]),
+        )
+        return int(existing[0])
+
     cur = conn.execute(
         """
         INSERT INTO lessons (type, scope, text, evidence, idea_id, factor_xname)
@@ -327,7 +381,7 @@ def add_lesson(
         """,
         (
             type_, scope, text,
-            json.dumps(evidence, ensure_ascii=False) if evidence else None,
+            evidence_json,
             idea_id, factor_xname,
         ),
     )
@@ -526,10 +580,11 @@ def add_graph_node(conn: sqlite3.Connection, table: str, data: dict) -> int:
         if chain is not None and not isinstance(chain, str):
             chain = json.dumps(chain, ensure_ascii=False)
         cur = conn.execute(
-            "INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, node_layer) "
-            "VALUES (?, ?, 'open', ?, ?, ?)",
+            "INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, node_layer, angle_code) "
+            "VALUES (?, ?, 'open', ?, ?, ?, ?)",
             (data.get("text"), data.get("parent_idea_id"), chain,
-             data.get("necessity_grade"), data.get("node_layer", "HYPOTHESIS")),
+             data.get("necessity_grade"), data.get("node_layer", "HYPOTHESIS"),
+             data.get("angle_code")),
         )
         return int(cur.lastrowid)
     raise ValueError(f"add_graph_node 不支持表: {table}")
@@ -1041,6 +1096,8 @@ def select_graph_operation(conn: sqlite3.Connection) -> dict:
         "generalize": min(1.0, max_cluster / _CLUSTER_SCALE),
         "fill":       min(1.0, n_gaps / _GAP_SCALE),
         "explore":    (n_fresh / total) * (n_saturated / total),
+        # angle_discovery:explore 卡(nFresh==0)+ 饱和多 → 该发现新角度,突破预定义语言边界
+        "angle_discovery": (n_saturated / total) if n_fresh == 0 else 0.0,
     }
 
     # ===== diversity bonus(连续,防垄断) =====
@@ -1484,3 +1541,488 @@ def quality_score_from_parts(
     score = 0.5 * ind + 0.5 * stability
     grade = "A" if score >= 0.7 else ("B" if score >= 0.4 else "C")
     return round(score, 3), grade
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 以下函数从 runtime/lib/factor-db.mjs 吸收(B 类:原 mjs 有、db.py 无)。
+# 换 python 后 mjs 删除,这些是 MCP tool handler 直接调用的唯一实现。
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _trigram_tokens(text: str, limit: int = 12) -> list[str]:
+    """把自然语言切成 trigram 列表(FTS5 trigram 分词器友好),去重,最多 limit 个。
+    (对齐 mjs searchFactors/searchLessons 的 trigram 逻辑。)"""
+    cleaned = re.sub(r"\s+", "", text or "")
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for i in range(len(cleaned) - 2):
+        t = cleaned[i:i + 3]
+        if t not in seen:
+            tokens.append(t)
+            seen.add(t)
+            if len(tokens) >= limit:
+                break
+    return tokens
+
+
+def _trigram_match_query(text: str, limit: int = 12) -> str | None:
+    """自然语言 → FTS5 trigram match 串(`"tok1" OR "tok2" ...`)。"""
+    tokens = _trigram_tokens(text, limit)
+    if not tokens:
+        return None
+    return " OR ".join(f'"{t}"' for t in tokens)
+
+
+def _days_since(ts) -> float:
+    """距今多少天(UTC 天)。ts 可为 str(datetime)。无法解析 → +inf。"""
+    if not ts:
+        return float("inf")
+    s = str(ts).strip().replace(" ", "T")
+    if not re.search(r"[zZ]$|[+-]\d\d:?\d\d$", s):
+        s += "Z"
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
+    except Exception:
+        return float("inf")
+
+
+# ============ 因子状态/查询 ============
+
+def update_factor_status(conn: sqlite3.Connection, xname: str, status: str) -> None:
+    if status not in VALID_STATUS:
+        raise ValueError(f"status must be {VALID_STATUS}, got {status!r}")
+    conn.execute(
+        "UPDATE factors SET status = ?, last_updated_ts = CURRENT_TIMESTAMP WHERE xname = ?",
+        (status, xname),
+    )
+
+
+def factor_exists(conn: sqlite3.Connection, xname: str) -> bool:
+    return bool(conn.execute("SELECT 1 FROM factors WHERE xname = ?", (xname,)).fetchone())
+
+
+def count_factors(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) AS n FROM factors").fetchone()["n"])
+
+
+def count_lessons(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) AS n FROM lessons").fetchone()["n"])
+
+
+def count_evaluated(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) AS n FROM factors WHERE status='evaluated'").fetchone()["n"])
+
+
+def recent_lessons(conn: sqlite3.Connection, k: int = 10) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, type, scope, text, idea_id, factor_xname, created_ts "
+        "FROM lessons ORDER BY id DESC LIMIT ?", (k,),
+    ).fetchall()
+
+
+def recent_factors(conn: sqlite3.Connection, k: int = 10) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT xname, class_name, status, latest_ic, latest_icir, last_updated_ts "
+        "FROM factors ORDER BY last_updated_ts DESC LIMIT ?", (k,),
+    ).fetchall()
+
+
+def search_factors(conn: sqlite3.Connection, query: str, k: int = 10) -> list[sqlite3.Row]:
+    """FTS5 全文检索 factors(formula/class_name),trigram 分词中文友好。"""
+    q = (query or "").strip()
+    if len(q) < 3:
+        return recent_factors(conn, k)
+    match = _trigram_match_query(q)
+    if not match:
+        return recent_factors(conn, k)
+    return conn.execute(
+        """SELECT f.xname, f.class_name, f.status, f.latest_icir, f.formula_text,
+                  bm25(factors_fts) AS score
+           FROM factors_fts ft JOIN factors f ON f.rowid = ft.rowid
+           WHERE factors_fts MATCH ? ORDER BY score LIMIT ?""",
+        (match, k),
+    ).fetchall()
+
+
+def ensure_formula_tags(conn: sqlite3.Connection, xname: str, formula: str | None, tags: list[str] | None) -> None:
+    """兜底:若 factors.formula_text 为空则补;tags 逐个绑定(幂等)。
+    用于 persistVerdict 在 .h 无 frontmatter 时保证三件套不缺。"""
+    if not xname:
+        return
+    if formula:
+        row = conn.execute("SELECT formula_text FROM factors WHERE xname = ?", (xname,)).fetchone()
+        if row and row["formula_text"] is None:
+            conn.execute(
+                "UPDATE factors SET formula_text = ?, last_updated_ts = CURRENT_TIMESTAMP WHERE xname = ?",
+                (formula, xname),
+            )
+    for t in tags or []:
+        if t:
+            conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (str(t),))
+            tag_id = conn.execute("SELECT id FROM tags WHERE name = ?", (str(t),)).fetchone()
+            if tag_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO factor_tags (factor_xname, tag_id) VALUES (?, ?)",
+                    (xname, tag_id["id"]),
+                )
+
+
+def add_lessons(conn: sqlite3.Connection, lessons: list[dict], idea_id: int | None = None) -> list[int]:
+    """批量写 lesson(逐条 try/except,跳过无效条目)。返回写入的 lesson id 列表。"""
+    ids = []
+    for l in lessons or []:
+        try:
+            ids.append(add_lesson(
+                conn,
+                type_=l["type"],
+                scope="factor",
+                text=l["text"],
+                idea_id=l.get("idea_id") or idea_id,
+                factor_xname=l["xname"],
+                evidence=l.get("evidence"),
+            ))
+        except Exception:
+            pass  # 无效条目跳过(对齐 mjs addLessons 逐条容错)
+    return ids
+
+
+# ============ 迭代状态机(open→in_progress→realized / reopen 回滚) ============
+
+def open_iteration(
+    conn: sqlite3.Connection,
+    from_xname: str,
+    idea_id: int | None = None,
+    change_note: str | None = None,
+    reason: str | None = None,
+    iterable: bool = True,
+) -> int:
+    """开 open suggestion。同 (from, change) 已 open/in_progress → 幂等返回已有 id。"""
+    existing = conn.execute(
+        """SELECT id FROM iterations
+           WHERE from_xname = ? AND change_note IS ? AND status IN ('open','in_progress')
+           ORDER BY ts DESC LIMIT 1""",
+        (from_xname, change_note),
+    ).fetchone()
+    if existing:
+        return int(existing["id"])
+    cur = conn.execute(
+        """INSERT INTO iterations (from_xname, to_xname, idea_id, change_note, reason, status, iterable)
+           VALUES (?, ?, ?, ?, ?, 'open', ?)""",
+        (from_xname, from_xname, idea_id, change_note, reason, 1 if iterable else 0),  # to 自指占位
+    )
+    return int(cur.lastrowid)
+
+
+def claim_iteration(conn: sqlite3.Connection, iter_id: int) -> dict:
+    """open→in_progress(接续候选 B 时)。非 open 不可 claim。"""
+    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    if not row:
+        raise ValueError(f"iteration id 不存在: {iter_id}")
+    if row["status"] != "open":
+        return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 open 不可 claim"}
+    conn.execute("UPDATE iterations SET status = 'in_progress' WHERE id = ?", (iter_id,))
+    return {"ok": True}
+
+
+def realize_iteration(conn: sqlite3.Connection, iter_id: int, to_xname: str, icir_delta: float | None = None) -> dict:
+    """in_progress→realized(B 已入库后)。填真实 to_xname + outcome(由 icir_delta 推导)。"""
+    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    if not row:
+        raise ValueError(f"iteration id 不存在: {iter_id}")
+    if row["status"] != "in_progress":
+        return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 in_progress 不可 realize"}
+    if icir_delta is None:
+        outcome = "neutral"
+    elif icir_delta > 0.02:
+        outcome = "improved"
+    elif icir_delta < -0.02:
+        outcome = "declined"
+    else:
+        outcome = "neutral"
+    conn.execute(
+        "UPDATE iterations SET status = 'realized', to_xname = ?, outcome = ?, icir_delta = ? WHERE id = ?",
+        (to_xname, outcome, icir_delta, iter_id),
+    )
+    return {"ok": True, "outcome": outcome}
+
+
+def reopen_iteration(conn: sqlite3.Connection, iter_id: int) -> dict:
+    """失败回滚:in_progress→open(允许下次再接续)。"""
+    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    if not row:
+        raise ValueError(f"iteration id 不存在: {iter_id}")
+    if row["status"] != "in_progress":
+        return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 in_progress 不可 reopen"}
+    conn.execute("UPDATE iterations SET status = 'open' WHERE id = ?", (iter_id,))
+    return {"ok": True}
+
+
+def list_open_iterations(conn: sqlite3.Connection, top_k: int = 5, source_status: str | None = None) -> list[sqlite3.Row]:
+    """检索待接续 open 建议,按 priority 降序。
+    priority = (evaluated?2.0:0.5) × exp(-age/14):pass 精进优先,老建议降权。"""
+    sql = """SELECT i.id AS suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id, i.iterable, i.ts,
+                    f.status AS from_status, f.latest_icir AS from_icir, f.formula_text AS from_formula,
+                    (CASE WHEN f.status = 'evaluated' THEN 2.0 ELSE 0.5 END)
+                      * EXP(-(julianday('now') - julianday(i.ts)) / 14.0) AS priority
+             FROM iterations i JOIN factors f ON f.xname = i.from_xname
+             WHERE i.status = 'open'"""
+    params: list[Any] = []
+    if source_status:
+        sql += " AND f.status = ?"
+        params.append(source_status)
+    sql += " ORDER BY priority DESC LIMIT ?"
+    params.append(top_k)
+    return conn.execute(sql, params).fetchall()
+
+
+# ============ 假设 / 发现(ideas + 论证链) ============
+
+def add_hypothesis(
+    conn: sqlite3.Connection,
+    text: str,
+    argument_chain: dict | None = None,
+    parent_idea_id: int | None = None,
+    necessity_grade: str | None = None,
+    angle_code: str | None = None,
+) -> int:
+    """写 idea + 结构化论证链(argument_chain)。论证链是假设的属性,不是因子的。"""
+    chain = json.dumps(argument_chain, ensure_ascii=False) if argument_chain is not None else None
+    cur = conn.execute(
+        """INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, angle_code)
+           VALUES (?, ?, 'open', ?, ?, ?)""",
+        (text, parent_idea_id, chain, necessity_grade, angle_code),
+    )
+    return int(cur.lastrowid)
+
+
+def get_hypothesis(conn: sqlite3.Connection, idea_id: int) -> sqlite3.Row | None:
+    """取假设的论证链 + 分级(reviewer-agent 审稿 / 忠实度判定读用)。"""
+    return conn.execute(
+        """SELECT id, text, argument_chain, necessity_grade, support_score, evaluated_factor_count, status
+           FROM ideas WHERE id = ?""",
+        (idea_id,),
+    ).fetchone()
+
+
+def update_idea_support_score(conn: sqlite3.Connection, idea_id: int, k: int = 1) -> dict:
+    """聚合假设支持度(贝叶斯平滑 (pass+k)/(total+2k),不绝对判断)。"""
+    if idea_id is None:
+        return {"ok": False, "error": "ideaId 为空"}
+    rows = conn.execute(
+        """SELECT f.status FROM idea_factor_links l
+           JOIN factors f ON f.xname = l.factor_xname
+           WHERE l.idea_id = ? AND f.status IN ('evaluated','dead_end')""",
+        (idea_id,),
+    ).fetchall()
+    total = len(rows)
+    n_pass = sum(1 for r in rows if r["status"] == "evaluated")
+    score = None if total == 0 else (n_pass + k) / (total + 2 * k)
+    conn.execute(
+        """UPDATE ideas SET support_score = ?, evaluated_factor_count = ?,
+           support_score_computed_at = CURRENT_TIMESTAMP WHERE id = ?""",
+        (score, total, idea_id),
+    )
+    return {"ok": True, "idea_id": idea_id, "pass": n_pass, "total": total, "score": score}
+
+
+def discover_failed_hypotheses(
+    conn: sqlite3.Connection, max_score: float = 0.4, min_evaluated: int = 2, limit: int = 10,
+) -> list[sqlite3.Row]:
+    """扫失效假设(support_score 低 + 已评估够多)——下一轮反常的原料。"""
+    return conn.execute(
+        """SELECT id, text, support_score, evaluated_factor_count, necessity_grade
+           FROM ideas
+           WHERE support_score IS NOT NULL AND support_score < ? AND evaluated_factor_count >= ?
+           ORDER BY support_score ASC LIMIT ?""",
+        (max_score, min_evaluated, limit),
+    ).fetchall()
+
+
+def discover_recent_dead_ends(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """最近 dead_end lessons(避雷 + 失效回喂)。"""
+    return conn.execute(
+        "SELECT id, text, factor_xname, idea_id, created_ts FROM lessons "
+        "WHERE type = 'dead_end' ORDER BY created_ts DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+# ============ 覆盖地图(coverage map) ============
+
+_COVERAGE_AXES = {
+    "symbol": "m.symbol",
+    "y_horizon": "m.y_horizon",
+    "status": "f.status",
+    "necessity_grade": "i.necessity_grade",
+}
+_DEFAULT_COVERAGE_AXES = ["symbol", "y_horizon", "status", "necessity_grade"]
+_COVERAGE_STALE_DAYS = 60
+
+
+def coverage_map(
+    conn: sqlite3.Connection,
+    slice_: dict | None = None,
+    group_by: list[str] | None = None,
+    min_count: int = 0,
+) -> list[dict]:
+    """覆盖张量切片。每格 gap_tags ∈ thin|hot|stale|normal(可叠加)。
+    thin=试过≤3且0评估成功; hot=evaluated≥1且avg_icir>全库均值; stale=最近评估>60天。"""
+    slice_ = slice_ or {}
+    axes = [a for a in (group_by or _DEFAULT_COVERAGE_AXES) if a in _COVERAGE_AXES] or _DEFAULT_COVERAGE_AXES
+    select_cols = ", ".join(f"{_COVERAGE_AXES[a]} AS {a}" for a in axes)
+    group_cols = ", ".join(_COVERAGE_AXES[a] for a in axes)
+
+    where, params = [], []
+    for a in _COVERAGE_AXES:
+        if a in slice_ and slice_[a] is not None:
+            where.append(f"{_COVERAGE_AXES[a]} = ?")
+            params.append(slice_[a])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    having_sql = ""
+    if min_count > 0:
+        having_sql = "HAVING COUNT(DISTINCT f.xname) >= ?"
+        params.append(min_count)
+
+    rows = conn.execute(f"""
+        SELECT {select_cols},
+               COUNT(DISTINCT f.xname) AS searched_count,
+               COUNT(DISTINCT CASE WHEN f.status='evaluated' THEN f.xname END) AS evaluated_count,
+               COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END) AS dead_end_count,
+               AVG(f.latest_icir) AS avg_icir,
+               MAX(m.computed_at) AS last_evaluated_ts
+        FROM factor_ic_vec_meta m
+        JOIN factors f ON f.xname = m.factor_xname
+        LEFT JOIN factor_evals e2 ON e2.id = (
+            SELECT id FROM factor_evals WHERE factor_xname = f.xname ORDER BY ts DESC LIMIT 1
+        )
+        LEFT JOIN ideas i ON i.id = e2.idea_id
+        {where_sql}
+        GROUP BY {group_cols}
+        {having_sql}
+        ORDER BY searched_count DESC
+    """, params).fetchall()
+
+    med = conn.execute(
+        "SELECT AVG(latest_icir) AS a FROM factors WHERE status='evaluated' AND latest_icir IS NOT NULL"
+    ).fetchone()
+    median_icir = (med["a"] or 0) if med else 0
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        tags = []
+        if d["searched_count"] <= 3 and d["evaluated_count"] == 0:
+            tags.append("thin")
+        if d["evaluated_count"] >= 1 and d["avg_icir"] is not None and d["avg_icir"] > median_icir and d["avg_icir"] > 0:
+            tags.append("hot")
+        if _days_since(d["last_evaluated_ts"]) > _COVERAGE_STALE_DAYS:
+            tags.append("stale")
+        if not tags:
+            tags.append("normal")
+        d["gap_tags"] = tags
+        result.append(d)
+    return result
+
+
+def coverage_gaps(conn: sqlite3.Connection, top_k: int = 5) -> dict:
+    """覆盖空白/热点队列:unexplored/thin/hot/stale 各取 top_k,带 suggestion 文本。"""
+    unexplored = conn.execute("""
+        SELECT m.symbol, m.y_horizon, i.necessity_grade,
+               COUNT(DISTINCT f.xname) AS searched_count,
+               COUNT(DISTINCT CASE WHEN f.status='evaluated' THEN f.xname END) AS evaluated_count
+        FROM factor_ic_vec_meta m
+        JOIN factors f ON f.xname = m.factor_xname
+        LEFT JOIN factor_evals e2 ON e2.id = (
+            SELECT id FROM factor_evals WHERE factor_xname = f.xname ORDER BY ts DESC LIMIT 1
+        )
+        LEFT JOIN ideas i ON i.id = e2.idea_id
+        GROUP BY m.symbol, m.y_horizon, i.necessity_grade
+        HAVING evaluated_count = 0
+        ORDER BY searched_count DESC LIMIT ?
+    """, (top_k,)).fetchall()
+
+    unexplored_list = [{
+        "symbol": r["symbol"], "y_horizon": r["y_horizon"], "necessity_grade": r["necessity_grade"],
+        "searched_count": r["searched_count"], "evaluated_count": r["evaluated_count"],
+        "gap_tag": "unexplored",
+        "suggestion": f"{r['symbol'] or '?'} × h={r['y_horizon'] if r['y_horizon'] is not None else '?'}s "
+                      f"× {r['necessity_grade'] or 'any'} 维度空白(试过 {r['searched_count']} 个均无 evaluated),值得冷启动探索",
+    } for r in unexplored]
+
+    cells = coverage_map(conn)
+
+    def pick(tag: str) -> list[dict]:
+        out = []
+        for c in cells:
+            if tag in c["gap_tags"]:
+                out.append({
+                    "symbol": c.get("symbol"), "y_horizon": c.get("y_horizon"),
+                    "status": c.get("status"), "necessity_grade": c.get("necessity_grade"),
+                    "searched_count": c.get("searched_count"), "evaluated_count": c.get("evaluated_count"),
+                    "avg_icir": c.get("avg_icir"), "last_evaluated_ts": c.get("last_evaluated_ts"),
+                    "gap_tag": tag,
+                    "suggestion": (
+                        f"{c.get('symbol') or '?'} × h={c.get('y_horizon') if c.get('y_horizon') is not None else '?'}s "
+                        f"高效热点(avg_icir={(c.get('avg_icir') or 0):.3f}),值得在该格继续变异"
+                        if tag == "hot" else
+                        f"{c.get('symbol') or '?'} × h={c.get('y_horizon') if c.get('y_horizon') is not None else '?'}s "
+                        f"× {c.get('status')} 欠探索({c.get('searched_count')} 个试过 0 评估成功),换轴或弃"
+                        if tag == "thin" else
+                        f"{c.get('symbol') or '?'} × h={c.get('y_horizon') if c.get('y_horizon') is not None else '?'}s "
+                        f"该格 {round(_days_since(c.get('last_evaluated_ts')))} 天没动,可能 drift,待复验"
+                    ),
+                })
+                if len(out) >= top_k:
+                    break
+        return out
+
+    return {"unexplored": unexplored_list, "thin": pick("thin"), "hot": pick("hot"), "stale": pick("stale")}
+
+
+# ============ 单因子详情 / 相似 ============
+
+def get_factor_detail(conn: sqlite3.Connection, xname: str) -> dict:
+    """单因子全貌:基本信息 + 最近 10 evals + tags + 迭代链(ancestors+descendants)。"""
+    factor = conn.execute("SELECT * FROM factors WHERE xname = ?", (xname,)).fetchone()
+    if not factor:
+        raise ValueError(f"xname 不存在: {xname}")
+    evals = conn.execute(
+        "SELECT ts, ic_mean, icir, sharpe, eval_mode, significant FROM factor_evals "
+        "WHERE factor_xname = ? ORDER BY ts DESC LIMIT 10", (xname,),
+    ).fetchall()
+    tags = [r["name"] for r in conn.execute(
+        "SELECT t.name FROM tags t JOIN factor_tags ft ON ft.tag_id = t.id WHERE ft.factor_xname = ?",
+        (xname,),
+    ).fetchall()]
+    ancestors = get_ancestors(conn, xname)
+    descendants = get_descendants(conn, xname)
+    return {"factor": dict(factor), "evals": [dict(e) for e in evals], "tags": tags,
+            "ancestors": [{"xname": a[0], "depth": a[1]} for a in ancestors],
+            "descendants": [{"xname": d[0], "depth": d[1]} for d in descendants]}
+
+
+def get_similar_factors(conn: sqlite3.Connection, xname: str, k: int = 10) -> list[sqlite3.Row]:
+    """向量查重:读自身 factors_vec embedding → search_similar。"""
+    row = conn.execute("SELECT embedding FROM factors_vec WHERE xname = ?", (xname,)).fetchone()
+    if not row:
+        raise ValueError(f"xname 在 factors_vec 中不存在: {xname}")
+    emb = list(struct.unpack(f"{len(row['embedding']) // 4}f", row["embedding"]))
+    return search_similar(conn, emb, k)
+
+
+def extract_metrics(daily_ic_preview: str | None) -> dict:
+    """从 daily_ic_results.txt 文本正则抽 IC/ICIR/Sharpe/Rank IC(纯文本,无 DB)。"""
+    if not daily_ic_preview:
+        return {}
+
+    def find(regex: str):
+        m = re.search(regex, str(daily_ic_preview), re.IGNORECASE)
+        return float(m.group(1)) if m else None
+
+    return {
+        "ic_mean": find(r"IC[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)"),
+        "icir": find(r"ICIR[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)"),
+        "sharpe": find(r"Sharpe[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)"),
+        "rank_ic": find(r"Rank\s*IC[^a-zA-Z0-9]+(-?\d+\.?\d*(?:e[-+]?\d+)?)"),
+    }
