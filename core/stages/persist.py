@@ -65,6 +65,12 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
                 meta.get("intuition") or intuition,
             ),
         )
+        # 建 idea_factor_links(update_idea_support_score 依赖此关联查因子)
+        if idea_id is not None:
+            conn.execute(
+                "INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)",
+                (idea_id, xname),
+            )
     return xname
 
 

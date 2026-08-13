@@ -167,10 +167,17 @@ Task({
    ⚠️ **metrics.mjs 缓存**: evidence 可能没 csv_ic 字段。**workaround**: Bash `find /tmp -path "*<xname>/csv_ic/csv_ic_ts.csv" 2>/dev/null | head -1` 直接找 check 输出目录。
 
    - **路径 B(主,库间 IC 冗余硬否决)**:抓"公式不同但日级 IC 同涨同跌"的真冗余(如同 run 变体、库内近似因子)。
-     1. 读 daily_ts(P6 后大字段外存): 优先从 `state.factors[i].evidence_file`(若存在, JSON 里 `daily_ts` 字段)读; state 内 `evidence.eval_metrics.csv_ic.daily_ts` 已外存为空(只剩 `_offloaded` 标记)。两个都没有则 Bash find check 输出目录的 `csv_ic_ts.csv`
-     2. Bash `python3 core/tools/csv_ic_adapter.py ingest_daily_ts <ts_file> <xname>` 写入 factor_ic_daily(**因子步骤 3 已入库,不撞 FK**)
-     3. Bash `/home/lgao/quant-venv/bin/python3 core/tools/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
-     4. **R4 检索(主)**: 调 R4 Contract `search_behavior_neighbors` 做完整的行为邻居检索(场景对齐 + ANN 召回 + 精确 pearson + residual IC + operator overlap):
+     1. 导 daily_ts(一步 CLI,自动处理 P6 外存 JSON 或 check_output CSV):
+        ```
+        # 优先从 evidence_file(P6 外存 JSON)导:
+        Bash: /home/lgao/quant-venv/bin/python core/tools/ingest_evidence_ts.py \
+              --evidence-file <state.factors[i].evidence_file> --xname <xname>
+        # 或从 check_output CSV 导(无 evidence_file 时):
+        Bash: /home/lgao/quant-venv/bin/python core/tools/ingest_evidence_ts.py \
+              --csv <check_output>/<xname>/csv_ic/csv_ic_ts.csv --xname <xname>
+        ```
+     2. Bash `/home/lgao/quant-venv/bin/python3 core/tools/vec_refresh_from_daily.py <xname>` 算 factor_ic_vec(需sqlite_vec)
+     3. **R4 检索(主)**: 调 R4 Contract `search_behavior_neighbors` 做完整的行为邻居检索(场景对齐 + ANN 召回 + 精确 pearson + residual IC + operator overlap):
         ```
         Bash: /home/lgao/quant-venv/bin/python core/retrieval/r4_search_behavior_neighbors.py \
               --xname <xname> --symbol <sym> --horizon <hz>
