@@ -64,6 +64,7 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 - `budget = 3`：因子代码重试（submit 编译错、`compile_failed`、`factor_runtime_crash`、`factor_runtime_error`）——每次 read evidence.cause_text + evidence.diagnosis 定向修代码
 - `transient_budget = 3`：`platform_transient` 重 check 等 DAG 完成/平台恢复，**独立计数**（已从旧的 8×30min≈4h 降下来——快速因子崩溃不再被当 timeout 空等）
 - `quality_budget = 3`：因子质量失败重试（`check_output_too_small` / `check_failed`），**独立计数**
+- `running_budget = 10`：`failureLayer == "running"` 时 sleep 60 秒后重 check,**独立计数**。10 次 × 60 秒 = 10 分钟上限——超过说明平台真的卡了,give_up（10 次内正常 DAG 一定能跑完）。running 不扣 transient_budget,因为它是正常等待不是失败。
 
 ```
 初始 step = "write"
@@ -105,6 +106,12 @@ while True:
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
     3. 如 result.failureLayer == "check_done":
          返回成功结果
+       elif result.failureLayer == "running":
+         # 平台仍在计算,退避等待后重 check(扣 running_budget,不扣 transient)
+         running_budget -= 1
+         如 running_budget <= 0：give_up(平台 10 分钟内没跑完,可能真卡了)
+         Bash: sleep 60   # 等 60 秒(平台 DAG 通常 2-10 分钟完成)
+         step = "check"   # 重试 check
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：
            "compile_failed" / "factor_runtime_crash" / "factor_runtime_error"
