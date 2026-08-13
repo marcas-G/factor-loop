@@ -23,7 +23,7 @@ auto-loops.sh                 tmux 单车道循环驱动器(拉起 /research-loo
 core/                         全部代码(纯 Python,无 node)
   config.py                   全局路径/环境常量(单一真相,叶子层)
   db/                         因子库 db.py + schema.sql + migrations + seed
-  retrieval/                  R1-R4 检索 Contract + 派生表
+  retrieval/                  R1-R3 检索 Contract + 派生表
   cog/                        cog-protocol 程序化部分(evidence 派生/探针/算子注册)
   platform/                   featuretool.py + factor_check.py(平台对接)
   tools/                      AI/IC/embedding 工具 + 测试

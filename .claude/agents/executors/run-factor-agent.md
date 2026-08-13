@@ -119,7 +119,7 @@ while True:
                --file <factor_file> --features <class_name> 2>/dev/null
          # 返回 JSON {ok, feature, metrics:[{x_col,horizon,R2_X,res_IC,dLOOCV_pct}], error?}
          # 若 ok=true: run_save 落 state.factors[index].evidence.ridge_svd = metrics
-         # 若 ok=false: 不落(assess 用 R4 fallback), 不阻塞 check_done
+         # 若 ok=false: 不落(assess 标"冗余未检"), 不阻塞 check_done
          返回成功结果
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：

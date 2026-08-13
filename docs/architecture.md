@@ -11,7 +11,7 @@ platform/     ← config          平台对接(featuretool/factor_check)
 infra/        ← config          subprocess 封装 + Airflow 失败分诊
 metrics.py    ← 纯函数           7 维评估数据聚合
 tools/        ← db + config     AI/IC/embedding 一次性工具
-retrieval/    ← db + config     R1-R4 检索 Contract
+retrieval/    ← db + config     R1-R3 检索 Contract
 cog/          ← db+platform+retrieval  认知协议程序化部分
 stages/       ← infra+db+metrics 编排(submit/check/persist)
 mcp/          ← db+stages+metrics+infra  quant-mcp server(编排层)
@@ -39,14 +39,13 @@ mcp/          ← db+stages+metrics+infra  quant-mcp server(编排层)
 
 ### 检索层(core/retrieval)
 
-4 个 Capability-scoped 检索 Contract:
+3 个 Capability-scoped 检索 Contract(R4 已删——冗余判定改平台 Ridge-SVD dLOOCV, 不再本地 IC 空间检索):
 
 | Contract | 服务阶段 | 问什么 |
 |---|---|---|
 | R1 `select_research_object` | Step 0 | 下一只最值得研究的 Factor 是谁 |
 | R2 `search_operator_closure` | S2.6 minimal-repair | distinction 是否已在 N2 闭包内 |
 | R3 `search_factor_realizations` | S3.4 reduction | 新测量是否已被因子库实现过 |
-| R4 `search_behavior_neighbors` | Step 4 assess | 新因子在 IC 空间撞到了谁 |
 
 ### 认知协议层(core/cog)
 
@@ -72,7 +71,7 @@ Step 1  cog-protocol:
           → register_operator(算子=资产,4 Gate 过即注册)
 Step 2  write-factor(contract 或修复路径 → .h)
 Step 3  run-factor-agent(submit → check → .xy)
-Step 4  assess(R4 查行为邻居 + 忠实度 + 三维度 + 一票否决)
+Step 4  assess(平台 dLOOCV 查冗余 + 忠实度 + 三维度 + 一票否决)
 Step 5  persist_factor + iteration 归档
 Step 6  汇总 → 换 Research Object 循环
 ```
@@ -92,6 +91,6 @@ Step 6  汇总 → 换 Research Object 循环
 - 探针 .xy 缓存:`/home/lgao/tmp/factor-vec-cache`(QUANT_XY_CACHE 可覆盖)
 - run state:`~/.quant-runs/<run_id>/state.json`
 
-## 检索层 R1-R4 的设计原则
+## 检索层 R1-R3 的设计原则
 
 **Capability-scoped Retrieval**:每个 Contract 先 SQL 硬过滤 capability 约束,再 vec rerank 语义,最后 log coverage。Agent 拿到的是"问什么",不是"搜什么"——防 agent 自己决定该搜什么导致检索偏离职责。
