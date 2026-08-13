@@ -44,21 +44,56 @@ Task({ subagent_type: "cog-assumption-extractor",
 
 **主会话 schema 自检**: 检查每条 assumption 是否有 F(A)=F(B) 形式 + held_equal/collapsed 具体无泛化 + behavioral=UNKNOWN + 无行为词(IC/收益/alpha)。不通过 → 回 assumption-extractor 补。
 
+**⚠️ 写 assumptions 到文件(衔接 S2.2 的前置)**: schema 自检通过后, 主会话把 agent 返回的 assumptions 数组写成一个 JSON 文件:
+```
+Bash: cat > /tmp/assumptions.json << 'EOF'
+<assumptions 数组的 JSON, 直接贴 agent 返回的数组>
+EOF
+```
+这是 S2.2 的 `--assumptions-file` 输入。别跳过这步直接调 evidence_investigate(它会报"需 --assumption 或 --assumptions-file")。
+
 ### S2.2 Evidence Investigation(程序层,1 次 CLI 调用)
 
 ```
 Bash: /home/lgao/quant-venv/bin/python core/cog/evidence_investigate.py \
-      --assumptions-file /tmp/assumptions.json --xname <xname>
+      --assumptions-file /tmp/assumptions.json --xname <xname> 2>/dev/null
 ```
-→ evidence_card JSON,含每条假设的 programmatic_verdict + IC 数据。
 
-evidence_investigate.py 一步到位:加载 14 Raw 探针 → evidence_derive 派生 89 维度 →
-对每条假设做 conditional slice(控制 held_equal 分位,看 collapsed 维度的偏 IC)→
-programmatic_verdict: **SUPPORTS**(假设成立,不派 adjudicator) / **CONTRADICTS**(假设被反驳,派 adjudicator 语义确认) / **UNCLEAR**(模糊,派 adjudicator)。
+⚠️ **`2>/dev/null` 必加**: 脚本的进度日志(`[evidence] 加载...`)走 stderr, JSON 走 stdout。不加 `2>/dev/null` 会让日志混进 JSON,导致 json.load 失败。
 
-读返回的 `summary` + `guidance`:
-- SUPPORTS 的假设:程序化已判,**不派 adjudicator**(省 agent 调用)
-- CONTRADICTS + UNCLEAR 的假设:**逐条派 adjudicator**(保隔离,防自圆其说)
+**输出 JSON schema(固定, 别猜字段名)**:
+
+```json
+{
+  "xname": "<因子名>",
+  "y_col": "<Y 列名>",
+  "n_samples": 4183984,
+  "n_assumptions": 8,
+  "summary": {"CONTRADICTS": N, "SUPPORTS": N, "UNCLEAR": N},
+  "results": [                         ← 每条假设一条, 数组名就叫 results(不是 assumptions)
+    {
+      "assumption_id": "A4",
+      "assumption": "<假设原文前120字>",
+      "matched_held_col": "imb",        ← 程序匹配到的 held_equal 列
+      "matched_collapsed_col": "d_imb", ← 程序匹配到的 collapsed 列
+      "programmatic_verdict": "CONTRADICTS | SUPPORTS | UNCLEAR",
+      "reason": "<判定理由(含 IC 数字)>",
+      "n": 836797,
+      "avg_ic_collapsed": 0.1785,       ← 控制 held 后 collapsed 的偏 IC
+      "avg_ic_held": 0.03,              ← held 列本身的 IC(对照)
+      "per_bin": [{"bin":0, "n":..., "ic_collapsed":..., "ic_held":...}, ...]
+    }
+  ],
+  "guidance": "<一句话: 哪些派 adjudicator>"
+}
+```
+
+**判据(从 results 数组逐条读, 别从 summary 猜)**:
+- `programmatic_verdict == "SUPPORTS"` → 假设成立(控制 held 后 collapsed IC<0.005), **不派 adjudicator**
+- `programmatic_verdict == "CONTRADICTS"` → 假设被反驳(collapsed IC>0.02), **派 adjudicator 做语义确认**
+- `programmatic_verdict == "UNCLEAR"` → 模糊(列匹配不到/样本不足/IC 边界), **派 adjudicator 判定**
+
+**主会话动作**: 从 `results` 里筛出 `programmatic_verdict ∈ {CONTRADICTS, UNCLEAR}` 的假设, 只对它们派 adjudicator。SUPPORTS 的直接跳过。
 
 ### S2.3 Adjudicator(派 agent,只派 CONTRADICTS + UNCLEAR)
 ```

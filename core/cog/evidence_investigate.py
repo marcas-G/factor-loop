@@ -193,7 +193,7 @@ def investigate(assumptions: list[dict], xname: str, y_horizon: str = "1") -> di
                 "assumption_id": aid,
                 "programmatic_verdict": "UNCLEAR",
                 "reason": f"无法匹配列(held={held_col}, collapsed={collapsed_col}),需 adjudicator",
-                "matched_held": held_col, "matched_collapsed": collapsed_col,
+                "matched_held_col": held_col, "matched_collapsed_col": collapsed_col,
             })
             continue
 
