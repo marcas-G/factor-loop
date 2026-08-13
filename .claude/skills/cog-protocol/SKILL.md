@@ -44,16 +44,27 @@ Task({ subagent_type: "cog-assumption-extractor",
 
 **主会话 schema 自检**: 检查每条 assumption 是否有 F(A)=F(B) 形式 + held_equal/collapsed 具体无泛化 + behavioral=UNKNOWN + 无行为词(IC/收益/alpha)。不通过 → 回 assumption-extractor 补。
 
-### S2.2 Evidence Investigation(程序层)
-1. **bridge_validator Gate C**(程序): `validate_bridge(assumption, evidence_test)` 验 evidence 对应 assumption
-2. **evidence_query_compiler**(程序): `compile_query(assumption, factor_xname)` → contract + bindings
-3. **probe**(程序): `execute_query` 用 xycache 原始字段透传探针(RawBidSize0 等)→ evidence_card
-4. **evidence_derive**(程序, 按需): 派生机制维度(mid/spread/imb/burst/run/phase/episode)
+### S2.2 Evidence Investigation(程序层,1 次 CLI 调用)
 
-### S2.3 Adjudicator(派 agent)
+```
+Bash: /home/lgao/quant-venv/bin/python core/cog/evidence_investigate.py \
+      --assumptions-file /tmp/assumptions.json --xname <xname>
+```
+→ evidence_card JSON,含每条假设的 programmatic_verdict + IC 数据。
+
+evidence_investigate.py 一步到位:加载 14 Raw 探针 → evidence_derive 派生 89 维度 →
+对每条假设做 conditional slice(控制 held_equal 分位,看 collapsed 维度的偏 IC)→
+programmatic_verdict: **SUPPORTS**(假设成立,不派 adjudicator) / **CONTRADICTS**(假设被反驳,派 adjudicator 语义确认) / **UNCLEAR**(模糊,派 adjudicator)。
+
+读返回的 `summary` + `guidance`:
+- SUPPORTS 的假设:程序化已判,**不派 adjudicator**(省 agent 调用)
+- CONTRADICTS + UNCLEAR 的假设:**逐条派 adjudicator**(保隔离,防自圆其说)
+
+### S2.3 Adjudicator(派 agent,只派 CONTRADICTS + UNCLEAR)
 ```
 Task({ subagent_type: "cog-equivalence-adjudicator",
-  prompt: "assumption:\n" + <assumption> + "\nevidence_card:\n" + <evidence_card>
+  prompt: "assumption:\n" + <contradicts_assumption>
+        + "\nevidence_card:\n" + <对应 evidence 结果>
 })
 ```
 → 四档: CONTRADICTS / CONSISTENT / INSUFFICIENT / OOD

@@ -83,6 +83,43 @@ def run_load(run_id: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _cur_get(cur, k):
+    """从 dict 或 list 按 key/index 取值;不存在返回 None。"""
+    if isinstance(cur, list):
+        if not k.isdigit():
+            raise TypeError(f"list 索引必须是数字,得到 '{k}'")
+        idx = int(k)
+        if 0 <= idx < len(cur):
+            return cur[idx]
+        return None
+    return cur.get(k)
+
+
+def _cur_set(cur, k, value):
+    """向 dict 或 list 按 key/index 写值。"""
+    if isinstance(cur, list):
+        if not k.isdigit():
+            raise TypeError(f"list 索引必须是数字,得到 '{k}'")
+        cur[int(k)] = value
+    else:
+        cur[k] = value
+
+
+def _cur_init_child(cur, k, is_next_numeric):
+    """若 cur[k] 不存在,初始化为 list 或 dict。返回 child。"""
+    if isinstance(cur, list):
+        idx = int(k)
+        # 列表只能向后 append,不支持任意位置空槽;调方需保证 idx 在范围内
+        if idx == len(cur):
+            cur.append([] if is_next_numeric else {})
+        elif idx > len(cur):
+            raise IndexError(f"list 跳跃式下标 {idx} > len {len(cur)}")
+        return cur[idx]
+    if cur.get(k) is None:
+        cur[k] = [] if is_next_numeric else {}
+    return cur[k]
+
+
 def _set_by_path(obj, dotted_path: str, value) -> None:
     parts = dotted_path.split(".")
     cur = obj
@@ -90,12 +127,25 @@ def _set_by_path(obj, dotted_path: str, value) -> None:
         k = parts[i]
         next_key = parts[i + 1]
         is_next_numeric = next_key.isdigit()
-        if cur.get(k) is None:
-            cur[k] = [] if is_next_numeric else {}
-        if not isinstance(cur[k], (dict, list)):
-            raise TypeError(f"路径 {'.'.join(parts[:i + 1])} 已是 {type(cur[k]).__name__},不能下钻")
-        cur = cur[k]
-    cur[parts[-1]] = value
+        child = _cur_get(cur, k)
+        if child is None:
+            child = _cur_init_child(cur, k, is_next_numeric)
+        elif not isinstance(child, (dict, list)):
+            raise TypeError(f"路径 {'.'.join(parts[:i + 1])} 已是 {type(child).__name__},不能下钻")
+        cur = child
+    last = parts[-1]
+    # 末段: list 末端用 int 索引写, dict 用 key 写
+    if isinstance(cur, list):
+        if not last.isdigit():
+            raise TypeError(f"list 索引必须是数字,得到 '{last}'")
+        # list 长度足够才能写
+        idx = int(last)
+        if idx < len(cur):
+            cur[idx] = value
+        else:
+            raise IndexError(f"末端下标 {idx} 超出 list 长度 {len(cur)}")
+    else:
+        cur[last] = value
 
 
 def _do_run_save(run_id: str, patch: dict) -> dict:
