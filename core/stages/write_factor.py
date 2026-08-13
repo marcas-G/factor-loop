@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""write-factor 纯函数(吸收 runtime/stages/write-factor.mjs)。
+r"""write-factor 纯函数(吸收 runtime/stages/write-factor.mjs)。
 
 新 pipeline 里 .h 生成由 write-factor skill(Claude)做,这里只提供 submit 阶段需要的辅助函数。
 """
