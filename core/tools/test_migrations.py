@@ -95,16 +95,12 @@ def test_ideas_necessity_fields_migrated():
     print("✓ ideas 必然假设 6 列迁移补齐(py 端历史漂移修复)")
 
 
-def test_py_mjs_version_in_sync():
-    """py CURRENT_VERSION == mjs CURRENT_SCHEMA_VERSION(双端防漂移核心断言)。"""
-    mjs = (Path(__file__).resolve().parents[2] /
-           "runtime" / "lib" / "factor-db.mjs").read_text(encoding="utf-8")
-    m = re.search(r"CURRENT_SCHEMA_VERSION\s*=\s*(\d+)", mjs)
-    assert m, "mjs 未找到 CURRENT_SCHEMA_VERSION 常量"
-    mjs_ver = int(m.group(1))
-    assert mjs_ver == migrations.CURRENT_VERSION, \
-        f"双端版本漂移: py={migrations.CURRENT_VERSION} mjs={mjs_ver}"
-    print(f"✓ 双端版本同步 py = mjs = {migrations.CURRENT_VERSION}")
+def test_current_version_valid():
+    """node 端已删除(全量迁 python),CURRENT_VERSION 只需是正整数且迁移链完整。"""
+    assert migrations.CURRENT_VERSION >= 15, "CURRENT_VERSION 应 ≥ 15(检索层)"
+    assert len(migrations.MIGRATIONS) == migrations.CURRENT_VERSION, \
+        f"迁移链 {len(migrations.MIGRATIONS)} 项 ≠ CURRENT_VERSION {migrations.CURRENT_VERSION}"
+    print(f"✓ CURRENT_VERSION={migrations.CURRENT_VERSION},迁移链 {len(migrations.MIGRATIONS)} 项完整")
 
 
 TESTS = [
@@ -112,7 +108,7 @@ TESTS = [
     test_migrate_idempotent,
     test_prehistoric_db_migrated_to_current,
     test_ideas_necessity_fields_migrated,
-    test_py_mjs_version_in_sync,
+    test_current_version_valid,
 ]
 
 

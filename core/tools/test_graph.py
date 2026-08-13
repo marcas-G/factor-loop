@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from core.db import db
 
 _BASE_DDLS = [
-    "CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, parent_idea_id INTEGER, status TEXT, argument_chain TEXT, necessity_grade TEXT)",
+    "CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, parent_idea_id INTEGER, status TEXT, argument_chain TEXT, necessity_grade TEXT, node_layer TEXT, angle_code TEXT)",
     "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
     "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, idea_id INTEGER, deprecated_at TIMESTAMP)",
 ]
