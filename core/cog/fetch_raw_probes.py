@@ -15,7 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # 项目根
 from core.platform.featuretool_common import ensure_cookie, fetch, base_url, HOST
 
 from core.config import CACHE_ROOT  # noqa: E402  单一真相缓存路径
-PROBES = ["RawBidSize0", "RawAskSize0", "RawBidPrice0", "RawAskPrice0"]
+PROBES = [
+    "RawBidSize0", "RawBidSize1", "RawBidSize2", "RawBidSize3", "RawBidSize4",
+    "RawAskSize0", "RawAskSize1", "RawAskSize2", "RawAskSize3", "RawAskSize4",
+    "RawBidPrice0", "RawAskPrice0",
+    "RawOI", "RawTotalVolume",
+]
 
 APP = "default"
 cookie = ensure_cookie(app=APP)
