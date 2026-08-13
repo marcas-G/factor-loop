@@ -163,3 +163,5 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 - 不要直接用 Write/Edit 写因子 `.h` 文件（只有 write-factor skill 通过它的内部流程做）
 - 不要用 SDK 风格的 `forkSession`（Claude Code 没有；每个 factor 的隔离靠 run-factor-agent 子代理）
 - 不要在主会话里跑 write/submit/check（必须派给 run-factor-agent 子代理）
+- **❌ 绝对禁止 kill MCP server 进程**(quant-mcp 是 stdio server,Claude Code 管理其生命周期)。stdio server 被 kill 后不会自动重连——kill 会导致 quant-mcp 工具全部不可用,主会话陷入死循环误调其他工具。如需重连:让用户 `/mcp` reconnect 或 `/exit` 重开 session。
+- **❌ 禁止 kill 自己依赖的任何 MCP server 进程**。改了 MCP server 源码后,代码在下次 session 重启时自然生效,不要主动 kill。
