@@ -35,7 +35,7 @@ Bash: python3 core/cog/inputs.py --factor <xname>
 ```
 Task({ subagent_type: "cog-assumption-extractor",
   prompt: "construction_view:\n" + <construction_view>
-        + "\n必读: core/cog/investigation/TRADING_WORLD_MODEL.md"
+        + "\n必读: .claude/agents/cog/TRADING_WORLD_MODEL.md"
 })
 ```
 → assumptions[](拆前置假设 + 认知盲区, 遍历输入/参与者/结构三维度, 不锚定公式单一方向)

@@ -8,7 +8,7 @@
 - tempo 族: burst_score / run_length / phase_raw
 - 事件推断族(自推断, 透明可控): cancel_proxy / add_proxy / trade_proxy / spoof_signature / pressure_source
 
-基于 TRADING_WORLD_MODEL §3(事件语义)/§4(价格形成)/§6(时间结构)。
+基于 TRADING_WORLD_MODEL(.claude/agents/cog/TRADING_WORLD_MODEL.md)§3(事件语义)/§4(价格形成)/§6(时间结构)。
 """
 import sys
 from pathlib import Path
