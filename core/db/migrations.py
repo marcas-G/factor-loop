@@ -25,6 +25,9 @@
   v15 retrieval_tables  检索层派生表(R1-R4 Contract 数据基础):
                   factor_operator_usage(R3 op 通道)/ operator_capability_index+vec(R2)/
                   factor_research_state(R1)/ factor_evidence_rollup(R4+S1)/ library_map VIEW(R1)
+  v16 ridge_svd_fields  factors 冗余度画像列(平台 restest Ridge-SVD):
+                  latest_dloocv_pct(线性净增益主判据)/ latest_r2_x(X空间冗余度)/
+                  latest_res_ic(增量IC)。冗余判定从 R4(IC空间pearson)改为平台 dLOOCV
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -44,7 +47,7 @@ import sqlite3
 from core.db import db
 
 # 与 runtime/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 15
+CURRENT_VERSION = 16
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -140,6 +143,12 @@ def _add_retrieval_tables(conn: sqlite3.Connection) -> None:
     db.ensure_retrieval_tables(conn)
 
 
+def _add_ridge_svd_fields(conn: sqlite3.Connection) -> None:
+    """v16 factors 冗余度画像列(平台 restest Ridge-SVD)。
+    latest_dloocv_pct / latest_r2_x / latest_res_ic。"""
+    db.ensure_ridge_svd_fields(conn)
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -157,6 +166,7 @@ MIGRATIONS = [
     (13, "cohort_meta", _add_cohort_meta),
     (14, "factor_structure", _add_factor_structure),
     (15, "retrieval_tables", _add_retrieval_tables),
+    (16, "ridge_svd_fields", _add_ridge_svd_fields),
 ]
 
 

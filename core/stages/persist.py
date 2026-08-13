@@ -74,6 +74,21 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
     return xname
 
 
+def _aggregate_ridge_svd(metrics: list | None) -> dict | None:
+    """从 ridge_svd metrics 数组聚合单一冗余画像(取主力非@1场景 dLOOCV 最大的)。"""
+    if not metrics:
+        return None
+    main = [m for m in metrics if "@1" not in (m.get("x_col") or "")]
+    if not main:
+        main = metrics
+    best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
+    return {
+        "dloocv_pct": best.get("dLOOCV_pct"),
+        "r2_x": best.get("R2_X"),
+        "res_ic": best.get("res_IC"),
+    }
+
+
 def _extract_metrics(eval_metrics) -> dict:
     """从 eval_metrics 提取 metrics(适配 3 种历史结构)。"""
     if not eval_metrics:
@@ -159,6 +174,8 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
             return {"ok": False, "error": "无法确定 xname(checkResult.features 和 factor.name 都为空)"}
         ts = datetime.now().isoformat()
         eval_metrics = (check_result.get("evidence") or {}).get("eval_metrics") or None
+        ridge_svd = (check_result.get("evidence") or {}).get("ridge_svd") or None
+        ridge_agg = _aggregate_ridge_svd(ridge_svd)
         metrics = _extract_metrics(eval_metrics)
 
         # === 早期否决(不依赖入库数据) ===
@@ -177,7 +194,12 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
                 (verdict.setdefault("key_weaknesses", []).append(
                     "代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决"))
 
-        full_metrics = {**metrics, "eval_metrics": eval_metrics,
+        # ridge_svd 明细塞进 eval_metrics(随 factor_evals.eval_metrics JSON 落库, 审计用)
+        eval_metrics_with_ridge = dict(eval_metrics or {})
+        if ridge_svd:
+            eval_metrics_with_ridge["ridge_svd"] = ridge_svd
+
+        full_metrics = {**metrics, "eval_metrics": eval_metrics_with_ridge,
                         "conditional_returns": (eval_metrics or {}).get("deep_best"),
                         "significant": verdict.get("verdict") == "pass"}
 
@@ -191,6 +213,9 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
             with db.get_conn() as conn:
                 db.add_eval(conn, written, ts, full_metrics, idea_id=idea_id, mode="full",
                             raw_path=check_result.get("checkOutput"), status="evaluated")
+                if ridge_agg:
+                    db.update_factor_ridge_svd(conn, written,
+                                              ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
                 lesson_id = db.add_lesson(conn, "success_pattern", "factor",
                                           _build_success_lesson_text(factor, verdict, eval_metrics),
                                           idea_id=idea_id, factor_xname=written,
@@ -218,6 +243,9 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
             with db.get_conn() as conn:
                 db.add_eval(conn, written, ts, full_metrics, idea_id=idea_id, mode="full",
                             raw_path=check_result.get("checkOutput"), status="dead_end")
+                if ridge_agg:
+                    db.update_factor_ridge_svd(conn, written,
+                                              ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
                 lesson_id = db.add_lesson(conn, "dead_end", "factor",
                                           _build_dead_end_lesson_text(factor, verdict, eval_metrics),
                                           idea_id=idea_id, factor_xname=written,

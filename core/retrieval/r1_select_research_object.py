@@ -151,7 +151,9 @@ def select_research_object(
 
         # ── 候选池 ───────────────────────────────────────────────
         pool = conn.execute(
-            "SELECT xname, angle_code, status, created_ts FROM factors "
+            "SELECT xname, angle_code, status, created_ts, "
+            "       latest_icir, latest_dloocv_pct, latest_r2_x, latest_res_ic "
+            "FROM factors "
             "WHERE deprecated_at IS NULL AND status IN ('evaluated','failed','dead_end') "
             "ORDER BY xname"
         ).fetchall()
@@ -160,7 +162,12 @@ def select_research_object(
         scored = []
         never_selected = 0
         for r in pool:
-            xn, angle, status, created = r["xname"], r["angle_code"], r["status"], r["created_ts"]
+            xn = r["xname"]
+            angle, status = r["angle_code"], r["status"]
+            icir = r["latest_icir"]
+            dloocv = r["latest_dloocv_pct"]
+            r2_x = r["latest_r2_x"]
+            res_ic = r["latest_res_ic"]
             if xn in recently_selected:
                 continue
             if exclude.get("angle") and angle == exclude["angle"]:
@@ -184,11 +191,20 @@ def select_research_object(
             recency = _recency_falloff(last_sel)
             de_prox = _dead_end_proximity(conn, xn, angle)
 
+            # 非线性价值(RunLength 教训): ICIR 强 + X空间不冗余(R2_X低) + 线性增量低(dLOOCV低)
+            # = 可能是非线性信号, 线性冗余判定误杀, 值得换方向/换变换重试
+            nonlinear = 1.0 if (
+                (icir or 0) is not None and abs(icir or 0) >= 0.3
+                and (r2_x is None or (r2_x or 0) < 0.5)
+                and (dloocv is None or (dloocv or 0) < 1.0)
+            ) else 0.0
+
             score = (
                 w["novelty"] * novelty
                 + w["fertility"] * fertility
                 + w["open_q"] * open_q
                 + w["recency"] * recency
+                + w.get("nonlinear_value", 0.10) * nonlinear
                 - w["dead_end_penalty"] * de_prox
             )
             scored.append({
@@ -201,7 +217,14 @@ def select_research_object(
                     "dead_end_proximity": de_prox,
                     "exhaustion": round(exhaustion, 4),
                     "times_selected": times_sel,
+                    "nonlinear_value": bool(nonlinear),
                     "composite": round(score, 4),
+                },
+                "ridge_svd": {
+                    "dloocv_pct": dloocv,
+                    "r2_x": r2_x,
+                    "res_ic": res_ic,
+                    "icir": icir,
                 },
                 "family": fam_detail,
                 "angle_code": angle,
@@ -213,7 +236,12 @@ def select_research_object(
 
         return {
             "selected": top[0]["xname"] if top else None,
-            "alternatives": [{"xname": t["xname"], "score": t["score"]} for t in top[1:]],
+            "alternatives": [
+                {"xname": t["xname"], "score": t["score"],
+                 "rationale": t["rationale"], "ridge_svd": t["ridge_svd"],
+                 "angle_code": t["angle_code"], "status": t["status"]}
+                for t in top[1:]
+            ],
             "rationale": top[0]["rationale"] if top else None,
             "context": {
                 "library_total": stats["total"],

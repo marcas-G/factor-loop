@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS factors (
     latest_icir      REAL,
     latest_sharpe    REAL,
     latest_rank_ic   REAL,
+    -- 冗余度画像(平台 restest Ridge-SVD, 与 latest_icir 对称的最新一次评估)
+    -- 主判据 dLOOCV: >1% 对线性模型显著增量, <0 过拟合, ≈0 无增益
+    latest_dloocv_pct REAL,        -- 对线性模型净增益%(Ridge 近似 Lasso 的 LOOCV 下降%)
+    latest_r2_x      REAL,         -- X 空间冗余度(别人72因子库解释方差, >0.8 高冗余)
+    latest_res_ic    REAL,         -- 去掉库冗余后的增量 IC
     created_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_updated_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deprecated_at    TIMESTAMP,

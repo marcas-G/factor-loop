@@ -1211,6 +1211,43 @@ def ensure_cohort_meta_fields(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE factors ADD COLUMN {col} {decl}")
 
 
+def ensure_ridge_svd_fields(conn: sqlite3.Connection) -> None:
+    """补 factors 冗余度画像列(平台 restest Ridge-SVD)。v16 ridge_svd。
+
+    latest_dloocv_pct: 对线性模型净增益%(主判据, >1 显著增量, <0 过拟合)
+    latest_r2_x:       X 空间冗余度(别人72因子库解释方差, >0.8 高冗余)
+    latest_res_ic:     去掉库冗余后的增量 IC
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    additions = {
+        "latest_dloocv_pct": "REAL",
+        "latest_r2_x": "REAL",
+        "latest_res_ic": "REAL",
+    }
+    for col, decl in additions.items():
+        if col not in cols:
+            conn.execute(f"ALTER TABLE factors ADD COLUMN {col} {decl}")
+
+
+def update_factor_ridge_svd(
+    conn: sqlite3.Connection,
+    xname: str,
+    dloocv_pct: float | None,
+    r2_x: float | None,
+    res_ic: float | None,
+) -> None:
+    """更新 factors 冗余度画像(平台 restest Ridge-SVD)。None = 不覆盖该字段。"""
+    conn.execute(
+        """UPDATE factors SET
+           latest_dloocv_pct = COALESCE(?, latest_dloocv_pct),
+           latest_r2_x = COALESCE(?, latest_r2_x),
+           latest_res_ic = COALESCE(?, latest_res_ic),
+           last_updated_ts = CURRENT_TIMESTAMP
+           WHERE xname = ?""",
+        (dloocv_pct, r2_x, res_ic, xname),
+    )
+
+
 def ensure_angle_candidates_table(conn: sqlite3.Connection) -> None:
     """建 angle_candidates 表(angle 自发现候选记录,防归纳循环)。v9 angle_candidates。"""
     tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
