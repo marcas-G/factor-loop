@@ -57,7 +57,7 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
             (
                 xname,
                 meta.get("class_name") or None,
-                Path(h_file).name,
+                f"factors/{Path(h_file).name}",  # 统一相对项目根格式(与 backfill 一致)
                 meta.get("formula") or None,
                 json.dumps(meta["params"], ensure_ascii=False) if meta.get("params") else None,
                 status,
