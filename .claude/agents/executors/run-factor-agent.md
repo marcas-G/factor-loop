@@ -1,7 +1,7 @@
 ---
 name: run-factor-agent
 description: 单个因子的 write→submit→check→rewrite 状态机执行。被 research-loop skill 通过 Task 工具调起，每个 factor 一个实例（独立 context）。
-tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__platform_submit_factor, mcp__quant-mcp__platform_check_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
+tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__platform_submit_factor, mcp__quant-mcp__platform_check_factor, mcp__quant-mcp__platform_restest_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
 ---
 
 # Run-Factor Agent — 单因子执行状态机
@@ -114,12 +114,11 @@ while True:
        # 工具内部已把完整 evidence + failure_layer 落 state（不经你的手，避免你二次加工丢字段）
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
     3. 如 result.failureLayer == "check_done":
-         # 冗余约束主判据: 跑 restest(Ridge-SVD 对别人大库正交化, 约 6.5 分钟阻塞)
-         Bash: /home/lgao/quant-venv/bin/python core/platform/restest.py \
-               --file <factor_file> --features <class_name> 2>/dev/null
-         # 返回 JSON {ok, feature, metrics:[{x_col,horizon,R2_X,res_IC,dLOOCV_pct}], error?}
-         # 若 ok=true: run_save 落 state.factors[index].evidence.ridge_svd = metrics
-         # 若 ok=false: 不落(assess 标"冗余未检"), 不阻塞 check_done
+         # 冗余约束主判据: 跑 restest(Ridge-SVD 对别人大库正交化, 约 6.5 分钟)
+         调 mcp__quant-mcp__platform_restest_factor {xname, factorFile: <factor_file>, run_id, factor_index: <index>}
+         # 工具内部: 提交→轮询→下载→聚合→落 state.evidence.ridge_svd + ridge_svd_agg
+         # 返回 {ok, dloocv_pct, r2_x, res_ic} 或 {ok:false, error}
+         # 若 ok=false: 不阻塞 check_done(assess 标"冗余未检")
          返回成功结果
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：

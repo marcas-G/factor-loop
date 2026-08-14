@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.mcp import run_store
 from core.metrics import is_all_zero_from_screening
+from core.platform.restest import run_restest, aggregate_ridge_svd
 from core.stages.check import check_factor_programmatic
 from core.stages.rename_factor import rename_factor_h
 from core.stages.submit import submit_factor_programmatic
@@ -137,7 +138,41 @@ def platform_check_factor(xname: str, submitRef: dict, checkOutput: str, run_id:
     return {"failureLayer": result.get("failureLayer"), "summary": result.get("summary")}
 
 
+def platform_restest_factor(xname: str, factorFile: str, run_id: str, factor_index: int) -> dict:
+    """跑平台 restest(Ridge-SVD 冗余分析, 约 6.5 分钟)。工具内部把 ridge_svd 结果落 state, 返回路由信息。
+
+    在 check_done 后调。提交因子到 restest → 轮询到 success → 下载解析 ridge_svd CSV
+    → 聚合(主力场景 max dLOOCV_pct)→ 落 state.factors[index].evidence.ridge_svd。
+    assess 读 ridge_svd 做 dLOOCV 冗余判定。
+    """
+    # 从 state 读 class_name(提交需要, template 类要加 <>)
+    from core.stages.write_factor import extract_class_name_from_h, is_template_class
+    class_name = extract_class_name_from_h(factorFile) or xname
+    features = f"{class_name}<>" if is_template_class(factorFile) else class_name
+
+    result = run_restest(factorFile, features)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error")}
+
+    metrics = result["metrics"]
+    agg = aggregate_ridge_svd(metrics)
+
+    # 落 state(ridge_svd metrics 数组 + 聚合画像)
+    run_store.run_save(run_id, {
+        f"factors.{factor_index}.evidence.ridge_svd": metrics,
+        f"factors.{factor_index}.evidence.ridge_svd_agg": agg,
+    })
+
+    return {
+        "ok": True,
+        "dloocv_pct": agg.get("max_dLOOCV_pct"),
+        "r2_x": agg.get("R2_X"),
+        "res_ic": agg.get("res_IC"),
+    }
+
+
 TOOLS = [
     ("platform_submit_factor", platform_submit_factor),
     ("platform_check_factor", platform_check_factor),
+    ("platform_restest_factor", platform_restest_factor),
 ]
