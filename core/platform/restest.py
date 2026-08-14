@@ -17,7 +17,7 @@ r"""restest 数据链路 —— 平台 Ridge-SVD 冗余分析(冗余约束主判
     result = run_restest("factors/ImbalanceBase.h", "ImbalanceBase")  # 提交+轮询+下载+解析
     # result = {"ok": True, "feature": "...", "metrics": {"R2_X":..., "res_IC":..., "dLOOCV_pct":...}}
 
-restest 提交 → 平台跑 Ridge-SVD DAG(约 6.5 分钟)→ 下载 ridge_svd CSV → 解析。
+restest 提交 → 平台跑 Ridge-SVD DAG(活跃因子实测可达 ~17 分钟)→ 下载 ridge_svd CSV → 解析。
 失败(提交失败/超时/下载失败)不抛, 返回 ok=False + reason, 调用方降级。
 """
 from __future__ import annotations
@@ -39,7 +39,8 @@ from core.platform.featuretool_common import (
 from core.stages.write_factor import extract_class_name_from_h, is_template_class
 
 APP = "default_test"
-RESTEST_TIMEOUT_SEC = 600   # Ridge-SVD DAG 约 6.5 分钟, 给 10 分钟兜底
+RESTEST_TIMEOUT_SEC = 1200  # Ridge-SVD DAG 实测活跃因子可达 ~17 分钟(600s 会超时但任务仍在后台跑完), 给 20 分钟兜底
+TASK_APPEAR_TIMEOUT_SEC = 300  # 提交后任务出现在主页的等待窗口。实测 303 后任务秒级建出(同秒就 running); 300s 足够, 主要兜底平台偶发排队。早期版本误判"超窗失败"的真正原因是匹配用裸类名漏了参数后缀(见 submit_restest 注释), 非窗口过小。
 POLL_INTERVAL_SEC = 30
 
 
@@ -82,17 +83,22 @@ def submit_restest(factor_file: str, features: str) -> dict:
     _post_submit(cookie, f"{bu}/submit_restest", factor_file, features,
                  {"_formkey": formkey, "_formname": "default"})
 
-    # 提交后从主页找 <factor>_restest_ 开头的任务(web2py 建 DAG run 需几秒, 重试几次)
-    # feature 名形如 ImbalanceBase_restest_SHFE_AG_SHFE_AG.1_SHFE_AU_SHFE_AU.1
-    # 注意: 主页 feature 名不含 <> (平台用 .h stem), 匹配用裸类名
-    stem = class_name
-    for _ in range(10):
+    # 提交后从主页找 <stem>_restest_ 开头的任务。
+    # ⚠️ 主页 feature 名用 .h 文件 stem(带参数后缀), 形如:
+    #   DepthAsymBucketGate_W500G4_restest_SHFE_AG_SHFE_AG.1_SHFE_AU_SHFE_AU.1
+    # 不是裸类名! 裸类名 "DepthAsymBucketGate_restest" 在主页不存在(中间隔着 _W500G4)→
+    # 永远匹配不到 → 误判"超窗失败"而任务其实秒级就建出。必须用带参数的 stem, 与 check
+    # (feature_key = Path(factor_file).stem, startswith 匹配)保持一致。
+    # 主页 feature 名不含 <> (平台用 .h stem 注册)。
+    stem = Path(factor_file).stem
+    deadline = time.time() + TASK_APPEAR_TIMEOUT_SEC
+    while time.time() < deadline:
         html = fetch(f"{bu}/index", cookie)
         m = re.search(rf"{re.escape(stem)}_restest_[A-Za-z0-9._,]+", html)
         if m:
             return {"ok": True, "feature": m.group(0)}
-        time.sleep(2)
-    return {"ok": False, "error": f"提交后 20 秒内未在主页找到 {features}_restest 任务"}
+        time.sleep(POLL_INTERVAL_SEC)
+    return {"ok": False, "error": f"提交后 {TASK_APPEAR_TIMEOUT_SEC} 秒内未在主页找到 {stem}_restest 任务(POST 已 303 到 index, 任务未出现在主页)"}
 
 
 def _latest_task(feature: str) -> dict | None:
@@ -176,8 +182,17 @@ def download_ridge_svd(feature: str, run_id: str) -> dict:
 
 
 def run_restest(factor_file: str, features: str) -> dict:
-    """提交 + 轮询 + 下载 + 解析, 一步到位。返回 {ok, feature?, metrics?, error?}。"""
-    sub = submit_restest(factor_file, features)
+    """提交 + 轮询 + 下载 + 解析, 一步到位。返回 {ok, feature?, metrics?, error?}。
+
+    提交重试: 平台 POST 成功(303)但任务偶发不出现在主页(管道抖动/排队丢失), 重提一次。
+    实测大部分提交秒级建出, 少数(~一次/几次)建不出, 重提即恢复。与 check 的有界重试同源。
+    """
+    sub = None
+    for attempt in (1, 2):
+        sub = submit_restest(factor_file, features)
+        if sub.get("ok"):
+            break
+        # 提交失败: 重试一次(若是匹配/网络问题重试无益, 但"任务没出现"属偶发, 重提常恢复)
     if not sub.get("ok"):
         return sub
     feature = sub["feature"]
