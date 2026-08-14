@@ -29,12 +29,10 @@ __pycache__/
 # ===== 不属于本循环仓库的独立子项目(各自管理)=====
 /factor_viewer/
 /sdk-demo/
-/data-lens-mcp/
 /factor-pipeline/
 /林劲展/
 
 # ===== 不属于循环的本地 skill / 配置 =====
-.claude/skills/data-lens/
 .claude/skills/onboard-factors/
 .claude/skills/html-report-gen/
 .claude/settings.json
