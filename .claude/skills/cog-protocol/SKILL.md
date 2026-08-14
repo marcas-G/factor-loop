@@ -44,11 +44,10 @@ Task({ subagent_type: "cog-assumption-extractor",
 
 **主会话 schema 自检**: 检查每条 assumption 是否有 F(A)=F(B) 形式 + held_equal/collapsed 具体无泛化 + behavioral=UNKNOWN + 无行为词(IC/收益/alpha)。不通过 → 回 assumption-extractor 补。
 
-**⚠️ 写 assumptions 到文件(衔接 S2.2 的前置)**: schema 自检通过后, 主会话把 agent 返回的 assumptions 数组写成一个 JSON 文件:
+**⚠️ 写 assumptions 到文件(衔接 S2.2 的前置)**: schema 自检通过后, 主会话把 agent 返回的 assumptions 数组写成一个 JSON 文件。**注意: 必须写到项目内路径(WWrite 工具默认禁止写 /tmp)**:
 ```
-Bash: cat > /tmp/assumptions.json << 'EOF'
-<assumptions 数组的 JSON, 直接贴 agent 返回的数组>
-EOF
+Write: .tmp/assumptions.json
+内容: <assumptions 数组的 JSON, 直接贴 agent 返回的数组>
 ```
 这是 S2.2 的 `--assumptions-file` 输入。别跳过这步直接调 evidence_investigate(它会报"需 --assumption 或 --assumptions-file")。
 
@@ -56,7 +55,7 @@ EOF
 
 ```
 Bash: /home/lgao/quant-venv/bin/python core/cog/evidence_investigate.py \
-      --assumptions-file /tmp/assumptions.json --xname <xname> 2>/dev/null
+      --assumptions-file .tmp/assumptions.json --xname <xname> 2>/dev/null
 ```
 
 ⚠️ **`2>/dev/null` 必加**: 脚本的进度日志(`[evidence] 加载...`)走 stderr, JSON 走 stdout。不加 `2>/dev/null` 会让日志混进 JSON,导致 json.load 失败。
