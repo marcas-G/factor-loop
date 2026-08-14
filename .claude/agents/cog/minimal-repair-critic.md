@@ -121,6 +121,8 @@ Phase 4 关闭 N3 后,动态 distinction 大量进 Phase 5。Phase 5 的 G4(redu
 
 Task prompt 含:current_representation / challenge witness / hypotheses(看 H 预言的 distinction)+ TRADING_WORLD_MODEL.md(机制语义参考)。
 
+**⚠️ 必读: PLATFORM_CAPABILITIES.md**(平台能力边界)。repair_contract 的修复方向必须落在平台可验证范围内(X 侧改公式/门控/变换/基底)。**禁止产出"换 Y 目标"方向**(平台只有 signed 方向收益,不支持 |Y| 幅度目标——硬产出必然 submit fail, 产生误导性 dead_end lesson)。
+
 ## 输出
 
 ```json
@@ -172,6 +174,11 @@ Task prompt 含:current_representation / challenge witness / hypotheses(看 H �
 - `output_composition`: 最终输出怎么组合(如 `regime_sign * (energy - 0.5)`),明确每个信号的乘性/加性/门控角色。
 
 **判据**: repair_contract 填完自问——"如果只给 write-factor 这个 JSON 而不给任何散文,它能否无歧义地写出正确的 .h?" 能 → 通过; 有歧义 → 补字段。
+
+**⚠️ 平台能力边界约束(硬规则)**: repair_contract 的修复方向必须落在 **X 侧**(因子输出设计), 不能要求改 Y。平台评估 Y 只有 signed 方向收益(PriceMid @ 1/5/10/60/300s), **不支持 |Y| 幅度目标 / 自定义 horizon / 自定义 Y 定义**。碰到"信号对方向无信息但对幅度有信息"时:
+- 沉淀 lesson: "X 是幅度/波动率信号, 非方向信号"
+- 产出方向因子时必须**重新编码**——把幅度信息转成方向信号(如:幅度大→反转概率高→输出方向)
+- **禁止硬产出 |Y| 目标因子**(平台无法验证 → submit 必然 fail → 误导性 dead_end lesson)
 
 ## 不要做
 

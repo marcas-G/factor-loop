@@ -125,7 +125,8 @@ Task({ subagent_type: "cog-hypothesis-generator",
 Task({ subagent_type: "cog-minimal-repair-critic",
   prompt: "supported_distinction(Layer1):\n" + <Layer1>
         + "\n原因子 construction_view:\n" + <construction_view>
-        + "\nTRADING_WORLD_MODEL.md §4/§6/§7/§11"
+        + "\n必读: .claude/agents/cog/TRADING_WORLD_MODEL.md §4/§6/§7/§11"
+        + "\n必读: .claude/agents/cog/PLATFORM_CAPABILITIES.md(平台能力边界)"
         + "\nidentifiability: 判 STRUCTURE 后, 同时判 required_object 能否从当前数据域构造(查 OBS001 order identity 等永久边界)"
 })
 ```
