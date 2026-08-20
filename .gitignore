@@ -15,6 +15,7 @@ __pycache__/
 /factor-evaluate-tmp/
 /featuretool-tmp/
 /check-output/
+/default_test/
 /logs/
 /pipeline-py/observe/out/
 *.tar
