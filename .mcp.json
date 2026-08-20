@@ -1,15 +1,11 @@
 {
   "mcpServers": {
     "quant-mcp": {
-      "command": "node",
-      "args": ["/home/lgao/work/factor-autoloop/pipeline-mcp/mcp/server.mjs"],
+      "command": "/home/lgao/quant-venv/bin/python",
+      "args": ["/home/lgao/work/factor-autoloop/core/mcp/server.py"],
       "env": {
         "QUANT_MCP_RUNS_ROOT": "/home/lgao/.quant-runs"
       }
-    },
-    "data-lens": {
-      "command": "node",
-      "args": ["/home/lgao/work/quant/data-lens-mcp/mcp/server.mjs"]
     }
   }
 }

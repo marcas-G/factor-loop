@@ -70,11 +70,11 @@ print('\n'.join(sorted(ev-has)))
 " | while read x; do
   [ -z "$x" ] && continue
   echo "=== refresh $x ==="
-  $PY factor_db/refresh_factor_ic_vectors.py --xname "$x" 2>&1 | tail -2
+  $PY core/tools/refresh_factor_ic_vectors.py --xname "$x" 2>&1 | tail -2
 done
 
 # 重 re-rank
-$PY factor_db/recompute_quality_scores.py
+$PY core/tools/recompute_quality_scores.py
 ```
 
 或 MCP(重启会话后): `mcp__quant-mcp__factor_ic_refresh {xname: "<name>"}` 逐个。
@@ -163,7 +163,7 @@ TurnoverSurpriseTailReversal_s2000p2000r600k2000rr1e-3tt2g15dg50d999, TurnoverDe
 ```bash
 # 重跑这 5 个的 factor_check(平台) → 补 eval_metrics(含 train_test)
 # 然后 re-rank
-/home/lgao/quant-venv/bin/python factor_db/recompute_quality_scores.py
+/home/lgao/quant-venv/bin/python core/tools/recompute_quality_scores.py
 ```
 
 或**接受**(5 个样本维用默认,影响小)。
@@ -225,8 +225,8 @@ print('evaluated 缺 angle_code:', n)
 
 ## 相关
 
-- **quality_score 公式**: `factor_db/db.py` `quality_score_from_parts`
-- **re-rank 脚本**: `factor_db/recompute_quality_scores.py`
-- **refresh 脚本**: `factor_db/refresh_factor_ic_vectors.py`(`--xname`)
+- **quality_score 公式**: `core/db/db.py` `quality_score_from_parts`
+- **re-rank 脚本**: `core/tools/recompute_quality_scores.py`
+- **refresh 脚本**: `core/tools/refresh_factor_ic_vectors.py`(`--xname`)
 - **审查**: 全面数据库审查 2026-07-16(schema v6 / 孤儿0 / 知识图血缘 / quality 一致性全过)
 - **提交**: 7d93b09(quality 理想公式) / 7150857(本补全文档前身)

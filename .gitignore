@@ -21,6 +21,7 @@ __pycache__/
 *.tar.gz
 
 # ===== 数据产物 / 备份 =====
+/data/factor_dashboard.html
 /factors_research.json
 /*_backup.json
 /factors_db_orphan*.json
@@ -29,16 +30,12 @@ __pycache__/
 # ===== 不属于本循环仓库的独立子项目(各自管理)=====
 /factor_viewer/
 /sdk-demo/
-/data-lens-mcp/
 /factor-pipeline/
 /林劲展/
 
-# ===== 不属于循环的本地 skill / 配置 =====
-.claude/skills/data-lens/
-.claude/skills/onboard-factors/
-.claude/skills/html-report-gen/
+# ===== Claude Code 专属配置（skill/agent 已迁出，见 AGENTS.md）=====
 .claude/settings.json
-.claude/CLAUDE.md
+.claude/settings.local.json
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
 
@@ -56,6 +53,7 @@ __pycache__/
 /docs/*
 !/docs/architecture.md
 !/docs/data-backfill.md
+!/docs/research-data-flow.md
 /research/
 /factors/
 /factors_to_import/
@@ -64,3 +62,4 @@ __pycache__/
 # ===== 日志 =====
 *.log
 _tmp_diag.txt
+.tmp/

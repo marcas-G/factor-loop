@@ -162,6 +162,8 @@ run_lane() {
     # 判定:done/paused(正常完成)vs running(到量/异常 → 续传同 run,不丢弃)
     if [ $hit = 1 ]; then
       echo "[$(date +%H:%M:%S)] 车道$lane 第 $round 轮完成(status=$st)→ session 销毁"
+      # marker: 通知前台 watch-loops skill 本轮结束(格式: ts|lane|round|run|status)
+      printf '%s|lane=%s|round=%s|run=%s|status=%s\n' "$(date -u +%FT%TZ)" "$lane" "$round" "$latest" "$st" >> "$LOGROOT/round-done.log"
       resume=""
     else
       latest=$(latest_run)
