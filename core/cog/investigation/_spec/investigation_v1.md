@@ -2,7 +2,7 @@
 
 ## 目标
 
-把 Representation Challenge 转成可被数据实验支持/反驳: 
+把 Representation Challenge 转成可被数据实验支持/反驳:
 `Challenge → Test Contract → Probe → Evidence → Verdict`
 
 v1 硬禁令: 不发明算子 / 不优化 alpha / 每 case ≤2 probe(防 adaptive mining)。

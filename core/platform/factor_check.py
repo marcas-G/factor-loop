@@ -101,7 +101,10 @@ def extract_class_name(h_file):
 def platform_name_to_stem(feature):
     """adapt/default-test: 平台 feature 名=<stem>_test_<feed>, 提取 stem 对齐 check.mjs featureKey(.h stem)。
     无 _test_ 后缀(老平台/兼容)时原样返回。"""
-    return feature.split("_test_")[0] if "_test_" in feature else feature
+    for marker in ("_gpu_csvic_", "_gpu_restest_", "_test_", "_restest_"):
+        if marker in feature:
+            return feature.split(marker)[0]
+    return feature
 
 
 def submit_factor(cookie, h_file, class_name, is_template, template_args, feeds, start_date, end_date):

@@ -37,7 +37,7 @@ Bash: python3 core/cog/factor_profile.py <xname>
 ```
 Task({ subagent_type: "cog-assumption-extractor",
   prompt: "construction_view:\n" + <construction_view>
-        + "\n必读: .claude/agents/cog/TRADING_WORLD_MODEL.md"
+        + "\n必读: .zcode/agents/cog/TRADING_WORLD_MODEL.md"
 })
 ```
 → assumptions[](拆前置假设 + 认知盲区, 遍历输入/参与者/结构三维度, 不锚定公式单一方向)
@@ -124,8 +124,8 @@ Task({ subagent_type: "cog-hypothesis-generator",
 Task({ subagent_type: "cog-minimal-repair-critic",
   prompt: "supported_distinction(Layer1):\n" + <Layer1>
         + "\n原因子 construction_view:\n" + <construction_view>
-        + "\n必读: .claude/agents/cog/TRADING_WORLD_MODEL.md §4/§6/§7/§11"
-        + "\n必读: .claude/agents/cog/PLATFORM_CAPABILITIES.md(平台能力边界)"
+        + "\n必读: .zcode/agents/cog/TRADING_WORLD_MODEL.md §4/§6/§7/§11"
+        + "\n必读: .zcode/agents/cog/PLATFORM_CAPABILITIES.md(平台能力边界)"
         + "\nidentifiability: 判 STRUCTURE 后, 同时判 required_object 能否从当前数据域构造(查 OBS001 order identity 等永久边界)"
 })
 ```

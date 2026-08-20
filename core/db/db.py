@@ -49,6 +49,7 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
 # ============ factors ============
 
 VALID_STATUS = {"draft", "submitted", "evaluated", "failed", "dead_end"}
+VALID_VERDICT = {"pass", "fail"}
 
 # angle_code 自动推断(从 formula/tags 关键词 → angle_ontology code)
 # 解耦 angle 标注与 explore:所有因子落盘时自动标,不依赖 explore 产 idea 才标
@@ -217,11 +218,13 @@ def add_eval(
     mode: str = "full",
     raw_path: str | None = None,
     status: str | None = None,
+    verdict: str | None = None,
 ) -> None:
     """新增评估快照 + 更新 factors 冗余字段。
 
     status: 强制设 factors.status("evaluated"/"dead_end")。None = 不动 status(仅更新最新指标)。
     (对齐 mjs addEval 语义:pass 传 evaluated, fail 传 dead_end, 不传则不碰 status。)
+    verdict: 评估结论("pass"/"fail")。缺省时由 status 推导(evaluated→pass, dead_end→fail)。
     """
     conn.execute(
         """
@@ -239,6 +242,10 @@ def add_eval(
             mode, int(bool(metrics.get("significant", False))), raw_path,
         ),
     )
+    if verdict is None and status is not None:
+        verdict = "pass" if status == "evaluated" else "fail" if status == "dead_end" else None
+    if verdict is not None and verdict not in VALID_VERDICT:
+        raise ValueError(f"verdict must be one of {VALID_VERDICT}, got {verdict!r}")
     if status is not None:
         if status not in VALID_STATUS:
             raise ValueError(f"status must be {VALID_STATUS}, got {status!r}")
@@ -246,13 +253,13 @@ def add_eval(
             """
             UPDATE factors SET
                 latest_ic = ?, latest_icir = ?, latest_sharpe = ?, latest_rank_ic = ?,
-                last_updated_ts = ?, status = ?
+                last_updated_ts = ?, status = ?, verdict = ?
             WHERE xname = ?
             """,
             (
                 metrics.get("ic_mean"), metrics.get("icir"),
                 metrics.get("sharpe"), metrics.get("rank_ic"),
-                ts, status, factor_xname,
+                ts, status, verdict, factor_xname,
             ),
         )
     else:
@@ -260,13 +267,13 @@ def add_eval(
             """
             UPDATE factors SET
                 latest_ic = ?, latest_icir = ?, latest_sharpe = ?, latest_rank_ic = ?,
-                last_updated_ts = ?
+                last_updated_ts = ?, verdict = ?
             WHERE xname = ?
             """,
             (
                 metrics.get("ic_mean"), metrics.get("icir"),
                 metrics.get("sharpe"), metrics.get("rank_ic"),
-                ts, factor_xname,
+                ts, verdict, factor_xname,
             ),
         )
 
@@ -1229,6 +1236,15 @@ def ensure_ridge_svd_fields(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE factors ADD COLUMN {col} {decl}")
 
 
+def ensure_verdict_field(conn: sqlite3.Connection) -> None:
+    """补 factors.verdict 列(评估结论 pass/fail)。v17 verdict_field。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "verdict" not in cols:
+        conn.execute(
+            "ALTER TABLE factors ADD COLUMN verdict TEXT CHECK (verdict IN ('pass','fail'))"
+        )
+
+
 def update_factor_ridge_svd(
     conn: sqlite3.Connection,
     xname: str,
@@ -1630,9 +1646,10 @@ def _days_since(ts) -> float:
 def update_factor_status(conn: sqlite3.Connection, xname: str, status: str) -> None:
     if status not in VALID_STATUS:
         raise ValueError(f"status must be {VALID_STATUS}, got {status!r}")
+    verdict = "pass" if status == "evaluated" else "fail" if status == "dead_end" else None
     conn.execute(
-        "UPDATE factors SET status = ?, last_updated_ts = CURRENT_TIMESTAMP WHERE xname = ?",
-        (status, xname),
+        "UPDATE factors SET status = ?, verdict = ?, last_updated_ts = CURRENT_TIMESTAMP WHERE xname = ?",
+        (status, verdict, xname),
     )
 
 

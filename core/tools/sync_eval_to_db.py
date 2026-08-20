@@ -6,6 +6,7 @@
   - latest_sharpe  ← deepbest.conditional_sharpe
   - latest_rank_ic ← deepbest.daily_rank_ic(daily 分桶,优先);旧 run 回退 rank_ic_max(pooled)
   - status         ← factor_level.keep > 0 ? 'evaluated' : 'dead_end'
+  - verdict        ← factor_level.keep > 0 ? 'pass' : 'fail'
 
 用法:
   python core/tools/sync_eval_to_db.py --run-id <run_id>            # 同步该 run 所有 check_done
@@ -43,16 +44,17 @@ def sync_one(conn, fac) -> dict:
         rank_ic = deep.get("rank_ic_max")
     keep = fl.get("keep", 0)
     status = "evaluated" if keep > 0 else "dead_end"
+    verdict = "pass" if keep > 0 else "fail"
 
     cur = conn.execute(
         "UPDATE factors SET latest_ic=?, latest_icir=?, latest_sharpe=?, "
-        "latest_rank_ic=?, status=?, last_updated_ts=CURRENT_TIMESTAMP WHERE xname=?",
-        (ic, icir, sharpe, rank_ic, status, xname),
+        "latest_rank_ic=?, status=?, verdict=?, last_updated_ts=CURRENT_TIMESTAMP WHERE xname=?",
+        (ic, icir, sharpe, rank_ic, status, verdict, xname),
     )
     return {
         "xname": xname, "updated_rows": cur.rowcount,
         "latest_ic": ic, "latest_icir": icir, "latest_sharpe": sharpe,
-        "latest_rank_ic": rank_ic, "keep": keep, "status": status,
+        "latest_rank_ic": rank_ic, "keep": keep, "status": status, "verdict": verdict,
     }
 
 

@@ -81,5 +81,3 @@ Bash: python3 -c "import sqlite3; c=sqlite3.connect('data/factors.db'); [print(f
 - ❌ 把 trivial_preserve_dims 当新 operator(那是组合)。
 - ❌ 为"系统要产出"降标准。
 - ❌ 跳过 R3 直接拍脑袋判 NOVEL(R3 是查重事实来源)。
-
-

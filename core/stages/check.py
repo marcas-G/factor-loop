@@ -229,12 +229,15 @@ def check_factor_programmatic(factor: dict, submit_result: dict, check_output: s
     if not factor.get("factor_file") and not stem_from_db:
         pass  # 回退 class 名,平台若用 stem 注册将永久 pending(与 mjs 一致)
 
+    csv_task = ((submit_result.get("tasks") or {}).get("csv_ic") or {})
+    task_feature = csv_task.get("feature") or feature_key
+
     # 阻塞等待:factor_check.py 内部 60s 轮询 + max-wait 兜底。
     # agent 只调 1 次,平台没跑完就在 subprocess 里等(不占 agent token)。
     # max-wait=540s(9 分钟,留 60s 给下载分析),run_py timeout=600s 兜底。
     result = run_py(
         FACTOR_CHECK_PY,
-        ["run", "--skip-submit", "--names", feature_key, "--dir", check_output,
+        ["run", "--skip-submit", "--names", task_feature, "--dir", check_output,
          "--mode", "none", "--force", "--max-wait", "540"],
         timeout_sec=600,
     )
@@ -246,7 +249,12 @@ def check_factor_programmatic(factor: dict, submit_result: dict, check_output: s
     # 通用失败分诊(失败容忍)
     tg = None
     try:
-        tg = triage_failure(factor_name=feature_key)
+        tg = triage_failure(
+            factor_name=task_feature,
+            dag_id=(
+                (re.search(r"/dags/([^/]+)/", csv_task.get("job_url") or "") or [None, "GenerateXYsTest"])[1]
+            ),
+        )
     except Exception:
         tg = None
     triage_evidence = None

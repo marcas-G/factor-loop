@@ -131,7 +131,8 @@ def _extract_raw_tail(log_text: str, max_lines: int = 30) -> str:
     return "\n".join(keep[-max_lines:])
 
 
-def triage_failure(factor_name: str, username: str | None = None, host: str = DEFAULT_HOST, max_map_probe: int = 3) -> dict:
+def triage_failure(factor_name: str, username: str | None = None, host: str = DEFAULT_HOST,
+                   max_map_probe: int = 3, dag_id: str = DAG_ID) -> dict:
     """通用失败分诊。失败/无 dag_run 时 ok=False。"""
     creds = _read_creds()
     user = username or (creds.get("username") if creds else None)
@@ -141,7 +142,7 @@ def triage_failure(factor_name: str, username: str | None = None, host: str = DE
 
     # 1. 最新 dag run
     try:
-        body = _curl_get(host, basic, f"/api/v1/dags/{DAG_ID}/dagRuns?limit=100&order_by=-start_date")
+        body = _curl_get(host, basic, f"/api/v1/dags/{dag_id}/dagRuns?limit=100&order_by=-start_date")
         runs = [r for r in (json.loads(body).get("dag_runs") or [])
                 if r.get("dag_run_id", "").startswith(f"{user}-{factor_name}-")]
     except Exception as e:
@@ -156,7 +157,7 @@ def triage_failure(factor_name: str, username: str | None = None, host: str = DE
     # 2. 全部 task instance
     try:
         body = _curl_get(host, basic,
-                         f"/api/v1/dags/{DAG_ID}/dagRuns/{latest['dag_run_id']}/taskInstances")
+                         f"/api/v1/dags/{dag_id}/dagRuns/{latest['dag_run_id']}/taskInstances")
         tis = json.loads(body).get("task_instances") or []
     except Exception as e:
         return _fail("taskinstances_fetch_failed", str(e), latest.get("dag_run_id"))
@@ -193,7 +194,7 @@ def triage_failure(factor_name: str, username: str | None = None, host: str = DE
                 mi = f"?map_index={mi_val}" if mi_val is not None else ""
                 try:
                     log = _curl_get(host, basic,
-                                    f"/api/v1/dags/{DAG_ID}/dagRuns/{latest['dag_run_id']}"
+                    f"/api/v1/dags/{dag_id}/dagRuns/{latest['dag_run_id']}"
                                     f"/taskInstances/{root_task_id}/logs/{ty}{mi}")
                     if log and len(log) > 10 and '"status": 404' not in log:
                         log_blob += "\n" + log

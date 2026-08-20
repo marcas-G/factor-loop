@@ -35,13 +35,15 @@ def build_factor_profile(conn, xname):
     row = conn.execute("""
         SELECT xname, class_name, file_path, formula_text, operator_chain,
                field_bindings, params, angle_code, status, quality_grade,
-               latest_ic, latest_icir, latest_sharpe, latest_rank_ic, intuition
+               latest_ic, latest_icir, latest_sharpe, latest_rank_ic,
+               latest_dloocv_pct, latest_r2_x, latest_res_ic, intuition
         FROM factors WHERE xname=?
     """, (xname,)).fetchone()
     if not row:
         return None
     (xn, cls, fpath, formula, op_chain, bindings, params,
-     angle, status, grade, lic, licir, lsharpe, lrank_ic, _intuition) = row
+     angle, status, grade, lic, licir, lsharpe, lrank_ic,
+     ldloocv, lr2_x, lres_ic, _intuition) = row
 
     # ── Construction View(assumption 唯一输入)──
     # 不含 intuition(解释侧)、不含 latest_ic/icir(evidence)。
@@ -120,6 +122,7 @@ def build_factor_profile(conn, xname):
         "status": status,
         "latest_metrics": {
             "ic": lic, "icir": licir, "sharpe": lsharpe, "rank_ic": lrank_ic,
+            "dloocv_pct": ldloocv, "r2_x": lr2_x, "res_ic": lres_ic,
         },
     }
 
@@ -136,9 +139,10 @@ def build_factor_profile(conn, xname):
                 "factors.field_bindings", "factors.params",
             ],
             "evidence_sources": [
-                "factor_ic_daily", "lessons", "siblings(angle_code)",
+                "factor_ic_daily", "factors.latest_dloocv_pct/latest_r2_x/latest_res_ic",
+                "lessons", "siblings(angle_code)",
             ],
-            "adapter_version": "factor_research_object_adapter_v0",
+            "adapter_version": "factor_research_object_adapter_v1",
             "isolation_guarantee": (
                 "construction_view ∩ evidence_view = ∅; "
                 "A_F=g(Construction(F)) enforced by orchestrator view dispatch; "

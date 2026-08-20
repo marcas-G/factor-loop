@@ -73,6 +73,24 @@ tail -f logs/loops/auto.out
 `data/factors.db`、`check-output/`、`logs/` 等运行数据与产物均不入库(见 `.gitignore`)。
 clone 后用 `core/db/init_db.py` 重建空库即可。
 
+## 因子看板
+
+随时从当前因子库生成一个自包含静态 HTML(不启动服务、不开放端口、不依赖 CDN):
+
+```bash
+python3 core/tools/generate_factor_dashboard.py
+```
+
+默认读取 `data/factors.db`,输出 `data/factor_dashboard.html`。也可以显式指定:
+
+```bash
+python3 core/tools/generate_factor_dashboard.py \
+  --db data/factors.db \
+  --output data/factor_dashboard.html
+```
+
+页面支持搜索、状态/标签筛选、单字段排序、冗余度×预测强度散点、因子详情、评估历史、迭代记录与当前列表 CSV 导出。点击表头按该列排序，再次点击切换升降序；想更新时重新执行同一条命令，再刷新浏览器中的 HTML 文件即可。
+
 ## 分层依赖规则
 
 依赖只能向下,不可向上:

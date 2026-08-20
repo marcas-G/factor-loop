@@ -103,12 +103,42 @@ def test_current_version_valid():
     print(f"✓ CURRENT_VERSION={migrations.CURRENT_VERSION},迁移链 {len(migrations.MIGRATIONS)} 项完整")
 
 
+def test_verdict_field_migrated_and_backfilled():
+    """v17 factors.verdict:老库按 status 回填(pass/fail),未评估保持 NULL,幂等。"""
+    tmp = tempfile.mktemp(suffix=".db")
+    with db.get_conn(tmp) as conn:
+        conn.execute("CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT)")
+        conn.execute("CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT)")
+        conn.execute("INSERT INTO factors VALUES ('PassedFactor', 'evaluated')")
+        conn.execute("INSERT INTO factors VALUES ('DeadEndFactor', 'dead_end')")
+        conn.execute("INSERT INTO factors VALUES ('DraftFactor', 'draft')")
+        migrations.migrate(conn)
+        rows = {
+            r["xname"]: r["verdict"]
+            for r in conn.execute("SELECT xname, verdict FROM factors")
+        }
+        assert rows == {
+            "PassedFactor": "pass",
+            "DeadEndFactor": "fail",
+            "DraftFactor": None,
+        }
+        migrations.migrate(conn)
+        rows2 = {
+            r["xname"]: r["verdict"]
+            for r in conn.execute("SELECT xname, verdict FROM factors")
+        }
+        assert rows2 == rows, "verdict 回填不幂等"
+    Path(tmp).unlink()
+    print("✓ verdict 字段迁移 + 老库回填(pass/fail)通过")
+
+
 TESTS = [
     test_init_new_db_marks_current_version,
     test_migrate_idempotent,
     test_prehistoric_db_migrated_to_current,
     test_ideas_necessity_fields_migrated,
     test_current_version_valid,
+    test_verdict_field_migrated_and_backfilled,
 ]
 
 

@@ -16,7 +16,7 @@ tools: Read
 
 ## ⚠️ 必读:TRADING_WORLD_MODEL.md
 
-读因子前, 先读 `.claude/agents/cog/TRADING_WORLD_MODEL.md`:
+读因子前, 先读 `.zcode/agents/cog/TRADING_WORLD_MODEL.md`:
 - §2 参与者模型(知情 hunter / 做市商 / 散户 / 套保)
 - §3 事件语义字典(字段 → 市场行为)
 - §4 价格形成机制(意图 vs 行动 / 突破级联 / OFI 驱动)

@@ -23,6 +23,8 @@ restest 提交 → 平台跑 Ridge-SVD DAG(活跃因子实测可达 ~17 分钟)�
 from __future__ import annotations
 
 import csv
+import fcntl
+import functools
 import io
 import re
 import subprocess
@@ -42,23 +44,61 @@ APP = "default_test"
 RESTEST_TIMEOUT_SEC = 1200  # Ridge-SVD DAG 实测活跃因子可达 ~17 分钟(600s 会超时但任务仍在后台跑完), 给 20 分钟兜底
 TASK_APPEAR_TIMEOUT_SEC = 300  # 提交后任务出现在主页的等待窗口。实测 303 后任务秒级建出(同秒就 running); 300s 足够, 主要兜底平台偶发排队。早期版本误判"超窗失败"的真正原因是匹配用裸类名漏了参数后缀(见 submit_restest 注释), 非窗口过小。
 POLL_INTERVAL_SEC = 30
+SUBMIT_LOCK_FILE = "/tmp/factor-autoloop-restest-submit.lock"
+
+
+def _serialize_submit(func):
+    """Serialize formkey acquisition and POST across MCP worker processes."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with open(SUBMIT_LOCK_FILE, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    return wrapper
 
 
 def _post_submit(cookie: str, url: str, factor_file: str, features: str,
-                 extra_fields: dict | None = None) -> str:
-    """curl multipart POST 提交, 返回响应 HTML。"""
+                 extra_fields: dict | None = None) -> dict:
+    """curl multipart POST 提交。返回 {ok, html}。
+
+    303 重定向(跟随 -L 后落到 index)不代表提交成功——web2py 表单校验失败
+    (formkey 过期/session 失效/字段错误)同样 303 回 index, 只是任务不建。
+    所以返回 html 供上层在任务未出现时留诊断证据, 不再吞响应。
+    """
     cmd = [
-        "curl", "-s", "-L", "-k", "--max-time", "60",
+        "curl", "-s", "-L", "-k", "--connect-timeout", "10", "--max-time", "60",
         "-b", f"{COOKIE_NAME}={cookie}",
         "-F", f"uploaded_file=@{factor_file}",
         "-F", f"features={features}",
+        "-w", "\n__CURL_META__%{http_code} %{url_effective}",
     ]
     for k, v in (extra_fields or {}).items():
         cmd += ["-F", f"{k}={v}"]
+    cmd.append(url)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    return r.stdout or ""
+    html = r.stdout or ""
+    http_code: str | None = None
+    effective_url: str | None = None
+    marker = "\n__CURL_META__"
+    if marker in html:
+        html, raw_meta = html.rsplit(marker, 1)
+        parts = raw_meta.strip().split(" ", 1)
+        http_code = parts[0] or None
+        effective_url = parts[1] if len(parts) > 1 else None
+    return {
+        "ok": r.returncode == 0,
+        "html": html,
+        "returncode": r.returncode,
+        "stderr": (r.stderr or "").strip()[-500:],
+        "http_code": http_code,
+        "effective_url": effective_url,
+    }
 
 
+@_serialize_submit
 def submit_restest(factor_file: str, features: str) -> dict:
     """提交因子到 restest(Ridge-SVD 冗余分析)。返回 {ok, feature?, error?}。
 
@@ -80,8 +120,19 @@ def submit_restest(factor_file: str, features: str) -> dict:
         return {"ok": False, "error": "submit_restest 页面无 formkey"}
     formkey = fk.group(1)
 
-    _post_submit(cookie, f"{bu}/submit_restest", factor_file, features,
-                 {"_formkey": formkey, "_formname": "default"})
+    post = _post_submit(cookie, f"{bu}/submit_restest", factor_file, features,
+                        {"_formkey": formkey, "_formname": "default"})
+    if not post.get("ok") or post.get("http_code") not in {"200", "201", "202", "204"}:
+        return {
+            "ok": False,
+            "error": (
+                f"restest POST 未成功: rc={post.get('returncode')} "
+                f"http={post.get('http_code')} url={post.get('effective_url')} "
+                f"stderr={post.get('stderr') or '-'} body={len(post.get('html') or '')}B"
+            ),
+        }
+    # web2py 表单校验失败会带 flash 错误回 index(任务不建); 留证据 + 触发重新登录
+    flash_err = re.search(r'class="flash"[^>]*>(.*?)</div>', post.get("html", ""), re.S)
 
     # 提交后从主页找 <stem>_restest_ 开头的任务。
     # ⚠️ 主页 feature 名用 .h 文件 stem(带参数后缀), 形如:
@@ -92,13 +143,31 @@ def submit_restest(factor_file: str, features: str) -> dict:
     # 主页 feature 名不含 <> (平台用 .h stem 注册)。
     stem = Path(factor_file).stem
     deadline = time.time() + TASK_APPEAR_TIMEOUT_SEC
+    last_html_len = 0
     while time.time() < deadline:
         html = fetch(f"{bu}/index", cookie)
+        last_html_len = len(html)
         m = re.search(rf"{re.escape(stem)}_restest_[A-Za-z0-9._,]+", html)
         if m:
             return {"ok": True, "feature": m.group(0)}
+        # session 中途失效: index 不再含 submit 链接 → 强制重登录一次再试(POST 响应
+        # set-cookie 会轮换 session_id, 旧 cookie 在长 run 中途可能被服务端弃用)
+        if "submit?username=" not in html:
+            from core.platform.featuretool_common import save_cookie, do_login, CREDS_FILE
+            import json as _json, os as _os
+            if _os.path.exists(CREDS_FILE):
+                creds = _json.load(open(CREDS_FILE))
+                new_cookie = do_login(creds["username"], creds["password"], app=APP)
+                if new_cookie:
+                    save_cookie(new_cookie)
+                    cookie = new_cookie
+                else:
+                    return {"ok": False, "error": "轮询中发现 session 失效且自动重登录失败"}
         time.sleep(POLL_INTERVAL_SEC)
-    return {"ok": False, "error": f"提交后 {TASK_APPEAR_TIMEOUT_SEC} 秒内未在主页找到 {stem}_restest 任务(POST 已 303 到 index, 任务未出现在主页)"}
+    diag = f"POST resp {len(post.get('html',''))}B flash={bool(flash_err)}"
+    if flash_err:
+        diag += f" flash_err={re.sub(r'<[^>]+>', '', flash_err.group(1)).strip()[:120]}"
+    return {"ok": False, "error": f"提交后 {TASK_APPEAR_TIMEOUT_SEC} 秒内未在主页找到 {stem}_restest 任务({diag}; index {last_html_len}B; formkey {formkey[:8]}…)"}
 
 
 def _latest_task(feature: str) -> dict | None:
@@ -170,13 +239,22 @@ def download_ridge_svd(feature: str, run_id: str) -> dict:
     rows = list(csv.DictReader(io.StringIO(content)))
     metrics = []
     for r in rows:
+        def number(value, caster=float):
+            if value is None or value == "":
+                return None
+            try:
+                return caster(float(value))
+            except (TypeError, ValueError):
+                return None
+
         metrics.append({
             "x_col": r.get("x_col", ""),
-            "horizon": int(float(r["horizon"])) if r.get("horizon") else None,
-            "R2_X": float(r["R2_X"]) if r.get("R2_X") else None,
-            "res_IC": float(r["res_IC"]) if r.get("res_IC") else None,
-            "n": int(float(r["n"])) if r.get("n") else None,
-            "dLOOCV_pct": float(r["dLOOCV_pct"]) if r.get("dLOOCV_pct") else None,
+            "horizon": number(r.get("horizon"), int),
+            "R2_X": number(r.get("R2_X")),
+            "res_IC": number(r.get("res_IC")),
+            "n": number(r.get("n"), int),
+            # GPU ridge_svd disables GCV and intentionally omits this column.
+            "dLOOCV_pct": number(r.get("dLOOCV_pct")),
         })
     return {"ok": True, "metrics": metrics}
 
@@ -184,17 +262,20 @@ def download_ridge_svd(feature: str, run_id: str) -> dict:
 def run_restest(factor_file: str, features: str) -> dict:
     """提交 + 轮询 + 下载 + 解析, 一步到位。返回 {ok, feature?, metrics?, error?}。
 
-    提交重试: 平台 POST 成功(303)但任务偶发不出现在主页(管道抖动/排队丢失), 重提一次。
-    实测大部分提交秒级建出, 少数(~一次/几次)建不出, 重提即恢复。与 check 的有界重试同源。
+    提交重试: 平台 POST 成功(303)但任务偶发不出现在主页(管道抖动/排队丢失/session 失效),
+    重提至多 3 次(每次间隔 60s)。实测大部分提交秒级建出, 重提常恢复。与 check 的有界重试同源。
     """
     sub = None
-    for attempt in (1, 2):
+    errors = []
+    for attempt in (1, 2, 3):
         sub = submit_restest(factor_file, features)
         if sub.get("ok"):
             break
-        # 提交失败: 重试一次(若是匹配/网络问题重试无益, 但"任务没出现"属偶发, 重提常恢复)
+        errors.append(f"attempt{attempt}: {sub.get('error')}")
+        if attempt < 3:
+            time.sleep(60)
     if not sub.get("ok"):
-        return sub
+        return {"ok": False, "error": " | ".join(errors)}
     feature = sub["feature"]
 
     poll = poll_restest(feature)
@@ -207,8 +288,21 @@ def run_restest(factor_file: str, features: str) -> dict:
     return {"ok": True, "feature": feature, "metrics": dl["metrics"]}
 
 
-def aggregate_ridge_svd(metrics: list[dict]) -> dict:
+def run_submitted_restest(feature: str, timeout_sec: int = RESTEST_TIMEOUT_SEC) -> dict:
+    """Wait for an already-submitted ridge_svd task and parse its artifact."""
+    poll = poll_restest(feature, timeout_sec=timeout_sec)
+    if poll["state"] != "success":
+        return {"ok": False, "feature": feature, "error": f"restest 任务状态={poll['state']}"}
+    dl = download_ridge_svd(feature, poll["run_id"])
+    if not dl.get("ok"):
+        return {"ok": False, "feature": feature, "error": dl.get("error")}
+    return {"ok": True, "feature": feature, "metrics": dl["metrics"]}
+
+
+def aggregate_ridge_svd(metrics: list[dict], engine: str = "cpu") -> dict:
     """把 metrics 数组(每 x_col×horizon 一条)聚合成单一冗余判定。
+
+    CPU 结果优先按 dLOOCV_pct 聚合; GPU 结果默认无 dLOOCV,按 |res_IC| 聚合。
 
     取主力(非 @1 次主力)场景中 dLOOCV_pct 最大的(最乐观增量), 作主判据:
       - max_dLOOCV_pct: 所有主力场景的最大 LOOCV 下降%(最乐观)
@@ -217,17 +311,26 @@ def aggregate_ridge_svd(metrics: list[dict]) -> dict:
     返回 {max_dLOOCV_pct, R2_X, res_IC, horizon, x_col}。
     """
     if not metrics:
-        return {"max_dLOOCV_pct": None, "R2_X": None, "res_IC": None, "horizon": None, "x_col": None}
+        return {"max_dLOOCV_pct": None, "R2_X": None, "res_IC": None,
+                "horizon": None, "x_col": None, "engine": engine,
+                "dloocv_available": False}
     main = [m for m in metrics if "@1" not in (m.get("x_col") or "")]
     if not main:
         main = metrics
-    best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
+    has_dloocv = any(m.get("dLOOCV_pct") is not None for m in main)
+    if has_dloocv:
+        best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
+    else:
+        # GPU GCV is disabled; use the strongest residual IC as the summary row.
+        best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
     return {
         "max_dLOOCV_pct": best.get("dLOOCV_pct"),
         "R2_X": best.get("R2_X"),
         "res_IC": best.get("res_IC"),
         "horizon": best.get("horizon"),
         "x_col": best.get("x_col"),
+        "engine": engine,
+        "dloocv_available": has_dloocv,
     }
 
 

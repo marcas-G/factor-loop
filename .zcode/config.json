@@ -1,0 +1,16 @@
+{
+  "mcp": {
+    "servers": {
+      "quant-mcp": {
+        "type": "stdio",
+        "command": "/home/lgao/quant-venv/bin/python",
+        "args": ["/home/lgao/work/factor-autoloop/core/mcp/server.py"],
+        "env": {
+          "QUANT_MCP_RUNS_ROOT": "/home/lgao/.quant-runs"
+        },
+        "enabled": true,
+        "timeoutMs": 60000
+      }
+    }
+  }
+}

@@ -6,4 +6,3 @@
 |---|---|---|
 | SHFE-AG@sqy0_oienergy_depthregime_oi200_dw200_thin0.333_thick0.667 | **1.00** | +0.02 |
 | SHFE-AG@1@sqy0_oienergy_depthregime_oi200_dw200_thin0.333_thick0.667 | +0.02 | **1.00** |
-

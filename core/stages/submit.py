@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 """submit(吸收 runtime/stages/submit.mjs)。
 
-推送到量化平台:subprocess featuretool.py submit。
+推送评估任务:CPU csv_ic 与 GPU ridge_svd 在同一提交阶段并发触发。
 categories 白名单校验(防 P0:angle 标签误填 → DAG failed)。
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-from core.infra.run_py import run_py, parse_json_output
+from core.platform.gpu import submit_csv_and_gpu_ridge
 from core.stages.write_factor import extract_class_name_from_h, is_template_class
-
-SUBMIT_TIMEOUT_SEC = 120
-# featuretool.py 路径(core/platform/)
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FEATURETOOL_PY = str(_PROJECT_ROOT / "core" / "platform" / "featuretool.py")
 
 # 合法品种代码白名单(沪金银铜铝镍,5 品种)。
 # categories 必须是这些代码之一,不是 angle 标签(oi_anomaly/regime_gate 等)。
@@ -58,17 +50,25 @@ def submit_factor_programmatic(factor: dict, factor_file: str) -> dict:
     features = f"{class_name}<>" if is_template_class(factor_file) else class_name
     feeds = _categories_to_feeds(factor.get("categories"))
 
-    args = ["submit", "--file", factor_file, "--features", features, "--json"]
-    if feeds:
-        args += ["--feeds", feeds]
-
-    result = run_py(FEATURETOOL_PY, args, timeout_sec=SUBMIT_TIMEOUT_SEC)
-
-    if result["timed_out"]:
-        return {"ok": False, "features": features, "error": f"submit 超时 ({result['duration_ms']}ms)", "raw": result["stdout"], "attempts": 1}
-    parsed = parse_json_output(result["stdout"])
-    if not parsed:
-        return {"ok": False, "features": features, "error": f"submit 输出非 JSON: {(result['stdout'] or result['stderr'])[:200]}", "raw": result["stdout"], "attempts": 1}
-    if parsed.get("ok") is True and result["exit_code"] == 0:
-        return {"ok": True, "features": parsed.get("features") or features, "raw": json.dumps(parsed, ensure_ascii=False), "attempts": 1}
-    return {"ok": False, "features": parsed.get("features") or features, "error": parsed.get("error") or f"exit={result['exit_code']}", "raw": json.dumps(parsed, ensure_ascii=False), "attempts": 1}
+    result = submit_csv_and_gpu_ridge(
+        factor_file,
+        features,
+        feeds or "SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1",
+    )
+    if result.get("ok"):
+        return {
+            "ok": True,
+            "features": features,
+            "engines": result["engines"],
+            "tasks": result["tasks"],
+            "raw": result,
+            "attempts": 1,
+        }
+    return {
+        "ok": False,
+        "features": features,
+        "error": result.get("error"),
+        "raw": result,
+        "attempts": 1,
+        "failure_layer": "submit_failed",
+    }

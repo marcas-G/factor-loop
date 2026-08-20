@@ -230,6 +230,7 @@ def parse_index(html, app=None):
 
         factors.append({
             "feature": feature,
+            "mode": m.group(2).strip(),
             "job_id": job_id,
             "job_url": job_url,
             "state": state,

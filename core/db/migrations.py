@@ -28,6 +28,8 @@
   v16 ridge_svd_fields  factors 冗余度画像列(平台 restest Ridge-SVD):
                   latest_dloocv_pct(线性净增益主判据)/ latest_r2_x(X空间冗余度)/
                   latest_res_ic(增量IC)。冗余判定从 R4(IC空间pearson)改为平台 dLOOCV
+  v17 verdict_field    factors.verdict(评估结论 pass/fail, 与 status 解耦)。
+                  老库回填:status=evaluated→pass, dead_end→fail。
 
 单一真相:
   - DDL 真相 = schema.sql(全量基线,新库直建到最新)
@@ -47,7 +49,7 @@ import sqlite3
 from core.db import db
 
 # 与 runtime/lib/factor-db.mjs 的 CURRENT_SCHEMA_VERSION 保持一致(test 断言)。
-CURRENT_VERSION = 16
+CURRENT_VERSION = 17
 
 
 def _baseline(conn: sqlite3.Connection) -> None:
@@ -149,6 +151,13 @@ def _add_ridge_svd_fields(conn: sqlite3.Connection) -> None:
     db.ensure_ridge_svd_fields(conn)
 
 
+def _add_verdict_field(conn: sqlite3.Connection) -> None:
+    """v17 factors.verdict(评估结论 pass/fail) + 老库按 status 回填。"""
+    db.ensure_verdict_field(conn)
+    conn.execute("UPDATE factors SET verdict='pass' WHERE status='evaluated' AND verdict IS NULL")
+    conn.execute("UPDATE factors SET verdict='fail' WHERE status='dead_end' AND verdict IS NULL")
+
+
 # (version, name, up) 有序。baseline 在前保证版本号语义完整;每步 up 必须幂等。
 MIGRATIONS = [
     (1, "baseline",     _baseline),
@@ -167,6 +176,7 @@ MIGRATIONS = [
     (14, "factor_structure", _add_factor_structure),
     (15, "retrieval_tables", _add_retrieval_tables),
     (16, "ridge_svd_fields", _add_ridge_svd_fields),
+    (17, "verdict_field", _add_verdict_field),
 ]
 
 

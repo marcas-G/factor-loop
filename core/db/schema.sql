@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS factors (
     params           TEXT,
     status           TEXT NOT NULL
                      CHECK (status IN ('draft','submitted','evaluated','failed','dead_end')),
+    verdict          TEXT CHECK (verdict IN ('pass','fail')),  -- 评估结论(pass/fail),与 status 解耦
     latest_ic        REAL,
     latest_icir      REAL,
     latest_sharpe    REAL,

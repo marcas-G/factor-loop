@@ -34,7 +34,7 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
 本 agent 是 `write → submit → check → 落盘 → return` 状态机。**每步完成后立即下一步 tool call，禁止步骤间输出纯总结后结束回合。**
 
 **write 步内嵌（不调 Skill）**：本 agent **不调用任何 Skill**（tools 里无 Skill）。write 因子时：
-1. `Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md`（获取框架 API / 模板 / 安全 / 命名规范，这是 write-factor 的完整规范）
+1. `Read ${CLAUDE_PROJECT_DIR}/.agents/skills/write-factor/SKILL.md`（获取框架 API / 模板 / 安全 / 命名规范，这是 write-factor 的完整规范）
 2. 按规范用 `Write` 生成 .h 到 `${CLAUDE_PROJECT_DIR}/factors/<name>.h`
    - **必须在 `#pragma once` 前写 frontmatter**（`// ---` YAML 块，含 xname/class_name/formula/tags/params/created_ts）：`formula` 取输入 spec.formula，`tags` 取输入 spec.tags。这是 `addFactorFromHFile` 入库时提取 formula_text/tags 的源头；漏写会导致入库三件套缺失。格式详见 write-factor/SKILL.md 的 frontmatter 规范。
 3. 立即进入 submit 步（run_save submitting + platform_submit_factor）
@@ -74,7 +74,7 @@ while True:
     1. 先 run_load 读 state.factors[index]，重点取：
          - factor.formula ← 因子伪代码 spec
          - factor.repair_contract ← 【认知协议 FACTOR_ITERATION 产出的结构化修复 spec，若存在则优先于 formula】
-    2. Read ${CLAUDE_PROJECT_DIR}/.claude/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
+    2. Read ${CLAUDE_PROJECT_DIR}/.agents/skills/write-factor/SKILL.md（框架 API/模板/安全/命名规范）
        （质量/编译重试时：先 run_load 读 evidence.cause_text+diagnosis，再 Read SKILL.md 的 STL/运行期陷阱段对照修）
     3. 按规范用 Write（首次生成）或 Edit（纠错改现有 .h）写到 ${CLAUDE_PROJECT_DIR}/factors/<name>.h
        ⚠️ 若 factor.repair_contract 存在，必须严格按它翻译（这是硬约束）：
@@ -94,6 +94,7 @@ while True:
 
   elif step == "submit":
     1. 调 mcp__quant-mcp__platform_submit_factor {xname, factorFile, categories, params}
+       # 工具内部同一提交阶段并发发出 CPU csv_ic 与 GPU ridge_svd; result.tasks 保存两条任务引用
     2. 如 result.ok == true:
          step = "check"
          存 submitResult = result
@@ -113,13 +114,15 @@ while True:
     2. 调 mcp__quant-mcp__platform_check_factor {xname, submitRef: submitResult, checkOutput, run_id, factor_index: <index>}
        # 工具内部已把完整 evidence + failure_layer 落 state（不经你的手，避免你二次加工丢字段）
        # 返回值只带 {failureLayer, summary}，不要试图从返回值取 evidence
-    3. 如 result.failureLayer == "check_done":
-         # 冗余约束主判据: 跑 restest(Ridge-SVD 对别人大库正交化, 约 6.5 分钟)
+   3. 如 result.failureLayer == "check_done":
+         # 冗余约束主判据(必做, 不可跳过): 等待 submit 阶段已并发发出的 GPU ridge_svd
          调 mcp__quant-mcp__platform_restest_factor {xname, factorFile: <factor_file>, run_id, factor_index: <index>}
-         # 工具内部: 提交→轮询→下载→聚合→落 state.evidence.ridge_svd + ridge_svd_agg
-         # 返回 {ok, dloocv_pct, r2_x, res_ic} 或 {ok:false, error}
-         # 若 ok=false: 不阻塞 check_done(assess 标"冗余未检")
-         返回成功结果
+         # 工具内部: 轮询已提交 GPU 任务→下载→聚合→落 state.evidence.ridge_svd + ridge_svd_agg
+         # GPU 默认无 dLOOCV_pct; 返回 {ok, dloocv_pct:null, r2_x, res_ic} 或 {ok:false, error}
+         若 ok=false: 再调【第二次】platform_restest_factor(继续/兜底提交并等待, 平台排队抖动跨分钟级恢复)
+         若仍 ok=false: run_save 记 {"factors.<i>.retry_trace": [...已有, "restest 最终失败: <error>"]} 后才可返回——
+         restest 是 check_done 的必做收尾, 不允许静默放弃; assess 将标"冗余未检"并压低 verdict 置信度
+         返回成功结果(含 r2_x/res_ic;dloocv_pct 为 null 是 GPU 正常口径)
        else:
          按 failureLayer 决定（三类 budget 独立扣减，见状态机头部）：
            "compile_failed" / "factor_runtime_crash" / "factor_runtime_error"
@@ -211,7 +214,7 @@ run_save {
 - **不要**用 Bash 调 factor-cli.mjs 或直接跑 python 平台脚本
 - **不调任何 Skill**（tools 里无 Skill）。write 因子 = `Read write-factor/SKILL.md` 规范 → `Write`/`Edit` .h（write 能力来自 Read 规范 + 自己写，不是 Skill 调用 —— 这消除了断流根因）
 - **不要**直接读写 state.json（用 mcp__quant-mcp__run_save 写、mcp__quant-mcp__run_load 读 evidence 诊断）
-- **只调**：Read / Edit / Write / Glob / Grep / mcp__quant-mcp__platform_submit_factor / mcp__quant-mcp__platform_check_factor / mcp__quant-mcp__run_save / mcp__quant-mcp__run_load
+- **只调**：Read / Edit / Write / Glob / Grep / mcp__quant-mcp__platform_submit_factor / mcp__quant-mcp__platform_check_factor / mcp__quant-mcp__platform_restest_factor / mcp__quant-mcp__run_save / mcp__quant-mcp__run_load
 
 ## 错误处理
 

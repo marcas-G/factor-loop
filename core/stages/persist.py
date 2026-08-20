@@ -2,8 +2,8 @@
 """DB 写入:verdict 决定写哪些表(吸收 runtime/stages/persist.mjs)。
 
 策略:
-  verdict=pass → factors(status=evaluated)+ factor_evals + success_pattern lesson + 支持度
-  verdict=fail → factors(status=dead_end)+ factor_evals + dead_end lesson + 支持度
+  verdict=pass → factors(status=evaluated, verdict=pass)+ factor_evals + success_pattern lesson + 支持度
+  verdict=fail → factors(status=dead_end, verdict=fail)+ factor_evals + dead_end lesson + 支持度
 失败因子(submit_failed/platform_*/check_failed)→ 不调本函数,靠 state.json 留痕。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ GEN_ANCHOR = str(_PROJECT_ROOT / "core" / "tools" / "ai_generate_anchor.py")
 
 
 def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str = "draft",
-                           intuition: str | None = None) -> str | None:
+                           intuition: str | None = None, verdict: str | None = None) -> str | None:
     """从 .h frontmatter 提取 meta → INSERT factors。返回 xname 或 None。"""
     text = Path(h_file).read_text(encoding="utf-8", errors="replace")
     meta = pf.parse_frontmatter(text) or {}
@@ -44,16 +44,21 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
     with db.get_conn() as conn:
         exists = conn.execute("SELECT 1 FROM factors WHERE xname = ?", (xname,)).fetchone()
         if exists:
+            updates = ["last_updated_ts = CURRENT_TIMESTAMP"]
+            params: list = []
             if meta.get("formula"):
-                conn.execute(
-                    "UPDATE factors SET formula_text = ?, last_updated_ts = CURRENT_TIMESTAMP WHERE xname = ?",
-                    (meta.get("formula"), xname),
-                )
+                updates.append("formula_text = ?")
+                params.append(meta.get("formula"))
+            if verdict:
+                updates.append("verdict = ?")
+                params.append(verdict)
+            params.append(xname)
+            conn.execute(f"UPDATE factors SET {', '.join(updates)} WHERE xname = ?", params)
             return xname
         conn.execute(
             """INSERT INTO factors
-               (xname, class_name, file_path, formula_text, params, status, created_ts, intuition)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (xname, class_name, file_path, formula_text, params, status, verdict, created_ts, intuition)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 xname,
                 meta.get("class_name") or None,
@@ -61,6 +66,7 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
                 meta.get("formula") or None,
                 json.dumps(meta["params"], ensure_ascii=False) if meta.get("params") else None,
                 status,
+                verdict,
                 meta.get("created_ts") or datetime.now().isoformat()[:10],
                 meta.get("intuition") or intuition,
             ),
@@ -75,17 +81,23 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
 
 
 def _aggregate_ridge_svd(metrics: list | None) -> dict | None:
-    """从 ridge_svd metrics 数组聚合单一冗余画像(取主力非@1场景 dLOOCV 最大的)。"""
+    """Aggregate ridge_svd rows; GPU rows omit dLOOCV by design."""
     if not metrics:
         return None
     main = [m for m in metrics if "@1" not in (m.get("x_col") or "")]
     if not main:
         main = metrics
-    best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
+    has_dloocv = any(m.get("dLOOCV_pct") is not None for m in main)
+    if has_dloocv:
+        best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
+    else:
+        best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
     return {
         "dloocv_pct": best.get("dLOOCV_pct"),
         "r2_x": best.get("R2_X"),
         "res_ic": best.get("res_IC"),
+        "engine": "gpu" if not has_dloocv else "cpu",
+        "dloocv_available": has_dloocv,
     }
 
 
@@ -126,8 +138,6 @@ def _build_success_lesson_text(factor, verdict, eval_metrics) -> str:
 def _build_dead_end_lesson_text(factor, verdict, eval_metrics) -> str:
     f = (eval_metrics or {}).get("factor_level") or {}
     deep = (eval_metrics or {}).get("deep_best") or {}
-    reasons = (eval_metrics or {}).get("failure_reasons") or {}
-    top_reasons = ", ".join(f"{k}({v})" for k, v in sorted(reasons.items(), key=lambda x: -x[1])[:3])
     weaknesses = "; ".join(verdict.get("key_weaknesses") or [])
     return "\n".join([
         f"[dead_end] {factor.get('name')}",
@@ -135,7 +145,6 @@ def _build_dead_end_lesson_text(factor, verdict, eval_metrics) -> str:
         f"X-Y 对: {f.get('n_pairs') or '?'} 个 (keep={f.get('keep') or 0}, watch={f.get('watch') or 0}, reject={f.get('reject') or 0})",
         f"deep: conditional_sharpe={deep.get('conditional_sharpe') if deep.get('conditional_sharpe') is not None else '?'} "
         f"monthly_icir={deep.get('monthly_icir') if deep.get('monthly_icir') is not None else '?'}",
-        f"主要失败原因: {top_reasons or '(无)'}",
         f"弱项: {weaknesses}",
         f"建议迭代: {verdict.get('suggested_iteration') or '(无)'}",
     ])
@@ -175,7 +184,8 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
         ts = datetime.now().isoformat()
         eval_metrics = (check_result.get("evidence") or {}).get("eval_metrics") or None
         ridge_svd = (check_result.get("evidence") or {}).get("ridge_svd") or None
-        ridge_agg = _aggregate_ridge_svd(ridge_svd)
+        ridge_agg = ((check_result.get("evidence") or {}).get("ridge_svd_agg")
+                     or _aggregate_ridge_svd(ridge_svd))
         metrics = _extract_metrics(eval_metrics)
 
         # === 早期否决(不依赖入库数据) ===
@@ -194,17 +204,22 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
                 (verdict.setdefault("key_weaknesses", []).append(
                     "代码兜底:deepbest 全 None(第二/三维数据缺)+ ICIR<3,评估不全硬否决"))
 
+        final_verdict = verdict.get("verdict")
+
         # ridge_svd 明细塞进 eval_metrics(随 factor_evals.eval_metrics JSON 落库, 审计用)
         eval_metrics_with_ridge = dict(eval_metrics or {})
         if ridge_svd:
             eval_metrics_with_ridge["ridge_svd"] = ridge_svd
+            if ridge_agg:
+                eval_metrics_with_ridge["ridge_svd_agg"] = ridge_agg
 
         full_metrics = {**metrics, "eval_metrics": eval_metrics_with_ridge,
                         "conditional_returns": (eval_metrics or {}).get("deep_best"),
-                        "significant": verdict.get("verdict") == "pass"}
+                        "significant": final_verdict == "pass"}
 
-        if verdict.get("verdict") == "pass":
-            written = add_factor_from_h_file(factor_file, idea_id, status="evaluated", intuition=factor.get("intuition"))
+        if final_verdict == "pass":
+            written = add_factor_from_h_file(factor_file, idea_id, status="evaluated",
+                                             intuition=factor.get("intuition"), verdict="pass")
             if not written:
                 return {"ok": False, "error": f"addFactorFromHFile 返回 None,factorFile={factor_file}"}
             with db.get_conn() as conn:
@@ -212,7 +227,7 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
             _gen_anchor_and_embedding(written)
             with db.get_conn() as conn:
                 db.add_eval(conn, written, ts, full_metrics, idea_id=idea_id, mode="full",
-                            raw_path=check_result.get("checkOutput"), status="evaluated")
+                            raw_path=check_result.get("checkOutput"), status="evaluated", verdict="pass")
                 if ridge_agg:
                     db.update_factor_ridge_svd(conn, written,
                                               ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
@@ -234,7 +249,8 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
 
         else:
             # fail/dead_end:lesson FK 依赖 factors → 先写 factors(dead_end)
-            written = add_factor_from_h_file(factor_file, idea_id, status="dead_end", intuition=factor.get("intuition"))
+            written = add_factor_from_h_file(factor_file, idea_id, status="dead_end",
+                                             intuition=factor.get("intuition"), verdict="fail")
             if not written:
                 return {"ok": False, "error": f"addFactorFromHFile 返回 None,factorFile={factor_file}"}
             with db.get_conn() as conn:
@@ -242,7 +258,7 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
             _gen_anchor_and_embedding(written)
             with db.get_conn() as conn:
                 db.add_eval(conn, written, ts, full_metrics, idea_id=idea_id, mode="full",
-                            raw_path=check_result.get("checkOutput"), status="dead_end")
+                            raw_path=check_result.get("checkOutput"), status="dead_end", verdict="fail")
                 if ridge_agg:
                     db.update_factor_ridge_svd(conn, written,
                                               ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
