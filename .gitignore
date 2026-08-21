@@ -1,66 +1,29 @@
-# ===== 数据库(二进制,本地数据,不入库)=====
+# ===== Python 本地环境 =====
+.venv/
+__pycache__/
+*.py[cod]
+
+# ===== 本地研究数据 / 平台产物 =====
 *.db
 *.db-wal
 *.db-shm
 *.bak
 *.bak.*
-
-# ===== 依赖 / 缓存 =====
-node_modules/
-.venv/
-__pycache__/
-*.pyc
-
-# ===== 临时 / 产物目录 =====
-/factor-evaluate-tmp/
-/featuretool-tmp/
-/check-output/
-/default_test/
-/logs/
-/pipeline-py/observe/out/
 *.tar
 *.tar.gz
+/data/
+/factors/
+/check-output/
+/default_test/
 
-# ===== 数据产物 / 备份 =====
-/data/factor_dashboard.html
-/factors_research.json
-/*_backup.json
-/factors_db_orphan*.json
-/batch_ic*.csv
+# ===== 日志与临时文件 =====
+/logs/
+*.log
+_tmp_diag.txt
+/.tmp/
 
-# ===== 不属于本循环仓库的独立子项目(各自管理)=====
-/factor_viewer/
-/sdk-demo/
-/factor-pipeline/
-/林劲展/
-
-# ===== Claude Code 专属配置（skill/agent 已迁出，见 AGENTS.md）=====
+# ===== 本地编辑器/客户端配置 =====
 .claude/settings.json
 .claude/settings.local.json
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
-
-# ===== 不属于循环的调度脚本(只保留 auto-loops.sh)=====
-/run-loops.sh
-/backfill-loops.sh
-
-# ===== 不属于循环的工具脚本 / 文档 / 产出 =====
-/operators*.py
-/xy_loader.py
-/batch_eval.py
-/evaluate_op.py
-/FACTOR_DB_DESIGN.md
-/中小盘_周频rent蓝图.md
-/docs/*
-!/docs/architecture.md
-!/docs/data-backfill.md
-!/docs/research-data-flow.md
-/research/
-/factors/
-/factors_to_import/
-/*.pdf
-
-# ===== 日志 =====
-*.log
-_tmp_diag.txt
-.tmp/
