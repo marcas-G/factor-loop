@@ -3,6 +3,8 @@
 量化因子自动挖掘循环 —— 基于 Claude Code 的 `/research-loop` skill,无人值守批量产出因子。
 全流程纯 Python,自动完成 **cog-protocol(认知协议发现缺口/发明算子)→ runFactor(write→submit→check)→ assess(评估入库)** 全流程,所有搬砖走 `quant-mcp` MCP server。
 
+框架全景文档: [docs/research-loop-framework.md](docs/research-loop-framework.md)(设计哲学/各 Step 机制/横切质量保障/实证样本)。
+
 ## 架构
 
 ```
@@ -10,13 +12,14 @@ auto-loops.sh                 tmux 单车道循环驱动器(拉起 /research-loo
 
 .claude/skills/               循环编排 skill 链
   research-loop/              编排器(认知协议 → 跑因子 → 评估)
-  cog-protocol/               认知协议(因子表示审查 → 新算子发明,8 cog agent)
+  cog-protocol/               认知协议(因子表示审查 → 新算子发明,9 cog agent)
   assess/                     评估(忠实度 + 三维度 + 一票否决,写库)
+  reseed/                     新基底再播种(饱和分支的去名化换根)
   write-factor/               写因子 .h(agent 内调)
   watch-loops/                后台循环监控
 
 .claude/agents/
-  cog/                        认知协议 8 agent(assumption→...→reduction)+ 世界模型
+  cog/                        认知协议 9 agent(assumption→概念编译→...→reduction)+ 世界模型
   executors/run-factor-agent  单因子 write→submit→check→rewrite 状态机
   reasoners/reviewer-agent    假设忠实度审稿
 
@@ -24,7 +27,11 @@ core/                         全部代码(纯 Python,无 node)
   config.py                   全局路径/环境常量(单一真相,叶子层)
   db/                         因子库 db.py + schema.sql + migrations + seed
   retrieval/                  R1-R3 检索 Contract + 派生表
-  cog/                        cog-protocol 程序化部分(evidence 派生/探针/算子注册)
+  cog/                        cog-protocol 程序化部分
+                              - evidence_investigate.py   证据引擎 v2(分裂检测/一致性/UNTESTABLE 分流,
+                                                          agent contract 优先 + 词表 fallback)
+                              - evidence_derive.py        14 原始探针 → 89 派生维度(检验弹药库)
+                              - factor_profile.py         双视图隔离(配方袋/成绩袋,盲态假设的地基)
   platform/                   featuretool.py + factor_check.py(平台对接)
   tools/                      AI/IC/embedding 工具 + 测试
   metrics.py                  7 维评估数据聚合(check output → eval_metrics)
@@ -32,7 +39,8 @@ core/                         全部代码(纯 Python,无 node)
   infra/                      run_py(subprocess 封装)+ airflow_log(失败分诊)
   mcp/                        quant-mcp server(mcp 2.0 SDK)+ 45 工具 + run_store
 
-factors/                      因子 .h 产物(19 个:14 探针 + 5 入库因子)
+data/concept_lexicon.json     概念词表(人话关键词→派生列映射,概念编译 agent 的缓存,逐轮生长)
+factors/                      因子 .h 产物(92 个:14 探针 + 78 实验因子;库内 evaluated 19 / dead_end 50)
 data/                         factors.db(运行数据,不入库)
 ```
 
@@ -72,6 +80,9 @@ tail -f logs/loops/auto.out
 
 `data/factors.db`、`check-output/`、`logs/` 等运行数据与产物均不入库(见 `.gitignore`)。
 clone 后用 `core/db/init_db.py` 重建空库即可。
+
+⚠️ `data/concept_lexicon.json`(概念词表)目前也落在被 ignore 的 `data/` 下——它是跨轮生长的共享资产,
+严格说应受版本控制,待迁移。
 
 ## 因子看板
 
