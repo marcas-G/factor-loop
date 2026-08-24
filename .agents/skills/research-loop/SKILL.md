@@ -19,7 +19,7 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 |---|---|
 | Step 0 → Step 1 | `Skill cog-protocol`（认知协议: 发现缺口+发明算子 → operator contract）|
 | Step 1 → Step 2 | 把 contract 交给 write-factor → 产候选 factor |
-| Step 2 → Step 3 | 在一个消息内并行发 N 个 `Task` (run-factor-agent) |
+| Step 2 → Step 3 | 写 `.tmp/agent_task.json` 后串行派 1 个 `run-factor-agent` |
 | Step 3 → Step 4 | 对第一个 `check_done` factor 调 `Skill assess` |
 | Step 4 → Step 5 | `run_save {status: "done"}`(算子注册已在 Step 1 认知协议 4 Gate 过时完成) |
 
@@ -37,8 +37,9 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 - 如给了 `run_id`：
   1. 调 MCP `run_load {run_id}` → 读 state
   2. 检查 `status`：如 `done` 报告"已完成"；如 `paused`/`running` 从断点续（看 `factors[].status` 决定从哪步开始）
+- 定向接力：若 state 有 `next_research_object`，本轮 Research Object **直接用该 xname**，跳过随机/R1 选择；进入 Step 1 后调 `run_save {patch: {next_research_object: null}}` 清掉定向标记。
 
-**→ 衔接硬规则**：Step 0 完成（拿到 run_id 或读完 state）后，**必须立即在同一回合**进入 Step 1 的第一个 tool call（调 Skill cog-protocol）。禁止输出"已初始化，开始认知协议"之类的纯文字回合。
+**→ 衔接硬规则**：Step 0 完成（拿到 run_id 或读完 state）后，**必须立即在同一回合**进入 Step 1 的第一个 tool call（若饱和则调 Skill reseed，否则调 Skill cog-protocol）。禁止输出"已初始化"之类的纯文字回合。
 
 ## Step 1 · 认知协议（发现缺口 + 发明算子, 循环起点）
 
@@ -46,7 +47,12 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 
 ```
 选 Research Object(dead_end/故事节点/现象)
-  → Skill cog-protocol
+  → 调 factor_saturation_status
+     ├─ saturated (branch max_depth > 5)
+     │    → Skill reseed → 产出单个 Measurement Seed
+     │    → Step 2(seed_spec → write-factor)
+     └─ not saturated
+          → Skill cog-protocol
     → 产出什么?
 
       ① NEW OPERATOR + contract (S2.6 判 STRUCTURE + S3 4 Gate 全过)
@@ -63,26 +69,33 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
         → 直到产出 ① 或 ②, 或 Research Object 耗尽(本轮 done)
 ```
 
-调 `Skill cog-protocol <xname?>`:
+**深度判定是硬门槛**: 每个 Research Object 在进 cog-protocol 前必须调
+`mcp__quant-mcp__factor_saturation_status {xname}`。`saturated == true` 时走 reseed,
+不允许继续原认知协议深挖; `saturated == false` 才走 cog-protocol。
+
+调 `Skill reseed <xname?>` 或 `Skill cog-protocol <xname?>`:
 - **① NEW OPERATOR + contract**: 4 Gate 过 → 立即 register_operator → Step 2
 - **② FACTOR_ITERATION**: minimal-repair 产出 **repair_contract**(结构化: preserved_signals/new_signals/forbidden_drops/gating_logic/output_composition)→ 主会话把它原样传给 write-factor → Step 2
-- **③ 无产出**: 换 Research Object 重跑
+- **③ RESEED SEED**: reseed 产出 **seed_spec**(measurement_object/operation/distinction/observability/independence)→ 主会话把它传给 write-factor → Step 2
+- **④ 无产出**: 换 Research Object 重跑
 
 **关键: FACTOR_ITERATION 不是终点, 是 Step 2 的另一个入口。且 repair_contract 是结构化 spec, write-factor 只能翻译不能自由发挥(防"推理天衣无缝、代码垃圾")。**
 
 ## Step 2 · 候选 factor(write-factor)
 
-两个入口汇聚到此:
+三个入口汇聚到此:
 
 **入口 A (Step 1 ① NEW OPERATOR)**: 认知协议产出 operator contract → 主会话翻译成 formula/intuition/tags/params → write-factor 生成 .h
 
 **入口 B (Step 1 ② FACTOR_ITERATION)**: minimal-repair 产出 repair_contract → 主会话把 repair_contract **原样**传给 write-factor 作为 spec → write-factor 严格按 preserved_signals/new_signals/forbidden_drops/gating_logic/output_composition 翻译成 .h
 
+**入口 C (Step 1 ③ RESEED SEED)**: reseed 产出 seed_spec → 主会话把 seed_spec 传给 write-factor，按 measurement_object + operation 实现最小直接公式，禁止复杂化。
+
 两个入口都产出候选 factor 对象(name/formula/intuition/tags/params/categories)。
 
 **⚠️ 入口 B 的忠实度要求**: repair_contract 的 `preserved_signals`(必须保留的信号)和 `forbidden_drops`(禁止丢弃的信号)是硬约束——write-factor 写 .h 时, 每个 preserved_signal 和 forbidden_drop 都必须出现在代码里。主会话在写完后核对: 代码里有没有丢了 forbidden_drops 里的信号? 丢了 → 重写。
 
-**⚠️ categories 语义(易错, P0)**:`categories` = **品种代码数组** `["AG"]` / `["AG","CU"]`,合法值仅 `AG/AU/CU/AL/NI`(沪金银铜铝镍)。**不是 angle 标签**(如 `oi_anomaly`)、**不是 tags**、**不是 xname**。空数组 `[]` = 用默认品种(SHFE-AG,SHFE-CU)。填错会被 `platform_submit_factor` 拦截返回 `config_error`(防拼出 `SHFE-oi_anomaly` 畸形 feeds 导致 DAG failed)。
+**⚠️ categories 语义(易错, P0)**:`categories` = **品种代码数组** `["AG"]` / `["AG","CU"]`,合法值仅 `AG/AU/CU/AL/NI`(沪金银铜铝镍)。**不是 tags**、**不是 xname**。空数组 `[]` = 用默认品种(SHFE-AG,SHFE-CU)。填错会被 `platform_submit_factor` 拦截返回 `config_error`(防拼出畸形 feeds 导致 DAG failed)。
 - 若 contract 直接给了实现(如算子实现), 按基底换绑定产因子候选
 
 候选数组后:
@@ -90,25 +103,34 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 1. **persist_candidates**: 调 MCP `persist_candidates {run_id, idea_text: "<cog: Research Object X → operator Y + 基底 Z>", factors: [候选]}` 存 state。
 2. 回主会话后, `state.factors` 已落盘(候选, 含 formula/intuition/tags/params/hypothesis)。
 
-**→ 衔接硬规则**：persist_candidates 返回后, **必须立即在同一回合**于一个消息内并行发 N 个 `Task` (run-factor-agent) tool call（N=候选数，≤3）。禁止输出"候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置, 必须严守。
+**→ 衔接硬规则**：persist_candidates 返回后, **必须立即进入第一个 factor 的任务文件交接**（Codex 环境）或 `Task` 派发（Claude Code 环境）。禁止输出"候选已生成"之类的纯文字回合——这是本 skill 最易断流的位置, 必须严守。
 
-## Step 3 · 每个 factor 跑 runFactor（Task 子代理，并发 3）
+## Step 3 · 每个 factor 跑 runFactor（Task 子代理，串行）
 
-把 factors 按每批 3 个分组。对每批：
+对 factors 按 index 逐个执行（Codex 环境禁止并发派发，避免多个子代理抢占同一任务文件）：
 
-1. 在**一个消息内**同时发 3 个 Task tool call（parallel tool use），每个：
-   - `subagent_type: "run-factor-agent"`
-   - `prompt`: 包含 `factor`（含 name/formula/intuition/categories/**tags**/params/hypothesis）+ `idea` + `run_id` + `factor_index`（该 factor 在 state.factors 数组里的下标，agent 用它做 `factors.<index>.xxx` 的 run_save）。**tags 从 state.factors[i].tags 取**（认知协议/contract 生成），写入 prompt 让 agent 生成 .h frontmatter 时带上
-2. 等待 3 个全部返回，收集每个的 `{xname, failure_layer}`（轻量路由信息，agent.md 规定的 return contract）
+1. 先把完整派发 JSON 写入 `.tmp/agent_task.json`：
+   ```json
+   {
+     "task": "按 run-factor-agent.md 状态机执行单个 factor，终态落盘后返回轻量路由信息",
+     "input": {
+       "factor": {"name": "...", "formula": "...", "intuition": "...", "categories": ["AG"], "tags": ["..."], "params": {}, "hypothesis": "..."},
+       "idea": "<state.idea>",
+       "run_id": "<run_id>",
+       "factor_index": <i>
+     },
+     "expect": {"xname": "<name>", "failure_layer": "check_done | ..."}
+   }
+   ```
+   `factor` 必须含 name/formula/intuition/categories/**tags**/params/hypothesis；**tags 从 state.factors[i].tags 取**，供 .h frontmatter 使用。
+2. `spawn_agent(task_name="run_factor_<i>", fork_turns="none", message="读取 .tmp/agent_task.json 并执行")`。等待终态，收集 `{xname, failure_layer}`；随后删除 `.tmp/agent_task.json`，再进入下一个 factor。
 3. agent 已在最终态自己调 `run_save` 落盘了完整字段（status / failure_layer / evidence / retry_trace / last_rewrite）——主会话**不再写这些**，避免靠 return message 传 state 时被 Claude 总结倾向截断
 4. 兜底（**断流根治**）：对每个返回结果，调 `run_load {run_id}` 确认 `factors[i].status` 是终态且字段齐全。**如缺失（agent 停在 write-factor 返回处断流——头号 bug，见 memory `run-factor-agent-stalls`，衔接硬规则 model 会忽略）**：
    ① 先 `ls factors/<name>.h` 确认 .h 已生成；已生成则**重派**同 agent，prompt 明令**禁调任何 Skill（含 write-factor）**、从 `platform_submit_factor` 起步 A→E 跑完——此为已验证的可靠推进方式（硬规则无效，唯禁 Skill + submit 起步有效）。
    ② 重派仍卡 → 才 `run_save {patch: {"factors.<i>.status": "failed", "factors.<i>.failure_layer": "agent_crashed"}}` 兜底，继续其它 factor。
    ③ .h 未生成（write 步就断）→ 兜底 agent_crashed，后续单独调 write-factor 生成 .h 再重派。
 
-5. **迭代回滚**：本批 3 个跑完 + 兜底确认后，扫一遍因子，对 `status==failed` 且 `suggestion_id` 非空的（接续候选 B 没跑成），调 `iteration_reopen {suggestion_id}` 把建议从 in_progress→open，允许下次再接续（不浪费这条精进/重试线索）。check_done 的不回滚（由 assess 的 realize 归档）。
-
-下一批 3 个，直到所有 factor 跑完。
+5. **迭代回滚**：所有 factor 跑完 + 兜底确认后，扫一遍因子，对 `status==failed` 且 `suggestion_id` 非空的（接续候选 B 没跑成），调 `iteration_reopen {suggestion_id}` 把建议从 in_progress→open，允许下次再接续（不浪费这条精进/重试线索）。check_done 的不回滚（由 assess 的 realize 归档）。
 
 **→ 衔接硬规则**：所有 factor 跑完 + 兜底 `run_load` 确认后，**必须立即在同一回合**进入 Step 4：对第一个 `failure_layer == "check_done"` 的 factor 调 `Skill assess`（若没有 check_done 则直接进 Step 5）。禁止输出"3 个因子全部完成"之类的纯文字回合。
 
@@ -127,6 +149,14 @@ description: 量化因子研究循环编排器。触发：`/research-loop <run_i
 ## Step 5 · 收尾（算子注册已在 Step 1 完成）
 
 **算子注册不在此步**——认知协议 S3 产出 operator contract（语义 4 Gate 过）时**立即注册** operators 表（source='cog'）。算子=资产（语义层可复用测量方法），先沉淀；因子=产品（实证验证），assess 管 ICIR 判定和因子入库。**算子注册不受 ICIR 影响**——ICIR 不达标不否定算子（可能是算子实现/基底选错），只否定该次因子实现。
+
+**再播种定向接力**：若本轮有 factor 来自 reseed（`state.factors[i].tags` 含 `reseed` 或 `state.factors[i].reseed_from` 非空），在该因子 persist 后调：
+
+```text
+run_save {run_id, patch: {next_research_object: "<seed factor xname>"}}
+```
+
+下一轮 Step 0 直接用它做 Research Object，不随机/R1 选择。
 
 ## Step 6 · 汇总报告（support_score 连续，不绝对判断）
 

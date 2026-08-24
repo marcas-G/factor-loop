@@ -1,6 +1,6 @@
 """schema 一致性测试:新库 schema.sql 直建必须含所有 migrate 补的列。
 
-防 iterations 类 bug(schema.sql 漏 status/iterable,靠 mjs migrateIterationsSchema
+防 iterations 类 bug(schema.sql 漏 status,靠 mjs migrateIterationsSchema
 给新老库补掩盖;测试 setup 漏跑 migrate 时暴露)。把"各 migrate 函数补的列"列成清单,
 断言新库 init_db 后各表都含——未来再漏列直接测试挂。
 
@@ -19,8 +19,11 @@ from core.db import init_db  # noqa: E402
 
 # 各 migrateXxxSchema / ensure_* 给表补的列。schema.sql 新库直建必须含(不能靠 migrate 掩盖)。
 EXPECTED_COLS = {
-    "factors": ["angle_code", "quality_score", "quality_grade", "intuition", "anchor_text"],
-    "iterations": ["status", "iterable"],
+    "factors": ["quality_score", "quality_grade", "intuition", "anchor_text"],
+    "iteration_suggestions": ["status"],
+    "factor_lineage_edges": ["relation_type", "origin", "suggestion_id", "confidence"],
+    "factor_lineage_paths": ["min_depth", "path_count", "is_direct"],
+    "factor_lineage_nodes": ["primary_root_xname", "descendant_count", "open_suggestion_count"],
     "ideas": ["argument_argument_chain_placeholder",  # 占位,下面真实清单
               "argument_chain", "support_score", "evaluated_factor_count",
               "support_score_computed_at", "necessity_grade", "node_layer"],
@@ -86,6 +89,19 @@ def test_lessons_type_check():
                 raise AssertionError("lessons.type CHECK 没拦住非法值 'bogus'")
             except Exception as e:
                 assert "CHECK" in str(e) or "constraint" in str(e).lower(), f"非预期错误: {e}"
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def test_iterations_is_readonly_compat_view():
+    """v19 新库应只有 iterations 只读 view,不再有物理表。"""
+    tmp = _new_db()
+    try:
+        with db.get_conn(tmp) as c:
+            row = c.execute(
+                "SELECT type FROM sqlite_master WHERE name='iterations'"
+            ).fetchone()
+            assert row and row[0] == "view", f"iterations 应为 view,实际 {row}"
     finally:
         Path(tmp).unlink(missing_ok=True)
 

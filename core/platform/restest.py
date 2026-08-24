@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 r"""restest 数据链路 —— 平台 Ridge-SVD 冗余分析(冗余约束主判据)。
 
-平台 default_test 的 Submit restest: 把新因子对固定大库(qyshen/0727pass_v3, AG/AU 72 因子)
-做 Ridge-SVD 正交化, 输出:
+2026-08-20 平台更新后, ridge_svd 的唯一入口是 GPU 版 Submit restest(原 Submit GPU):
+  - 表单含 alpha / lib_key / n_workers(默认 12) / transform_sweep, 不再有 mode/Feeds/日期;
+  - 日期固定半年(20250101~20250630);
+  - CPU 版 submit_restest / restest_1 已从导航隐藏(历史 URL 仍可访问), 本文件保留其
+    提交逻辑仅作兼容/backfill, 新链路一律走 core/platform/gpu.py 的 GPU 提交。
+把新因子对固定大库(qyshen/0727pass_v3, AG/AU 72 因子)做 Ridge-SVD 正交化, 输出:
   - R2_X:        库因子线性组合能解释新因子多少方差(X 空间冗余度)
   - res_IC:      去掉库冗余后的 pooled Pearson 增量预测力
-  - dLOOCV_pct:  Ridge 近似 Lasso 的 LOOCV 下降%(对线性模型的净增益, 主判据)
-
-判据(平台文档 + 实测):
-  dLOOCV_pct > 1%  → 对线性模型显著增益(不冗余)
-  dLOOCV_pct ≈ 0   → 没贡献(冗余)
-  dLOOCV_pct < 0   → 过拟合(更差)
+平台只输出 R2_X + res_IC, 冗余判定只用这两个指标。
 
 用法(供 run-factor-agent / assess 调用):
     from core.platform.restest import run_restest
     result = run_restest("factors/ImbalanceBase.h", "ImbalanceBase")  # 提交+轮询+下载+解析
-    # result = {"ok": True, "feature": "...", "metrics": {"R2_X":..., "res_IC":..., "dLOOCV_pct":...}}
+    # result = {"ok": True, "feature": "...", "metrics": {"R2_X":..., "res_IC":..., "n":...}}
 
 restest 提交 → 平台跑 Ridge-SVD DAG(活跃因子实测可达 ~17 分钟)→ 下载 ridge_svd CSV → 解析。
 失败(提交失败/超时/下载失败)不抛, 返回 ok=False + reason, 调用方降级。
@@ -100,9 +99,11 @@ def _post_submit(cookie: str, url: str, factor_file: str, features: str,
 
 @_serialize_submit
 def submit_restest(factor_file: str, features: str) -> dict:
-    """提交因子到 restest(Ridge-SVD 冗余分析)。返回 {ok, feature?, error?}。
+    """提交因子到 CPU submit_restest(Ridge-SVD 冗余分析, 已停用/兼容路径)。
 
     features 传类名即可(template 类内部自动加 <>), 与 submit.py 语义一致。
+    平台 2026-08-20 起该入口从导航隐藏(历史 URL 仍可访问); 新链路请走
+    core/platform/gpu.py submit_gpu_tasks(mode=ridge_svd)。
     """
     # template 类自动加 <> (与 submit.py 一致, 否则平台编译失败 → DAG failed)
     class_name = extract_class_name_from_h(factor_file) or features
@@ -214,7 +215,7 @@ def poll_restest(feature: str, timeout_sec: int = RESTEST_TIMEOUT_SEC) -> dict:
 
 
 def download_ridge_svd(feature: str, run_id: str) -> dict:
-    """下载 ridge_svd 结果包, 解析 CSV → {metrics: [{x_col, horizon, R2_X, res_IC, n, dLOOCV_pct}]}。"""
+    """下载 ridge_svd 结果包, 解析 CSV → {metrics: [{x_col, horizon, R2_X, res_IC, n}]}。"""
     bu = base_url(APP)
     cookie = ensure_cookie(app=APP)
     if not cookie:
@@ -253,8 +254,6 @@ def download_ridge_svd(feature: str, run_id: str) -> dict:
             "R2_X": number(r.get("R2_X")),
             "res_IC": number(r.get("res_IC")),
             "n": number(r.get("n"), int),
-            # GPU ridge_svd disables GCV and intentionally omits this column.
-            "dLOOCV_pct": number(r.get("dLOOCV_pct")),
         })
     return {"ok": True, "metrics": metrics}
 
@@ -299,38 +298,27 @@ def run_submitted_restest(feature: str, timeout_sec: int = RESTEST_TIMEOUT_SEC) 
     return {"ok": True, "feature": feature, "metrics": dl["metrics"]}
 
 
-def aggregate_ridge_svd(metrics: list[dict], engine: str = "cpu") -> dict:
+def aggregate_ridge_svd(metrics: list[dict], engine: str = "gpu") -> dict:
     """把 metrics 数组(每 x_col×horizon 一条)聚合成单一冗余判定。
 
-    CPU 结果优先按 dLOOCV_pct 聚合; GPU 结果默认无 dLOOCV,按 |res_IC| 聚合。
-
-    取主力(非 @1 次主力)场景中 dLOOCV_pct 最大的(最乐观增量), 作主判据:
-      - max_dLOOCV_pct: 所有主力场景的最大 LOOCV 下降%(最乐观)
+    平台只输出 R2_X/res_IC, 一律按主力(非 @1)场景中 |res_IC| 最大那条聚合:
       - R2_X: 对应场景的库解释方差
       - res_IC: 对应场景的增量 IC
-    返回 {max_dLOOCV_pct, R2_X, res_IC, horizon, x_col}。
+    返回 {R2_X, res_IC, horizon, x_col}。
     """
     if not metrics:
-        return {"max_dLOOCV_pct": None, "R2_X": None, "res_IC": None,
-                "horizon": None, "x_col": None, "engine": engine,
-                "dloocv_available": False}
+        return {"R2_X": None, "res_IC": None,
+                "horizon": None, "x_col": None, "engine": engine}
     main = [m for m in metrics if "@1" not in (m.get("x_col") or "")]
     if not main:
         main = metrics
-    has_dloocv = any(m.get("dLOOCV_pct") is not None for m in main)
-    if has_dloocv:
-        best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
-    else:
-        # GPU GCV is disabled; use the strongest residual IC as the summary row.
-        best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
+    best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
     return {
-        "max_dLOOCV_pct": best.get("dLOOCV_pct"),
         "R2_X": best.get("R2_X"),
         "res_IC": best.get("res_IC"),
         "horizon": best.get("horizon"),
         "x_col": best.get("x_col"),
         "engine": engine,
-        "dloocv_available": has_dloocv,
     }
 
 

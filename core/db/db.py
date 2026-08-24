@@ -51,41 +51,6 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
 VALID_STATUS = {"draft", "submitted", "evaluated", "failed", "dead_end"}
 VALID_VERDICT = {"pass", "fail"}
 
-# angle_code 自动推断(从 formula/tags 关键词 → angle_ontology code)
-# 解耦 angle 标注与 explore:所有因子落盘时自动标,不依赖 explore 产 idea 才标
-_ANGLE_KEYWORDS = [
-    ("imbalance_depth_profile", ["imbalancedepth"]),  # 新自发现角度:per-level imb 向量(优先于 book_imbalance 的宽泛 imbalance)
-    ("book_imbalance",       ["imbalance", "imb", "bsi", "ofi"]),
-    ("add_cancel_imbalance", ["cancel_imb", "add_imb", "add_cancel_imb"]),
-    ("add_cancel_pattern",   ["spoof", "layering", "cancel_pattern", "add_pattern"]),
-    ("depth_shape",          ["depth_shape", "entropy", "skew", "hhi", "conc"]),
-    ("depth_slope",          ["depth_slope", "book_slope", "slope"]),
-    ("spread_structure",     ["spread", "bid_ask_spread"]),
-    ("trade_imbalance",      ["trade_imb", "volume_imb", "tvi"]),
-    ("trade_rhythm",         ["hawkes", "burst", "rhythm", "cluster"]),
-    ("intensity_level",      ["intensity", "turnover", "active"]),
-    ("volatility_regime",    ["vol_regime", "volatility", "vol_gate", "volregime", "vol burst", "vol regime"]),
-    ("price_microstructure", ["microstructure", "roll", "autocorr"]),
-    ("oi_anomaly",           ["oi_", "oi ", "open_interest", "oipersist", "oiresist", "oispike", "oiintensity"]),
-]
-
-
-def infer_angle_code(formula_text: str | None, tags: Iterable[str] | None,
-                     xname: str | None = None) -> str | None:
-    """从 formula/tags/xname 推断 angle_code。不依赖 explore 标注。
-
-    与 factor-db.mjs inferAngleCode 双端一致。
-    """
-    text = " ".join(filter(None, [
-        (formula_text or "").lower(),
-        " ".join(tags or []).lower(),
-        (xname or "").lower(),
-    ]))
-    for code, keywords in _ANGLE_KEYWORDS:
-        if any(kw in text for kw in keywords):
-            return code
-    return None
-
 
 def add_factor(
     conn: sqlite3.Connection,
@@ -131,31 +96,6 @@ def add_factor(
             "INSERT OR IGNORE INTO idea_factor_links (idea_id, factor_xname) VALUES (?, ?)",
             (idea_id, xname),
         )
-        # angle_code 回灌(优先 idea.angle_code 血缘,次 DERIVES_FROM properties.angle 兜底):
-        a = conn.execute(
-            "SELECT angle_code FROM ideas WHERE id=?", (idea_id,)
-        ).fetchone()
-        if not (a and a[0]):
-            a = conn.execute(
-                """SELECT json_extract(properties,'$.angle') FROM graph_edges
-                   WHERE from_id=? AND edge_type='DERIVES_FROM'
-                     AND json_extract(properties,'$.angle') IS NOT NULL LIMIT 1""",
-                (str(idea_id),),
-            ).fetchone()
-        if a and a[0]:
-            conn.execute(
-                "UPDATE factors SET angle_code=? WHERE xname=?", (a[0], xname)
-            )
-    # angle_code 自动推断(解耦 explore):idea 无 angle 或无 idea 时,从 formula/xname 推断
-    cur_angle = conn.execute(
-        "SELECT angle_code FROM factors WHERE xname=?", (xname,)
-    ).fetchone()
-    if not (cur_angle and cur_angle[0]):
-        inferred = infer_angle_code(formula_text, tags, xname)
-        if inferred:
-            conn.execute(
-                "UPDATE factors SET angle_code=? WHERE xname=?", (inferred, xname)
-            )
     return True
 
 
@@ -280,6 +220,72 @@ def add_eval(
 
 # ============ iterations ============
 
+def add_lineage_edge(
+    conn: sqlite3.Connection,
+    parent_xname: str,
+    child_xname: str,
+    *,
+    relation_type: str = "iteration",
+    origin: str = "manual_backfill",
+    suggestion_id: int | None = None,
+    idea_id: int | None = None,
+    op_id: int | None = None,
+    change_note: str | None = None,
+    reason: str | None = None,
+    outcome: str | None = None,
+    icir_delta: float | None = None,
+    evidence: dict | None = None,
+    confidence: str = "observed",
+) -> int:
+    """Add one immutable realized derivation edge and refresh derived lineage tables."""
+    valid_relation = {"iteration", "repair", "operator_application", "manual", "reseed"}
+    valid_origin = {
+        "suggestion", "retry", "cog_repair", "operator_contract",
+        "manual_backfill", "reseeding",
+    }
+    if relation_type not in valid_relation:
+        raise ValueError(f"relation_type 必须为 {valid_relation}")
+    if origin not in valid_origin:
+        raise ValueError(f"origin 必须为 {valid_origin}")
+    if confidence not in {"observed", "declared", "inferred"}:
+        raise ValueError("confidence 必须为 observed/declared/inferred")
+    if parent_xname == child_xname:
+        raise ValueError("血缘边 parent/child 不能自指")
+    for xname in (parent_xname, child_xname):
+        if not conn.execute("SELECT 1 FROM factors WHERE xname=?", (xname,)).fetchone():
+            raise ValueError(f"血缘端点不存在: {xname}")
+
+    evidence_json = json.dumps(evidence, ensure_ascii=False) if evidence is not None else None
+    cur = conn.execute(
+        """
+        INSERT INTO factor_lineage_edges
+            (parent_xname, child_xname, relation_type, origin, suggestion_id,
+             idea_id, op_id, change_note, reason, outcome, icir_delta, evidence,
+             confidence)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(parent_xname, child_xname, relation_type) DO UPDATE SET
+            origin=excluded.origin,
+            suggestion_id=COALESCE(excluded.suggestion_id, factor_lineage_edges.suggestion_id),
+            idea_id=COALESCE(excluded.idea_id, factor_lineage_edges.idea_id),
+            op_id=COALESCE(excluded.op_id, factor_lineage_edges.op_id),
+            change_note=COALESCE(excluded.change_note, factor_lineage_edges.change_note),
+            reason=COALESCE(excluded.reason, factor_lineage_edges.reason),
+            outcome=COALESCE(excluded.outcome, factor_lineage_edges.outcome),
+            icir_delta=COALESCE(excluded.icir_delta, factor_lineage_edges.icir_delta),
+            evidence=COALESCE(excluded.evidence, factor_lineage_edges.evidence),
+            confidence=excluded.confidence
+        """,
+        (
+            parent_xname, child_xname, relation_type, origin, suggestion_id,
+            idea_id, op_id, change_note, reason, outcome, icir_delta,
+            evidence_json,
+            confidence,
+        ),
+    )
+    rebuild_factor_lineage(conn)
+    return int(cur.lastrowid)
+
+
 def add_iteration(
     conn: sqlite3.Connection,
     from_xname: str,
@@ -289,49 +295,277 @@ def add_iteration(
     reason: str | None = None,
     outcome: str | None = None,
     icir_delta: float | None = None,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO iterations
-            (from_xname, to_xname, idea_id, change_note, reason, outcome, icir_delta)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (from_xname, to_xname, idea_id, change_note, reason, outcome, icir_delta),
+) -> int:
+    """Compatibility entry for realized retry edges; new suggestion queues use open_iteration."""
+    return add_lineage_edge(
+        conn, from_xname, to_xname, relation_type="repair", origin="retry",
+        idea_id=idea_id, change_note=change_note, reason=reason,
+        outcome=outcome, icir_delta=icir_delta,
     )
 
 
-def get_ancestors(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]:
-    # status='realized' 过滤:排除 open/in_progress 的自指占位(to=from),防递归 CTE 无限循环
-    return conn.execute(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT from_xname AS ancestor, 1 AS depth
-            FROM iterations WHERE to_xname = ? AND status = 'realized'
-            UNION ALL
-            SELECT i.from_xname, c.depth + 1
-            FROM iterations i JOIN chain c ON i.to_xname = c.ancestor AND i.status = 'realized'
+def _assert_acyclic_lineage(adjacency: dict[str, list[str]]) -> None:
+    state: dict[str, int] = {}
+
+    def visit(node: str, stack: set[str]) -> None:
+        if state.get(node) == 2:
+            return
+        if state.get(node) == 1:
+            cycle = stack_to_cycle(stack, node)
+            raise ValueError(f"因子血缘出现环: {' -> '.join(cycle)}")
+        state[node] = 1
+        for child in adjacency.get(node, []):
+            visit(child, stack | {child})
+        state[node] = 2
+
+    def stack_to_cycle(stack: set[str], node: str) -> list[str]:
+        # The exact stack order is unnecessary for the error; deterministic sort is enough.
+        return sorted(stack | {node})
+
+    for node in sorted(adjacency):
+        visit(node, {node})
+
+
+def rebuild_factor_lineage(conn: sqlite3.Connection) -> None:
+    """Rebuild closure and per-factor lineage profile from immutable edges."""
+    factors = [r[0] for r in conn.execute(
+        "SELECT xname FROM factors ORDER BY xname"
+    ).fetchall()]
+    factor_set = set(factors)
+    edges = conn.execute("""
+        SELECT parent_xname, child_xname, created_ts, outcome
+        FROM factor_lineage_edges
+        ORDER BY edge_id
+    """).fetchall()
+    adjacency: dict[str, list[str]] = {x: [] for x in factors}
+    parents: dict[str, list[str]] = {x: [] for x in factors}
+    edge_created: dict[tuple[str, str], str] = {}
+    for edge in edges:
+        parent, child = edge["parent_xname"], edge["child_xname"]
+        if parent not in factor_set or child not in factor_set:
+            continue
+        adjacency[parent].append(child)
+        parents[child].append(parent)
+        edge_created[(parent, child)] = edge["created_ts"]
+    _assert_acyclic_lineage(adjacency)
+
+    direct = {pair for pair in edge_created}
+    conn.execute("DELETE FROM factor_lineage_paths")
+    for source in factors:
+        distance = {source: 0}
+        path_count = {source: 1}
+        queue = [source]
+        cursor = 0
+        while cursor < len(queue):
+            node = queue[cursor]
+            cursor += 1
+            for child in adjacency.get(node, []):
+                new_depth = distance[node] + 1
+                if child not in distance:
+                    distance[child] = new_depth
+                    path_count[child] = path_count[node]
+                    queue.append(child)
+                elif distance[child] == new_depth:
+                    path_count[child] = min(1000, path_count[child] + path_count[node])
+        for target, depth in distance.items():
+            conn.execute(
+                """INSERT INTO factor_lineage_paths
+                   (ancestor_xname, descendant_xname, min_depth, path_count, is_direct)
+                   VALUES (?,?,?,?,?)""",
+                (
+                    source, target, depth, path_count[target],
+                    1 if depth == 1 and (source, target) in direct else 0,
+                ),
+            )
+
+    status_by_factor = dict(conn.execute("SELECT xname, status FROM factors").fetchall())
+    suggestion_counts = {
+        r["from_xname"]: r["n"]
+        for r in conn.execute("""
+            SELECT from_xname, COUNT(*) AS n FROM iteration_suggestions
+            WHERE status='open' GROUP BY from_xname
+        """).fetchall()
+    }
+    child_counts: dict[str, int] = {}
+    for parent, children in adjacency.items():
+        child_counts[parent] = len(children)
+    suggestion_updated = {
+        r["from_xname"]: r["last_ts"]
+        for r in conn.execute("""
+            SELECT from_xname, MAX(updated_ts) AS last_ts FROM iteration_suggestions
+            GROUP BY from_xname
+        """).fetchall()
+    }
+    ancestor_pairs = {
+        (r[0], r[1]) for r in conn.execute(
+            """SELECT ancestor_xname, descendant_xname FROM factor_lineage_paths
+               WHERE ancestor_xname<>descendant_xname"""
+        ).fetchall()
+    }
+
+    conn.execute("DELETE FROM factor_lineage_nodes")
+    for xname in factors:
+        ancestor_rows = conn.execute(
+            """SELECT ancestor_xname, min_depth FROM factor_lineage_paths
+               WHERE descendant_xname=? AND ancestor_xname<>?""",
+            (xname, xname),
+        ).fetchall()
+        descendant_rows = conn.execute(
+            """SELECT descendant_xname, min_depth FROM factor_lineage_paths
+               WHERE ancestor_xname=? AND descendant_xname<>?""",
+            (xname, xname),
+        ).fetchall()
+        descendants = [r["descendant_xname"] for r in descendant_rows]
+        ancestor_names = {r["ancestor_xname"] for r in ancestor_rows}
+        # A primary root must itself have no ancestor in this factor's closure. This
+        # avoids choosing a lexicographically small intermediate node in long chains.
+        non_roots = {
+            descendant for ancestor, descendant in ancestor_pairs
+            if ancestor in ancestor_names and descendant in ancestor_names
+        }
+        topological_roots = ancestor_names - non_roots
+        primary_root = min(topological_roots, default=xname)
+        depth_from_root = next(
+            (r["min_depth"] for r in ancestor_rows if r["ancestor_xname"] == primary_root),
+            0,
         )
-        SELECT ancestor, depth FROM chain ORDER BY depth
-        """,
-        (xname,),
+        last_ts_values = [suggestion_updated.get(xname)]
+        last_ts_values.extend(edge_created.get((xname, child)) for child in adjacency[xname])
+        last_ts_values.extend(edge_created.get((parent, xname)) for parent in parents[xname])
+        last_ts = max((v for v in last_ts_values if v), default=None)
+        conn.execute(
+            """INSERT INTO factor_lineage_nodes
+               (xname, is_root, is_leaf, parent_count, child_count,
+                primary_root_xname, depth_from_primary_root, descendant_count,
+                max_descendant_depth, evaluated_descendant_count,
+                dead_end_descendant_count, open_suggestion_count, last_lineage_ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                xname,
+                1 if not parents[xname] else 0,
+                1 if not adjacency[xname] else 0,
+                len(set(parents[xname])),
+                child_counts.get(xname, 0),
+                primary_root,
+                depth_from_root,
+                len(descendants),
+                max((r["min_depth"] for r in descendant_rows), default=0),
+                sum(1 for d in descendants if status_by_factor.get(d) == "evaluated"),
+                sum(1 for d in descendants if status_by_factor.get(d) == "dead_end"),
+                suggestion_counts.get(xname, 0),
+                last_ts,
+            ),
+        )
+
+
+def get_ancestors(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]:
+    return conn.execute(
+        """SELECT ancestor_xname AS ancestor, min_depth AS depth
+           FROM factor_lineage_paths
+           WHERE descendant_xname=? AND ancestor_xname<>?
+           ORDER BY min_depth, ancestor_xname""",
+        (xname, xname),
     ).fetchall()
 
 
 def get_descendants(conn: sqlite3.Connection, xname: str) -> list[tuple[str, int]]:
-    # status='realized' 过滤:排除 open/in_progress 的自指占位(to=from),防递归 CTE 无限循环
     return conn.execute(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT to_xname AS descendant, 1 AS depth
-            FROM iterations WHERE from_xname = ? AND status = 'realized'
-            UNION ALL
-            SELECT i.to_xname, c.depth + 1
-            FROM iterations i JOIN chain c ON i.from_xname = c.descendant AND i.status = 'realized'
-        )
-        SELECT descendant, depth FROM chain ORDER BY depth
-        """,
+        """SELECT descendant_xname AS descendant, min_depth AS depth
+           FROM factor_lineage_paths
+           WHERE ancestor_xname=? AND descendant_xname<>?
+           ORDER BY min_depth, descendant_xname""",
+        (xname, xname),
+    ).fetchall()
+
+
+def list_lineage_branches(
+    conn: sqlite3.Connection,
+    *,
+    min_members: int = 2,
+    limit: int = 20,
+) -> list[sqlite3.Row]:
+    """Return root-level branch profiles for saturation / reseeding selectors."""
+    return conn.execute(
+        """SELECT * FROM factor_lineage_branches
+           WHERE member_count >= ?
+           ORDER BY member_count DESC, max_depth DESC,
+                    open_suggestion_count DESC, root_xname
+           LIMIT ?""",
+        (min_members, limit),
+    ).fetchall()
+
+
+def get_lineage_profile(conn: sqlite3.Connection, xname: str) -> dict:
+    """Return direct edges, derived node profile, branch profile, and open suggestions."""
+    if not conn.execute("SELECT 1 FROM factors WHERE xname=?", (xname,)).fetchone():
+        raise ValueError(f"xname 不存在: {xname}")
+    node = conn.execute(
+        "SELECT * FROM factor_lineage_nodes WHERE xname=?", (xname,)
+    ).fetchone()
+    if not node:
+        rebuild_factor_lineage(conn)
+        node = conn.execute(
+            "SELECT * FROM factor_lineage_nodes WHERE xname=?", (xname,)
+        ).fetchone()
+    parents = conn.execute(
+        """SELECT e.*, pf.status AS parent_status
+           FROM factor_lineage_edges e JOIN factors pf ON pf.xname=e.parent_xname
+           WHERE e.child_xname=? ORDER BY e.created_ts, e.edge_id""",
         (xname,),
     ).fetchall()
+    children = conn.execute(
+        """SELECT e.*, cf.status AS child_status
+           FROM factor_lineage_edges e JOIN factors cf ON cf.xname=e.child_xname
+           WHERE e.parent_xname=? ORDER BY e.created_ts, e.edge_id""",
+        (xname,),
+    ).fetchall()
+    branch = conn.execute(
+        "SELECT * FROM factor_lineage_branches WHERE root_xname=?",
+        (node["primary_root_xname"],),
+    ).fetchone()
+    open_suggestions = conn.execute(
+        """SELECT suggestion_id, change_note, reason, created_ts
+           FROM iteration_suggestions
+           WHERE from_xname=? AND status='open'
+           ORDER BY created_ts""",
+        (xname,),
+    ).fetchall()
+    return {
+        "node": dict(node) if node else None,
+        "parents": [dict(r) for r in parents],
+        "children": [dict(r) for r in children],
+        "branch": dict(branch) if branch else None,
+        "open_suggestions": [dict(r) for r in open_suggestions],
+    }
+
+
+def get_branch_saturation(conn: sqlite3.Connection, xname: str) -> dict:
+    """返回因子所在分支的深度与饱和判定(饱和 = branch max_depth > 5)。"""
+    node = conn.execute(
+        "SELECT primary_root_xname, depth_from_primary_root FROM factor_lineage_nodes WHERE xname=?",
+        (xname,),
+    ).fetchone()
+    if not node:
+        if not conn.execute("SELECT 1 FROM factors WHERE xname=?", (xname,)).fetchone():
+            raise ValueError(f"xname 不存在: {xname}")
+        root_xname = xname
+        factor_depth = 0
+    else:
+        root_xname = node["primary_root_xname"]
+        factor_depth = node["depth_from_primary_root"]
+    branch = conn.execute(
+        "SELECT max_depth, member_count FROM factor_lineage_branches WHERE root_xname=?",
+        (root_xname,),
+    ).fetchone()
+    branch_depth = int(branch["max_depth"]) if branch and branch["max_depth"] is not None else 0
+    return {
+        "xname": xname,
+        "root_xname": root_xname,
+        "factor_depth": factor_depth,
+        "branch_max_depth": branch_depth,
+        "branch_member_count": int(branch["member_count"]) if branch else 0,
+        "saturated": branch_depth > 5,
+    }
 
 
 # ============ lessons ============
@@ -538,12 +772,11 @@ def ensure_ideas_necessity_fields(conn: sqlite3.Connection) -> None:
 
 
 def ensure_graph_schema(conn: sqlite3.Connection) -> None:
-    """对现有库幂等补齐知识图表结构(= migrations v2 graph_core + v3 bounds + v4 angle)。
+    """对现有库幂等补齐知识图表结构(= migrations v2 graph_core + v3 bounds)。
     新库由 schema.sql 直接建；此函数给已存在的库做在线迁移。向后兼容,调用方不变。"""
     _ensure_graph_tables(conn)
     ensure_ideas_necessity_fields(conn)
     migrate_graph_edge_bounds(conn)
-    ensure_angle_schema(conn)
 
 
 def add_axiom(
@@ -588,11 +821,10 @@ def add_graph_node(conn: sqlite3.Connection, table: str, data: dict) -> int:
         if chain is not None and not isinstance(chain, str):
             chain = json.dumps(chain, ensure_ascii=False)
         cur = conn.execute(
-            "INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, node_layer, angle_code) "
-            "VALUES (?, ?, 'open', ?, ?, ?, ?)",
+            "INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, node_layer) "
+            "VALUES (?, ?, 'open', ?, ?, ?)",
             (data.get("text"), data.get("parent_idea_id"), chain,
-             data.get("necessity_grade"), data.get("node_layer", "HYPOTHESIS"),
-             data.get("angle_code")),
+             data.get("necessity_grade"), data.get("node_layer", "HYPOTHESIS")),
         )
         return int(cur.lastrowid)
     raise ValueError(f"add_graph_node 不支持表: {table}")
@@ -925,87 +1157,51 @@ def migrate_graph_edge_bounds(conn: sqlite3.Connection) -> None:
     )
 
 
-# ============ 信息角度元层（angle_ontology + factors.angle_code）============
-# 数据→信息角度字典。让 graph-engine 感知"哪些角度饱和、哪些未探索",自动换角度。
+# ============ angle 层历史迁移（v21-v26）============
+# 活跃的 angle 层已退役；以下 helper 仅由 schema 迁移链调用。
 
-def ensure_angle_schema(conn: sqlite3.Connection) -> None:
-    """建 angle_ontology 表 + factors.angle_code 列。幂等。"""
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS angle_ontology (
-            code          TEXT PRIMARY KEY,
-            name          TEXT NOT NULL,
-            field_family  TEXT NOT NULL,
-            extraction    TEXT NOT NULL,
-            signal_target TEXT,
-            theory_axiom  TEXT,
-            description   TEXT
-        )"""
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family)")
-    fcols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
-    if "angle_code" not in fcols:
-        conn.execute("ALTER TABLE factors ADD COLUMN angle_code TEXT")
+def retire_angle_layer(conn: sqlite3.Connection) -> None:
+    """v26: 删除 angle_ontology 与 angle_code 列,重建无 angle 的 library_map。"""
+    conn.execute("DROP VIEW IF EXISTS library_map")
+    conn.execute("DROP TABLE IF EXISTS angle_ontology")
+    for table in ("factors", "ideas"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "angle_code" in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN angle_code")
+    ensure_retrieval_tables(conn)
 
 
-def add_angle(
-    conn: sqlite3.Connection, code: str, name: str, field_family: str, extraction: str,
-    signal_target: str | None = None, theory_axiom: str | None = None, description: str | None = None,
-) -> None:
-    """写一条信息角度(幂等,code 主键)。"""
-    conn.execute(
-        """INSERT OR IGNORE INTO angle_ontology
-           (code,name,field_family,extraction,signal_target,theory_axiom,description)
-           VALUES (?,?,?,?,?,?,?)""",
-        (code, name, field_family, extraction, signal_target, theory_axiom, description),
-    )
+def drop_angle_theory_axiom(conn: sqlite3.Connection) -> None:
+    """v21: 删除 angle 层的 theory_axiom 软引用字段。幂等。"""
+    for table in ("angle_ontology", "angle_candidates"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "theory_axiom" in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN theory_axiom")
 
 
-def tag_factor_angle(conn: sqlite3.Connection, xname: str, angle_code: str) -> None:
-    """标注因子所属信息角度。"""
-    conn.execute("UPDATE factors SET angle_code=? WHERE xname=?", (angle_code, xname))
+def drop_angle_field_family(conn: sqlite3.Connection) -> None:
+    """v22: 删除 angle 层的 field_family 字段。幂等。"""
+    conn.execute("DROP INDEX IF EXISTS idx_angle_family")
+    for table in ("angle_ontology", "angle_candidates"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "field_family" in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN field_family")
 
 
-def query_angle_coverage(conn: sqlite3.Connection) -> list[dict]:
-    """每角度的探索状态:因子数/dead_end/evaluated/最高icir/饱和度。explore_uncovered_angle 的输入。
+def drop_angle_extraction(conn: sqlite3.Connection) -> None:
+    """v23: 删除 angle 层的 extraction 字段。幂等。"""
+    for table in ("angle_ontology", "angle_candidates"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "extraction" in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN extraction")
 
-    饱和度启发:saturated=因子≥5且dead_end占≥60%; thin=因子≤2; unexplored=0因子且0 idea; partial=其余。
-    saturation 把 idea 占用算进去:有 idea(方向已推理触及)但无 factor → partial(非 explore fresh),
-    避免 graph 反复往"假 fresh"角度派 explore 产同方向对偶命题。"""
-    rows = conn.execute(
-        """
-        SELECT a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom,
-               COUNT(f.xname) AS n_factors,
-               COALESCE(SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END),0) AS n_dead_end,
-               COALESCE(SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END),0) AS n_evaluated,
-               (SELECT COUNT(*) FROM ideas i WHERE i.angle_code = a.code) AS n_ideas,
-               MAX(f.latest_icir) AS max_icir
-        FROM angle_ontology a
-        LEFT JOIN factors f ON f.angle_code = a.code AND f.deprecated_at IS NULL
-        GROUP BY a.code, a.name, a.field_family, a.extraction, a.signal_target, a.theory_axiom
-        ORDER BY n_factors ASC
-        """
-    ).fetchall()
-    out = []
-    for r in rows:
-        n, nd, ni = r["n_factors"], r["n_dead_end"], r["n_ideas"] or 0
-        sc = graph_constants()["saturation"]
-        if n == 0 and ni == 0:
-            sat = "unexplored"
-        elif n == 0 and ni > 0:
-            sat = "partial"
-        elif n >= sc["min_n_saturated"] and nd >= n * sc["dead_ratio_saturated"]:
-            sat = "saturated"
-        elif n <= sc["max_n_thin"]:
-            sat = "thin"
-        else:
-            sat = "partial"
-        out.append({
-            "code": r["code"], "name": r["name"], "field_family": r["field_family"],
-            "extraction": r["extraction"], "signal_target": r["signal_target"],
-            "theory_axiom": r["theory_axiom"], "n_factors": n, "n_dead_end": nd,
-            "n_evaluated": r["n_evaluated"], "n_ideas": ni, "max_icir": r["max_icir"], "saturation": sat,
-        })
-    return out
+
+def drop_angle_description(conn: sqlite3.Connection) -> None:
+    """v24: 删除 angle 层的 description 字段。幂等。"""
+    for table in ("angle_ontology", "angle_candidates"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "description" in cols:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN description")
 
 
 # ============ 操作选择（3 操作数据驱动打分）============
@@ -1030,7 +1226,6 @@ def query_recent_operations(conn: sqlite3.Connection, n: int = 10) -> list[str]:
         "refutation_correction": "generalize",
         "orthogonal_branch": "generalize",
         "fill_chain_gap": "fill",
-        "explore_uncovered_angle": "explore",
         "resolve_contradiction": "generalize",
         "trace_verification": "generalize",
     }
@@ -1061,51 +1256,29 @@ def _count_fill_gaps(conn: sqlite3.Connection) -> int:
     return n
 
 
-def _max_angle_cluster(conn: sqlite3.Connection) -> int:
-    """同 angle_code 的 dead_end 因子最大数(angle 聚簇大小)。"""
-    row = conn.execute(
-        """SELECT MAX(n) FROM (
-              SELECT COUNT(*) n FROM factors
-              WHERE status='dead_end' AND deprecated_at IS NULL AND angle_code IS NOT NULL
-              GROUP BY angle_code
-           )"""
-    ).fetchone()
-    return int(row[0]) if row and row[0] else 0
-
-
 def select_graph_operation(conn: sqlite3.Connection) -> dict:
-    """3 操作数据驱动打分:score = trigger × diversity,无魔数 if-else。
+    """图操作数据驱动打分:score = trigger × diversity,无魔数 if-else。
 
-    操作层(3 个):
+    操作层(2 个):
       generalize(归纳): 从图里案例(反例/成功/混合)归纳新假设
       fill(维护):       补已有论证链客观空节
-      explore(拓展):    往未探索角度产种子
 
     方法论层(graph-reasoner 推理时自选,不在此打分):
       全dead_end→反例归纳 / 有pass→成功归纳或正交展开 / 混合→对比归纳
     """
-    coverage = query_angle_coverage(conn)
     recent = query_recent_operations(conn, 10)
 
-    n_fresh = sum(1 for a in coverage if a["saturation"] in ("unexplored", "thin"))
-    n_saturated = sum(1 for a in coverage if a["saturation"] == "saturated")
-    total = max(len(coverage), 1)
-
     # ===== trigger strength(连续,从图状态算) =====
-    # generalize: max(idea 聚簇, angle 聚簇) / scale
+    # generalize: idea 聚簇 / scale
     idea_clusters = find_refutation_clusters(conn, min_size=3, limit=5)
     max_idea_cluster = max((cl["size"] for cl in idea_clusters), default=0)
-    max_angle_cluster = _max_angle_cluster(conn)
-    max_cluster = max(max_idea_cluster, max_angle_cluster)
+    max_cluster = max_idea_cluster
 
     n_gaps = _count_fill_gaps(conn)
 
     trigger = {
         "generalize": min(1.0, max_cluster / _CLUSTER_SCALE),
         "fill":       min(1.0, n_gaps / _GAP_SCALE),
-        "explore":    (n_fresh / total) * (n_saturated / total),
-        # angle_discovery:explore 卡(nFresh==0)+ 饱和多 → 该发现新角度,突破预定义语言边界
-        "angle_discovery": (n_saturated / total) if n_fresh == 0 else 0.0,
     }
 
     # ===== diversity bonus(连续,防垄断) =====
@@ -1123,11 +1296,7 @@ def select_graph_operation(conn: sqlite3.Connection) -> dict:
         "trigger": {k: round(v, 3) for k, v in trigger.items()},
         "max_cluster": max_cluster,
         "n_gaps": n_gaps,
-        "n_fresh": n_fresh,
-        "n_saturated": n_saturated,
         "recent_operations": recent,
-        "fresh_angles": sorted(a["code"] for a in coverage if a["saturation"] in ("unexplored", "thin")),
-        "saturated_angles": sorted(a["code"] for a in coverage if a["saturation"] == "saturated"),
     }
 
 
@@ -1221,19 +1390,24 @@ def ensure_cohort_meta_fields(conn: sqlite3.Connection) -> None:
 def ensure_ridge_svd_fields(conn: sqlite3.Connection) -> None:
     """补 factors 冗余度画像列(平台 restest Ridge-SVD)。v16 ridge_svd。
 
-    latest_dloocv_pct: 对线性模型净增益%(主判据, >1 显著增量, <0 过拟合)
     latest_r2_x:       X 空间冗余度(别人72因子库解释方差, >0.8 高冗余)
     latest_res_ic:     去掉库冗余后的增量 IC
     """
     cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
     additions = {
-        "latest_dloocv_pct": "REAL",
         "latest_r2_x": "REAL",
         "latest_res_ic": "REAL",
     }
     for col, decl in additions.items():
         if col not in cols:
             conn.execute(f"ALTER TABLE factors ADD COLUMN {col} {decl}")
+
+
+def drop_ridge_dloocv_field(conn: sqlite3.Connection) -> None:
+    """v30: 删除 factors.latest_dloocv_pct(平台 2026-08-20 起不再输出 dLOOCV)。幂等。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if "latest_dloocv_pct" in cols:
+        conn.execute("ALTER TABLE factors DROP COLUMN latest_dloocv_pct")
 
 
 def ensure_verdict_field(conn: sqlite3.Connection) -> None:
@@ -1248,90 +1422,491 @@ def ensure_verdict_field(conn: sqlite3.Connection) -> None:
 def update_factor_ridge_svd(
     conn: sqlite3.Connection,
     xname: str,
-    dloocv_pct: float | None,
     r2_x: float | None,
     res_ic: float | None,
 ) -> None:
     """更新 factors 冗余度画像(平台 restest Ridge-SVD)。None = 不覆盖该字段。"""
     conn.execute(
         """UPDATE factors SET
-           latest_dloocv_pct = COALESCE(?, latest_dloocv_pct),
            latest_r2_x = COALESCE(?, latest_r2_x),
            latest_res_ic = COALESCE(?, latest_res_ic),
            last_updated_ts = CURRENT_TIMESTAMP
            WHERE xname = ?""",
-        (dloocv_pct, r2_x, res_ic, xname),
+        (r2_x, res_ic, xname),
     )
 
 
-def ensure_angle_candidates_table(conn: sqlite3.Connection) -> None:
-    """建 angle_candidates 表(angle 自发现候选记录,防归纳循环)。v9 angle_candidates。"""
-    tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "angle_candidates" not in tabs:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS angle_candidates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL,
-                field_family TEXT, extraction TEXT, signal_target TEXT, theory_axiom TEXT,
-                description TEXT, novelty_argument TEXT, trigger_angle TEXT,
-                status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
-                reject_reason TEXT, nearest_existing TEXT,
-                tried_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status)")
-
-
-def add_angle_candidate(conn, *, code, field_family=None, extraction=None, signal_target=None,
-                        theory_axiom=None, description=None, novelty_argument=None,
-                        trigger_angle=None, status="proposed") -> int:
-    """写一条 angle 自发现候选(proposed),返回 id。"""
-    cur = conn.execute(
-        """INSERT INTO angle_candidates
-           (code, field_family, extraction, signal_target, theory_axiom, description,
-            novelty_argument, trigger_angle, status)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (code, field_family, extraction, signal_target, theory_axiom, description,
-         novelty_argument, trigger_angle, status),
-    )
-    return int(cur.lastrowid)
-
-
-def update_angle_candidate(conn, candidate_id: int, *, status: str,
-                           reject_reason: str | None = None,
-                           nearest_existing: str | None = None) -> None:
-    """更新候选状态(accept→accepted / reject→rejected + reason)。"""
-    conn.execute(
-        """UPDATE angle_candidates SET status=?, reject_reason=?, nearest_existing=? WHERE id=?""",
-        (status, reject_reason, nearest_existing, candidate_id),
-    )
-
-
-def list_angle_candidates(conn, status: str | None = None) -> list[sqlite3.Row]:
-    """列候选(可按 status 过滤)。meta-angle-discoverer 查 rejected 防循环用。"""
-    if status:
-        return conn.execute(
-            "SELECT * FROM angle_candidates WHERE status=? ORDER BY tried_at DESC", (status,)
-        ).fetchall()
-    return conn.execute("SELECT * FROM angle_candidates ORDER BY tried_at DESC").fetchall()
-
-
-def ensure_ideas_angle_code(conn: sqlite3.Connection) -> None:
-    """补 ideas.angle_code 列(信息角度血缘)。v10。"""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(ideas)")}
-    if "angle_code" not in cols:
-        conn.execute("ALTER TABLE ideas ADD COLUMN angle_code TEXT")
+def retire_angle_candidates(conn: sqlite3.Connection) -> None:
+    """v25: 删除 angle_candidates 表(候选自发现链路已退役)。幂等。"""
+    conn.execute("DROP TABLE IF EXISTS angle_candidates")
 
 
 def ensure_iterations_columns(conn: sqlite3.Connection) -> None:
-    """补 iterations.status/iterable 列(迭代建议状态机)。
+    """补旧物理 iterations.status/iterable 列(v11 历史迁移步骤)。
     v11 iterations_status_iterable。与 runtime migrateIterationsSchema 对齐——
     schema.sql 新库已含,此函数给既有 Python 库经 migrate 补列(JS 侧靠 init 兜底,py 侧原本漏)。"""
+    obj = conn.execute(
+        "SELECT type FROM sqlite_master WHERE name='iterations'"
+    ).fetchone()
+    if not obj or obj["type"] != "table":
+        return  # v19 后 iterations 是只读 view,不再需要补列
     cols = {r[1] for r in conn.execute("PRAGMA table_info(iterations)")}
-    if not cols:
-        return  # 表不存在(全新库待 schema.sql 建),跳过
     if "status" not in cols:
         conn.execute("ALTER TABLE iterations ADD COLUMN status TEXT NOT NULL DEFAULT 'realized'")
     if "iterable" not in cols:
         conn.execute("ALTER TABLE iterations ADD COLUMN iterable INTEGER NOT NULL DEFAULT 1")
+
+
+def ensure_factor_lineage_schema(conn: sqlite3.Connection) -> None:
+    """v18: suggestions + immutable lineage DAG + derived closure/profile.
+
+    A legacy physical ``iterations`` table, if present, is imported with ids preserved so
+    run-local ``suggestion_id`` references stay valid; only realized non-self rows become
+    lineage edges. v19 later replaces that physical table with a read-only view.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS iteration_suggestions (
+            suggestion_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_xname        TEXT NOT NULL,
+            idea_id           INTEGER,
+            op_id             INTEGER,
+            change_note       TEXT,
+            reason            TEXT,
+            status            TEXT NOT NULL DEFAULT 'open'
+                              CHECK (status IN ('open','in_progress','realized','abandoned')),
+            created_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (from_xname)        REFERENCES factors(xname),
+            FOREIGN KEY (idea_id)           REFERENCES ideas(id),
+            FOREIGN KEY (op_id)             REFERENCES operators(op_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_is_from   ON iteration_suggestions(from_xname);
+        CREATE INDEX IF NOT EXISTS idx_is_status ON iteration_suggestions(status);
+        CREATE INDEX IF NOT EXISTS idx_is_idea   ON iteration_suggestions(idea_id);
+        CREATE INDEX IF NOT EXISTS idx_is_op     ON iteration_suggestions(op_id);
+
+        CREATE TABLE IF NOT EXISTS factor_lineage_edges (
+            edge_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_xname  TEXT NOT NULL,
+            child_xname   TEXT NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'iteration'
+                          CHECK (relation_type IN ('iteration','repair','operator_application','manual','reseed')),
+            origin        TEXT NOT NULL DEFAULT 'suggestion'
+                          CHECK (origin IN ('suggestion','retry','cog_repair','operator_contract','manual_backfill','reseeding')),
+            suggestion_id INTEGER,
+            idea_id       INTEGER,
+            op_id         INTEGER,
+            change_note   TEXT,
+            reason        TEXT,
+            outcome       TEXT CHECK (outcome IN ('improved','declined','neutral')),
+            icir_delta    REAL,
+            evidence      TEXT,
+            confidence    TEXT NOT NULL DEFAULT 'observed'
+                          CHECK (confidence IN ('observed','declared','inferred')),
+            created_ts    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (parent_xname, child_xname, relation_type),
+            FOREIGN KEY (parent_xname)   REFERENCES factors(xname),
+            FOREIGN KEY (child_xname)    REFERENCES factors(xname),
+            FOREIGN KEY (suggestion_id)  REFERENCES iteration_suggestions(suggestion_id),
+            FOREIGN KEY (idea_id)        REFERENCES ideas(id),
+            FOREIGN KEY (op_id)          REFERENCES operators(op_id),
+            CHECK (parent_xname <> child_xname)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fle_parent ON factor_lineage_edges(parent_xname);
+        CREATE INDEX IF NOT EXISTS idx_fle_child  ON factor_lineage_edges(child_xname);
+        CREATE INDEX IF NOT EXISTS idx_fle_sugg   ON factor_lineage_edges(suggestion_id);
+        CREATE INDEX IF NOT EXISTS idx_fle_idea   ON factor_lineage_edges(idea_id);
+        CREATE INDEX IF NOT EXISTS idx_fle_op     ON factor_lineage_edges(op_id);
+
+        CREATE TABLE IF NOT EXISTS factor_lineage_paths (
+            ancestor_xname   TEXT NOT NULL,
+            descendant_xname TEXT NOT NULL,
+            min_depth        INTEGER NOT NULL,
+            path_count       INTEGER NOT NULL DEFAULT 1,
+            is_direct        INTEGER NOT NULL DEFAULT 0 CHECK (is_direct IN (0,1)),
+            rebuilt_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ancestor_xname, descendant_xname),
+            FOREIGN KEY (ancestor_xname)   REFERENCES factors(xname),
+            FOREIGN KEY (descendant_xname) REFERENCES factors(xname)
+        );
+        CREATE INDEX IF NOT EXISTS idx_flp_descendant ON factor_lineage_paths(descendant_xname, min_depth);
+
+        CREATE TABLE IF NOT EXISTS factor_lineage_nodes (
+            xname                      TEXT PRIMARY KEY,
+            is_root                    INTEGER NOT NULL DEFAULT 1 CHECK (is_root IN (0,1)),
+            is_leaf                    INTEGER NOT NULL DEFAULT 1 CHECK (is_leaf IN (0,1)),
+            parent_count               INTEGER NOT NULL DEFAULT 0,
+            child_count                INTEGER NOT NULL DEFAULT 0,
+            primary_root_xname         TEXT NOT NULL,
+            depth_from_primary_root    INTEGER NOT NULL DEFAULT 0,
+            descendant_count           INTEGER NOT NULL DEFAULT 0,
+            max_descendant_depth       INTEGER NOT NULL DEFAULT 0,
+            evaluated_descendant_count INTEGER NOT NULL DEFAULT 0,
+            dead_end_descendant_count  INTEGER NOT NULL DEFAULT 0,
+            open_suggestion_count      INTEGER NOT NULL DEFAULT 0,
+            last_lineage_ts            TIMESTAMP,
+            updated_ts                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (xname)              REFERENCES factors(xname),
+            FOREIGN KEY (primary_root_xname) REFERENCES factors(xname)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fln_root ON factor_lineage_nodes(primary_root_xname);
+        CREATE INDEX IF NOT EXISTS idx_fln_leaf ON factor_lineage_nodes(is_leaf);
+    """)
+
+    edge_cols = {r[1] for r in conn.execute("PRAGMA table_info(factor_lineage_edges)")}
+    if "confidence" not in edge_cols:
+        conn.execute(
+            "ALTER TABLE factor_lineage_edges ADD COLUMN confidence TEXT NOT NULL DEFAULT 'observed'"
+        )
+
+    # Preserve legacy ids. Old open suggestions keep their ids so in-flight run states
+    # can still call claim/realize without a translation layer.
+    if "iterations" in {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}:
+        for row in conn.execute("""
+            SELECT id, from_xname, to_xname, idea_id, op_id, change_note, reason,
+                   status, iterable, outcome, icir_delta, ts
+            FROM iterations
+        """).fetchall():
+            status = row["status"] if row["status"] in {"open", "in_progress", "realized", "abandoned"} else "realized"
+            target = row["to_xname"] if status == "realized" and row["to_xname"] != row["from_xname"] else None
+            conn.execute("""
+                INSERT OR IGNORE INTO iteration_suggestions
+                    (suggestion_id, from_xname, idea_id, op_id, change_note, reason, status,
+                     created_ts, updated_ts)
+                VALUES (?,?,?,?,?,?,?,COALESCE(?, datetime('now')), datetime('now'))
+            """, (
+                row["id"], row["from_xname"], row["idea_id"], row["op_id"],
+                row["change_note"], row["reason"], status, row["ts"],
+            ))
+            if target:
+                conn.execute("""
+                    INSERT OR IGNORE INTO factor_lineage_edges
+                        (parent_xname, child_xname, relation_type, origin, suggestion_id,
+                         idea_id, op_id, change_note, reason, outcome, icir_delta, created_ts)
+                    VALUES (?,?, 'iteration', 'suggestion', ?,?,?,?,?,?,?,?)
+                """, (
+                    row["from_xname"], target, row["id"], row["idea_id"], row["op_id"],
+                    row["change_note"], row["reason"], row["outcome"], row["icir_delta"], row["ts"],
+                ))
+
+    conn.executescript("""
+        CREATE VIEW IF NOT EXISTS factor_lineage_branches AS
+        WITH roots AS (
+            SELECT f.xname AS root_xname
+            FROM factors f
+            WHERE f.deprecated_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM factor_lineage_paths p
+                  WHERE p.descendant_xname = f.xname
+                    AND p.ancestor_xname <> f.xname
+              )
+        ),
+        members AS (
+            SELECT p.ancestor_xname AS root_xname,
+                   p.descendant_xname AS member_xname,
+                   p.min_depth AS member_depth
+            FROM factor_lineage_paths p
+            JOIN roots r ON r.root_xname = p.ancestor_xname
+        ),
+        suggestion_stats AS (
+            SELECT from_xname,
+                   SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_suggestion_count,
+                   MAX(updated_ts) AS last_suggestion_ts
+            FROM iteration_suggestions
+            GROUP BY from_xname
+        ),
+        edge_stats AS (
+            SELECT parent_xname, COUNT(*) AS realized_child_count, MAX(created_ts) AS last_edge_ts
+            FROM factor_lineage_edges
+            GROUP BY parent_xname
+        ),
+        aggregated AS (
+            SELECT m.root_xname,
+                   COUNT(*) AS member_count,
+                   MAX(m.member_depth) AS max_depth,
+                   SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END) AS evaluated_count,
+                   SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END) AS dead_end_count,
+                   MAX(f.last_updated_ts) AS last_factor_ts,
+                   COALESCE(SUM(ss.open_suggestion_count), 0) AS open_suggestion_count,
+                   MAX(ss.last_suggestion_ts) AS last_suggestion_ts,
+                   COALESCE(SUM(es.realized_child_count), 0) AS realized_edge_count,
+                   MAX(es.last_edge_ts) AS last_edge_ts
+            FROM members m
+            JOIN factors f ON f.xname=m.member_xname AND f.deprecated_at IS NULL
+            LEFT JOIN suggestion_stats ss ON ss.from_xname=m.member_xname
+            LEFT JOIN edge_stats es ON es.parent_xname=m.member_xname
+            GROUP BY m.root_xname
+        )
+        SELECT a.root_xname, rf.status AS root_status, a.member_count, a.max_depth,
+               a.evaluated_count, a.dead_end_count,
+               ROUND(CAST(a.dead_end_count AS REAL) / CAST(a.member_count AS REAL), 4) AS dead_end_ratio,
+               a.open_suggestion_count, a.realized_edge_count,
+               MAX(a.last_factor_ts, a.last_suggestion_ts, a.last_edge_ts) AS last_activity_ts
+        FROM aggregated a
+        JOIN factors rf ON rf.xname=a.root_xname;
+    """)
+    rebuild_factor_lineage(conn)
+    # v18 changes the source of realized-child counts; refresh derived research state after
+    # importing legacy rows. Local import avoids a module-level retrieval -> db cycle.
+    from core.retrieval.derived_tables import rebuild_research_state
+    factor_cols = {r[1] for r in conn.execute("PRAGMA table_info(factors)")}
+    if {"deprecated_at", "status"}.issubset(factor_cols):
+        rebuild_research_state(conn)
+
+
+def retire_iterations_table(conn: sqlite3.Connection) -> None:
+    """v19: remove the legacy physical iterations table and expose a read-only view.
+
+    Call only after all legacy rows have been imported. The view keeps old reporting
+    SQL readable, while preventing the retired table from becoming a second writable
+    source of truth.
+    """
+    ensure_factor_lineage_schema(conn)
+    obj = conn.execute(
+        "SELECT type FROM sqlite_master WHERE name='iterations'"
+    ).fetchone()
+    if obj and obj["type"] == "table":
+        conn.execute("DROP TABLE iterations")
+    else:
+        conn.execute("DROP VIEW IF EXISTS iterations")
+    conn.execute("""
+        CREATE VIEW iterations AS
+        SELECT
+            s.suggestion_id AS id,
+            s.from_xname,
+            COALESCE(e.child_xname, s.from_xname) AS to_xname,
+            s.idea_id,
+            s.change_note,
+            s.reason,
+            e.outcome,
+            e.icir_delta,
+            s.created_ts AS ts,
+            s.status,
+            s.op_id
+        FROM iteration_suggestions s
+        LEFT JOIN factor_lineage_edges e
+          ON e.suggestion_id = s.suggestion_id AND e.origin = 'suggestion'
+    """)
+
+
+def drop_iteration_suggestion_audit_fields(conn: sqlite3.Connection) -> None:
+    """v27/v28: 删除 iteration_suggestions 的 opened/claimed/legacy/iterable 字段。幂等。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(iteration_suggestions)")}
+    target = {"opened_run_id", "claimed_run_id", "claimed_ts", "legacy_iteration_id", "iterable"}
+    if not target & cols:
+        return
+    conn.execute("DROP VIEW IF EXISTS iterations")
+    conn.execute("DROP VIEW IF EXISTS factor_lineage_branches")
+    conn.execute("PRAGMA defer_foreign_keys=ON")
+    conn.execute("DROP TABLE IF EXISTS iteration_suggestions_new")
+    conn.execute("""
+        CREATE TABLE iteration_suggestions_new (
+            suggestion_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_xname    TEXT NOT NULL,
+            idea_id       INTEGER,
+            op_id         INTEGER,
+            change_note   TEXT,
+            reason        TEXT,
+            status        TEXT NOT NULL DEFAULT 'open'
+                          CHECK (status IN ('open','in_progress','realized','abandoned')),
+            created_ts    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_ts    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (from_xname) REFERENCES factors(xname),
+            FOREIGN KEY (idea_id)    REFERENCES ideas(id),
+            FOREIGN KEY (op_id)      REFERENCES operators(op_id)
+        )
+    """)
+    conn.execute("""
+        INSERT INTO iteration_suggestions_new
+            (suggestion_id, from_xname, idea_id, op_id, change_note, reason,
+             status, created_ts, updated_ts)
+        SELECT suggestion_id, from_xname, idea_id, op_id, change_note, reason,
+               status, created_ts, updated_ts
+        FROM iteration_suggestions
+    """)
+    conn.execute("DROP TABLE iteration_suggestions")
+    conn.execute("ALTER TABLE iteration_suggestions_new RENAME TO iteration_suggestions")
+    conn.execute("PRAGMA defer_foreign_keys=OFF")
+    ensure_factor_lineage_schema(conn)
+    retire_iterations_table(conn)
+
+
+def drop_low_value_lineage_fields(conn: sqlite3.Connection) -> None:
+    """v28: 删除 lineage 层低价值审计/冗余字段。幂等。"""
+    drop_iteration_suggestion_audit_fields(conn)
+    edge_cols = {r[1] for r in conn.execute("PRAGMA table_info(factor_lineage_edges)")}
+    if "run_id" in edge_cols:
+        conn.execute("ALTER TABLE factor_lineage_edges DROP COLUMN run_id")
+    node_cols = {r[1] for r in conn.execute("PRAGMA table_info(factor_lineage_nodes)")}
+    if "realized_child_count" in node_cols:
+        conn.execute("ALTER TABLE factor_lineage_nodes DROP COLUMN realized_child_count")
+
+
+def ensure_operator_family_edge_unique(conn: sqlite3.Connection) -> None:
+    """v29: operator_family_edges 重建为带 UNIQUE(op_id, base_type) 的表。
+
+    旧表允许同一算子×基底重复记录,撞族结果只能靠 ORDER BY 取最新;
+    新表把“一算子×基底一行、更新即最新”做成结构约束。幂等。"""
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operator_family_edges'"
+    ).fetchone():
+        return
+    if any(
+        str(idx[1]).startswith("sqlite_autoindex_")
+        for idx in conn.execute("PRAGMA index_list(operator_family_edges)").fetchall()
+    ):
+        return
+
+    conn.execute("PRAGMA defer_foreign_keys=ON")
+    conn.execute("DROP TABLE IF EXISTS operator_family_edges_new")
+    conn.execute("""
+        DELETE FROM operator_family_edges
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM operator_family_edges
+            GROUP BY op_id, base_type
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE operator_family_edges_new (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_id       INTEGER NOT NULL,
+            base_type   TEXT NOT NULL,
+            family      TEXT,
+            pearson     REAL,
+            residual    REAL,
+            tested_on   TEXT,
+            verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
+            note        TEXT,
+            ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(op_id, base_type),
+            FOREIGN KEY (op_id)     REFERENCES operators(op_id),
+            FOREIGN KEY (tested_on)  REFERENCES factors(xname)
+        )
+    """)
+    conn.execute("""
+        INSERT INTO operator_family_edges_new
+            (op_id, base_type, family, pearson, residual, tested_on, verdict, note, ts)
+        SELECT op_id, base_type, family, pearson, residual, tested_on, verdict, note, ts
+        FROM operator_family_edges
+    """)
+    conn.execute("DROP TABLE operator_family_edges")
+    conn.execute("ALTER TABLE operator_family_edges_new RENAME TO operator_family_edges")
+    conn.execute("PRAGMA defer_foreign_keys=OFF")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_fam  ON operator_family_edges(family)")
+
+
+def normalize_suggestion_node_schema(conn: sqlite3.Connection) -> None:
+    """v20: make iteration_suggestions a pure node todo, not a second edge fact.
+
+    Any previously realized rows are folded into factor_lineage_edges first; the
+    suggestion table then keeps only lifecycle fields. The iterations compatibility
+    view derives target/outcome/icir from the edge.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(iteration_suggestions)")}
+    edge_cols = {r[1] for r in conn.execute("PRAGMA table_info(factor_lineage_edges)")}
+
+    if {"realized_to_xname", "outcome", "icir_delta"}.issubset(cols):
+        for row in conn.execute("""
+            SELECT suggestion_id, from_xname, realized_to_xname, idea_id, op_id,
+                   change_note, reason, outcome, icir_delta
+            FROM iteration_suggestions
+            WHERE status='realized' AND realized_to_xname IS NOT NULL
+        """).fetchall():
+            existing = conn.execute(
+                """SELECT edge_id, outcome, icir_delta FROM factor_lineage_edges
+                   WHERE suggestion_id=?""",
+                (row["suggestion_id"],),
+            ).fetchone()
+            if existing:
+                if existing["outcome"] is None and row["outcome"] is not None:
+                    conn.execute(
+                        "UPDATE factor_lineage_edges SET outcome=? WHERE edge_id=?",
+                        (row["outcome"], existing["edge_id"]),
+                    )
+                if existing["icir_delta"] is None and row["icir_delta"] is not None:
+                    conn.execute(
+                        "UPDATE factor_lineage_edges SET icir_delta=? WHERE edge_id=?",
+                        (row["icir_delta"], existing["edge_id"]),
+                    )
+                continue
+            relation = "operator_application" if row["op_id"] is not None else "iteration"
+            conn.execute(
+                """INSERT OR IGNORE INTO factor_lineage_edges
+                   (parent_xname, child_xname, relation_type, origin, suggestion_id,
+                    idea_id, op_id, change_note, reason, outcome, icir_delta,
+                    confidence)
+                   VALUES (?,?,?, 'suggestion', ?,?,?,?,?,?,?, 'observed')""",
+                (
+                    row["from_xname"], row["realized_to_xname"], relation,
+                    row["suggestion_id"], row["idea_id"], row["op_id"],
+                    row["change_note"], row["reason"], row["outcome"], row["icir_delta"],
+                ),
+            )
+
+    conn.execute("DROP VIEW IF EXISTS iterations")
+    needs_rebuild = bool(
+        {"realized_run_id", "realized_ts", "realized_to_xname", "outcome", "icir_delta"} & cols
+    )
+    if needs_rebuild:
+        conn.execute("DROP VIEW IF EXISTS factor_lineage_branches")
+        conn.execute("PRAGMA defer_foreign_keys=ON")
+        conn.execute("DROP TABLE IF EXISTS iteration_suggestions_new")
+        conn.execute("""
+            CREATE TABLE iteration_suggestions_new (
+                suggestion_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_xname        TEXT NOT NULL,
+                idea_id           INTEGER,
+                op_id             INTEGER,
+                change_note       TEXT,
+                reason            TEXT,
+                status            TEXT NOT NULL DEFAULT 'open'
+                                  CHECK (status IN ('open','in_progress','realized','abandoned')),
+                created_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (from_xname) REFERENCES factors(xname),
+                FOREIGN KEY (idea_id)    REFERENCES ideas(id),
+                FOREIGN KEY (op_id)      REFERENCES operators(op_id)
+            )
+        """)
+        conn.execute("""
+            INSERT INTO iteration_suggestions_new
+                (suggestion_id, from_xname, idea_id, op_id, change_note, reason,
+                 status, created_ts, updated_ts)
+            SELECT suggestion_id, from_xname, idea_id, op_id, change_note, reason,
+                   status, created_ts, updated_ts
+            FROM iteration_suggestions
+        """)
+        conn.execute("DROP TABLE iteration_suggestions")
+        conn.execute("ALTER TABLE iteration_suggestions_new RENAME TO iteration_suggestions")
+        conn.execute("PRAGMA defer_foreign_keys=OFF")
+        ensure_factor_lineage_schema(conn)
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_is_from   ON iteration_suggestions(from_xname)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_is_status ON iteration_suggestions(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_is_idea   ON iteration_suggestions(idea_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_is_op     ON iteration_suggestions(op_id)")
+    conn.execute("""
+        CREATE VIEW iterations AS
+        SELECT
+            s.suggestion_id AS id,
+            s.from_xname,
+            COALESCE(e.child_xname, s.from_xname) AS to_xname,
+            s.idea_id,
+            s.change_note,
+            s.reason,
+            e.outcome,
+            e.icir_delta,
+            s.created_ts AS ts,
+            s.status,
+            s.op_id
+        FROM iteration_suggestions s
+        LEFT JOIN factor_lineage_edges e
+          ON e.suggestion_id = s.suggestion_id AND e.origin = 'suggestion'
+    """)
+    rebuild_factor_lineage(conn)
 
 
 def ensure_operators_library(conn: sqlite3.Connection) -> None:
@@ -1368,12 +1943,13 @@ def ensure_operators_library(conn: sqlite3.Connection) -> None:
                 pearson     REAL,
                 residual    REAL,
                 tested_on   TEXT,
-                verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
-                note        TEXT,
-                ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (op_id)     REFERENCES operators(op_id),
-                FOREIGN KEY (tested_on)  REFERENCES factors(xname)
-            )
+            verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
+            note        TEXT,
+            ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(op_id, base_type),
+            FOREIGN KEY (op_id)     REFERENCES operators(op_id),
+            FOREIGN KEY (tested_on)  REFERENCES factors(xname)
+        )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_op   ON operator_family_edges(op_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ofe_base ON operator_family_edges(base_type)")
@@ -1383,6 +1959,58 @@ def ensure_operators_library(conn: sqlite3.Connection) -> None:
     if iter_cols and "op_id" not in iter_cols:
         conn.execute("ALTER TABLE iterations ADD COLUMN op_id INTEGER REFERENCES operators(op_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_iter_op ON iterations(op_id)")
+
+
+def record_operator_family_edge(
+    conn: sqlite3.Connection,
+    op_id: int,
+    base_type: str,
+    *,
+    family: str | None = None,
+    pearson: float | None = None,
+    residual: float | None = None,
+    tested_on: str | None = None,
+    verdict: str = "untested",
+    note: str | None = None,
+) -> int:
+    """记录算子×基底类型的撞族边界(平台评估/assess 后调用)。
+
+    verdict 语义:
+      outside_closure — family 为空,该算子在 base_type 上落在已知族闭包外;
+      inside_closure  — family 为撞到的族名,后续发明/复用按此避让;
+      untested        — 只登记待测边界。
+    同 (op_id, base_type) 已存在则更新指标,保留最新测试结果。
+    """
+    if verdict not in {"outside_closure", "inside_closure", "untested"}:
+        raise ValueError(f"verdict must be one of outside_closure/inside_closure/untested, got {verdict!r}")
+    if not conn.execute("SELECT 1 FROM operators WHERE op_id=?", (op_id,)).fetchone():
+        raise ValueError(f"op_id 不存在: {op_id}")
+    if tested_on and not conn.execute(
+        "SELECT 1 FROM factors WHERE xname=?", (tested_on,)
+    ).fetchone():
+        raise ValueError(f"tested_on 因子不存在: {tested_on}")
+
+    conn.execute(
+        """
+        INSERT INTO operator_family_edges
+            (op_id, base_type, family, pearson, residual, tested_on, verdict, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(op_id, base_type) DO UPDATE SET
+            family = excluded.family,
+            pearson = excluded.pearson,
+            residual = excluded.residual,
+            tested_on = excluded.tested_on,
+            verdict = excluded.verdict,
+            note = excluded.note,
+            ts = CURRENT_TIMESTAMP
+        """,
+        (op_id, base_type, family, pearson, residual, tested_on, verdict, note),
+    )
+    row = conn.execute(
+        "SELECT id FROM operator_family_edges WHERE op_id=? AND base_type=?",
+        (op_id, base_type),
+    ).fetchone()
+    return int(row[0])
 
 
 def ensure_factor_structure_table(conn: sqlite3.Connection) -> None:
@@ -1511,7 +2139,7 @@ def ensure_retrieval_tables(conn: sqlite3.Connection) -> None:
         conn.execute("""
             CREATE VIEW library_map AS
             SELECT
-                f.status AS status, f.angle_code AS angle_code,
+                f.status AS status,
                 COALESCE(fs.complexity, 'unknown') AS structure_family,
                 COUNT(DISTINCT f.xname) AS total_factors,
                 COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END) AS dead_end_count,
@@ -1523,7 +2151,7 @@ def ensure_retrieval_tables(conn: sqlite3.Connection) -> None:
             LEFT JOIN lessons l_de ON l_de.factor_xname=f.xname AND l_de.type='dead_end' AND l_de.deprecated_at IS NULL
             LEFT JOIN lessons l_su ON l_su.factor_xname=f.xname AND l_su.type='success_pattern' AND l_su.deprecated_at IS NULL
             WHERE f.deprecated_at IS NULL
-            GROUP BY f.status, f.angle_code, COALESCE(fs.complexity, 'unknown')
+            GROUP BY f.status, COALESCE(fs.complexity, 'unknown')
         """)
 
 
@@ -1750,43 +2378,62 @@ def open_iteration(
     idea_id: int | None = None,
     change_note: str | None = None,
     reason: str | None = None,
-    iterable: bool = True,
 ) -> int:
     """开 open suggestion。同 (from, change) 已 open/in_progress → 幂等返回已有 id。"""
     existing = conn.execute(
-        """SELECT id FROM iterations
-           WHERE from_xname = ? AND change_note IS ? AND status IN ('open','in_progress')
-           ORDER BY ts DESC LIMIT 1""",
-        (from_xname, change_note),
+        """SELECT suggestion_id FROM iteration_suggestions
+           WHERE from_xname = ? AND change_note IS ?
+             AND idea_id IS ?
+             AND status IN ('open','in_progress')
+           ORDER BY updated_ts DESC LIMIT 1""",
+        (from_xname, change_note, idea_id),
     ).fetchone()
     if existing:
-        return int(existing["id"])
+        return int(existing["suggestion_id"])
     cur = conn.execute(
-        """INSERT INTO iterations (from_xname, to_xname, idea_id, change_note, reason, status, iterable)
-           VALUES (?, ?, ?, ?, ?, 'open', ?)""",
-        (from_xname, from_xname, idea_id, change_note, reason, 1 if iterable else 0),  # to 自指占位
+        """INSERT INTO iteration_suggestions
+           (from_xname, idea_id, change_note, reason, status)
+           VALUES (?,?,?,?, 'open')""",
+        (from_xname, idea_id, change_note, reason),
     )
+    rebuild_factor_lineage(conn)
     return int(cur.lastrowid)
 
 
 def claim_iteration(conn: sqlite3.Connection, iter_id: int) -> dict:
     """open→in_progress(接续候选 B 时)。非 open 不可 claim。"""
-    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    row = conn.execute(
+        "SELECT status FROM iteration_suggestions WHERE suggestion_id = ?", (iter_id,)
+    ).fetchone()
     if not row:
         raise ValueError(f"iteration id 不存在: {iter_id}")
     if row["status"] != "open":
         return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 open 不可 claim"}
-    conn.execute("UPDATE iterations SET status = 'in_progress' WHERE id = ?", (iter_id,))
+    conn.execute(
+        """UPDATE iteration_suggestions
+           SET status='in_progress', updated_ts=CURRENT_TIMESTAMP
+           WHERE suggestion_id=?""",
+        (iter_id,),
+    )
+    rebuild_factor_lineage(conn)
     return {"ok": True}
 
 
 def realize_iteration(conn: sqlite3.Connection, iter_id: int, to_xname: str, icir_delta: float | None = None) -> dict:
     """in_progress→realized(B 已入库后)。填真实 to_xname + outcome(由 icir_delta 推导)。"""
-    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    row = conn.execute(
+        """SELECT from_xname, status, idea_id, op_id, change_note, reason
+           FROM iteration_suggestions WHERE suggestion_id = ?""",
+        (iter_id,),
+    ).fetchone()
     if not row:
         raise ValueError(f"iteration id 不存在: {iter_id}")
     if row["status"] != "in_progress":
         return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 in_progress 不可 realize"}
+    if to_xname == row["from_xname"]:
+        return {"ok": False, "error": "realized target 不能等于 source"}
+    if not conn.execute("SELECT 1 FROM factors WHERE xname=?", (to_xname,)).fetchone():
+        return {"ok": False, "error": f"realized target 不存在: {to_xname}"}
     if icir_delta is None:
         outcome = "neutral"
     elif icir_delta > 0.02:
@@ -1795,32 +2442,58 @@ def realize_iteration(conn: sqlite3.Connection, iter_id: int, to_xname: str, ici
         outcome = "declined"
     else:
         outcome = "neutral"
+    relation = "operator_application" if row["op_id"] is not None else "iteration"
+    add_lineage_edge(
+        conn,
+        row["from_xname"],
+        to_xname,
+        relation_type=relation,
+        origin="suggestion",
+        suggestion_id=iter_id,
+        idea_id=row["idea_id"],
+        op_id=row["op_id"],
+        change_note=row["change_note"],
+        reason=row["reason"],
+        outcome=outcome,
+        icir_delta=icir_delta,
+    )
     conn.execute(
-        "UPDATE iterations SET status = 'realized', to_xname = ?, outcome = ?, icir_delta = ? WHERE id = ?",
-        (to_xname, outcome, icir_delta, iter_id),
+        """UPDATE iteration_suggestions
+           SET status='realized', updated_ts=CURRENT_TIMESTAMP
+           WHERE suggestion_id=?""",
+        (iter_id,),
     )
     return {"ok": True, "outcome": outcome}
 
 
 def reopen_iteration(conn: sqlite3.Connection, iter_id: int) -> dict:
     """失败回滚:in_progress→open(允许下次再接续)。"""
-    row = conn.execute("SELECT status FROM iterations WHERE id = ?", (iter_id,)).fetchone()
+    row = conn.execute(
+        "SELECT status FROM iteration_suggestions WHERE suggestion_id = ?", (iter_id,)
+    ).fetchone()
     if not row:
         raise ValueError(f"iteration id 不存在: {iter_id}")
     if row["status"] != "in_progress":
         return {"ok": False, "error": f"iteration {iter_id} 状态={row['status']},非 in_progress 不可 reopen"}
-    conn.execute("UPDATE iterations SET status = 'open' WHERE id = ?", (iter_id,))
+    conn.execute(
+        """UPDATE iteration_suggestions
+           SET status='open', updated_ts=CURRENT_TIMESTAMP
+           WHERE suggestion_id=?""",
+        (iter_id,),
+    )
+    rebuild_factor_lineage(conn)
     return {"ok": True}
 
 
 def list_open_iterations(conn: sqlite3.Connection, top_k: int = 5, source_status: str | None = None) -> list[sqlite3.Row]:
     """检索待接续 open 建议,按 priority 降序。
     priority = (evaluated?2.0:0.5) × exp(-age/14):pass 精进优先,老建议降权。"""
-    sql = """SELECT i.id AS suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id, i.iterable, i.ts,
+    sql = """SELECT i.suggestion_id, i.from_xname, i.change_note, i.reason, i.idea_id,
+                    i.created_ts AS ts,
                     f.status AS from_status, f.latest_icir AS from_icir, f.formula_text AS from_formula,
                     (CASE WHEN f.status = 'evaluated' THEN 2.0 ELSE 0.5 END)
-                      * EXP(-(julianday('now') - julianday(i.ts)) / 14.0) AS priority
-             FROM iterations i JOIN factors f ON f.xname = i.from_xname
+                      * EXP(-(julianday('now') - julianday(i.created_ts)) / 14.0) AS priority
+             FROM iteration_suggestions i JOIN factors f ON f.xname = i.from_xname
              WHERE i.status = 'open'"""
     params: list[Any] = []
     if source_status:
@@ -1839,14 +2512,13 @@ def add_hypothesis(
     argument_chain: dict | None = None,
     parent_idea_id: int | None = None,
     necessity_grade: str | None = None,
-    angle_code: str | None = None,
 ) -> int:
     """写 idea + 结构化论证链(argument_chain)。论证链是假设的属性,不是因子的。"""
     chain = json.dumps(argument_chain, ensure_ascii=False) if argument_chain is not None else None
     cur = conn.execute(
-        """INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade, angle_code)
-           VALUES (?, ?, 'open', ?, ?, ?)""",
-        (text, parent_idea_id, chain, necessity_grade, angle_code),
+        """INSERT INTO ideas (text, parent_idea_id, status, argument_chain, necessity_grade)
+           VALUES (?, ?, 'open', ?, ?)""",
+        (text, parent_idea_id, chain, necessity_grade),
     )
     return int(cur.lastrowid)
 
@@ -2052,9 +2724,11 @@ def get_factor_detail(conn: sqlite3.Connection, xname: str) -> dict:
     ).fetchall()]
     ancestors = get_ancestors(conn, xname)
     descendants = get_descendants(conn, xname)
+    lineage_profile = get_lineage_profile(conn, xname)
     return {"factor": dict(factor), "evals": [dict(e) for e in evals], "tags": tags,
             "ancestors": [{"xname": a[0], "depth": a[1]} for a in ancestors],
-            "descendants": [{"xname": d[0], "depth": d[1]} for d in descendants]}
+            "descendants": [{"xname": d[0], "depth": d[1]} for d in descendants],
+            "lineage": lineage_profile}
 
 
 def get_similar_factors(conn: sqlite3.Connection, xname: str, k: int = 10) -> list[sqlite3.Row]:

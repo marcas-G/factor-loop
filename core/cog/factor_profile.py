@@ -34,16 +34,16 @@ def build_factor_profile(conn, xname):
     """返回 {identity, construction_view, evidence_view, provenance}。找不到返回 None。"""
     row = conn.execute("""
         SELECT xname, class_name, file_path, formula_text, operator_chain,
-               field_bindings, params, angle_code, status, quality_grade,
+               field_bindings, params, status, quality_grade,
                latest_ic, latest_icir, latest_sharpe, latest_rank_ic,
-               latest_dloocv_pct, latest_r2_x, latest_res_ic, intuition
+               latest_r2_x, latest_res_ic, intuition
         FROM factors WHERE xname=?
     """, (xname,)).fetchone()
     if not row:
         return None
     (xn, cls, fpath, formula, op_chain, bindings, params,
-     angle, status, grade, lic, licir, lsharpe, lrank_ic,
-     ldloocv, lr2_x, lres_ic, _intuition) = row
+     status, grade, lic, licir, lsharpe, lrank_ic,
+     lr2_x, lres_ic, _intuition) = row
 
     # ── Construction View(assumption 唯一输入)──
     # 不含 intuition(解释侧)、不含 latest_ic/icir(evidence)。
@@ -93,22 +93,25 @@ def build_factor_profile(conn, xname):
     } for l in lessons]
 
     siblings = []
-    if angle:
-        sib_rows = conn.execute("""
-            SELECT xname, latest_icir, latest_ic, substr(formula_text,1,140)
-            FROM factors
-            WHERE angle_code=? AND xname!=? AND status='evaluated'
-              AND deprecated_at IS NULL
-            ORDER BY latest_icir DESC NULLS LAST LIMIT 8
-        """, (angle, xn)).fetchall()
-        for s in sib_rows:
-            siblings.append({
-                "xname": s[0],
-                "icir": round(s[1], 2) if s[1] is not None else None,
-                "ic": round(s[2], 4) if s[2] is not None else None,
-                "formula_excerpt": s[3],
-                # attribution_strength 由 adjudicator/orchestrator 判(看 changed_axes)
-            })
+    sib_rows = conn.execute("""
+        SELECT DISTINCT e.child_xname AS xname, f.latest_icir, f.latest_ic,
+               substr(f.formula_text, 1, 140)
+        FROM factor_lineage_edges e
+        JOIN factors f ON f.xname = e.child_xname
+        WHERE e.parent_xname IN (
+                SELECT parent_xname FROM factor_lineage_edges WHERE child_xname=?
+              )
+          AND e.child_xname != ?
+          AND f.status='evaluated' AND f.deprecated_at IS NULL
+        ORDER BY f.latest_icir DESC NULLS LAST LIMIT 8
+    """, (xn, xn)).fetchall()
+    for s in sib_rows:
+        siblings.append({
+            "xname": s[0],
+            "icir": round(s[1], 2) if s[1] is not None else None,
+            "ic": round(s[2], 4) if s[2] is not None else None,
+            "formula_excerpt": s[3],
+        })
 
     evidence_view = {
         "horizon_profile": horizon_profile,
@@ -122,14 +125,14 @@ def build_factor_profile(conn, xname):
         "status": status,
         "latest_metrics": {
             "ic": lic, "icir": licir, "sharpe": lsharpe, "rank_ic": lrank_ic,
-            "dloocv_pct": ldloocv, "r2_x": lr2_x, "res_ic": lres_ic,
+            "r2_x": lr2_x, "res_ic": lres_ic,
         },
     }
 
     return {
         "identity": {
             "xname": xn, "class_name": cls, "file_path": fpath,
-            "angle_code": angle, "status": status, "quality_grade": grade,
+            "status": status, "quality_grade": grade,
         },
         "construction_view": construction_view,
         "evidence_view": evidence_view,
@@ -139,8 +142,8 @@ def build_factor_profile(conn, xname):
                 "factors.field_bindings", "factors.params",
             ],
             "evidence_sources": [
-                "factor_ic_daily", "factors.latest_dloocv_pct/latest_r2_x/latest_res_ic",
-                "lessons", "siblings(angle_code)",
+                "factor_ic_daily", "factors.latest_r2_x/latest_res_ic",
+                "lessons", "siblings(lineage)",
             ],
             "adapter_version": "factor_research_object_adapter_v1",
             "isolation_guarantee": (

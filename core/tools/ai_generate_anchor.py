@@ -4,7 +4,7 @@
 与 intuition(研究用,带 idea#/上下文)分离:anchor_text 专门给 embedding。
 
 只处理 factors.anchor_text IS NULL/空的因子。
-- 读 formula_text + tags + angle → 调 glm-5.1 按四要素模板生成 → UPDATE anchor_text
+- 读 formula_text + tags → 调 glm-5.1 按四要素模板生成 → UPDATE anchor_text
 
 幂等:anchor_text 非空跳过;--force 全部重生成。
 
@@ -34,7 +34,7 @@ DEFAULT_MODEL = "GLM-5.1"
 
 # 固定四要素模板 —— 所有因子统一格式,保证 embedding 锚点风格一致
 # 核心约束:机制要素必须具体(落到字段+算子+触发条件),禁泛化套话——检索靠它区分因子
-SYSTEM_PROMPT = """你是量化因子语义标注专家。给定因子的公式/标签/信息角度,严格按四要素模板输出锚定文本(用于语义检索 embedding)。
+SYSTEM_PROMPT = """你是量化因子语义标注专家。给定因子的公式和标签,严格按四要素模板输出锚定文本(用于语义检索 embedding)。
 
 **最高优先级规则**:机制要素必须写该因子 formula 特有的、能区分同族变体的具体微观行为,**严禁泛化套话**。检索靠机制要素区分因子,套话(如"做市商盘口不对称")会让同类因子无法区分、检索失效。
 
@@ -52,7 +52,7 @@ SYSTEM_PROMPT = """你是量化因子语义标注专家。给定因子的公式/
 5. 只输出四行,无解释/前言/示例复述
 
 示例:
-输入: 公式=EMA(卖方撤单量)×浅盘口深度权重, 标签=cancel/liquidity, 角度=撤单流
+输入: 公式=EMA(卖方撤单量)×浅盘口深度权重, 标签=cancel/liquidity
 机制: 卖方撤单量的指数移动平均累积,浅薄深度档位加权放大撤单冲击,撤单方向暴露虚假卖压。
 利润来源: 赚 L2 流动性补偿,对手方是被撤单误导的做市商。
 信息源: 限价单撤销量的方向性 EMA 累积 × 深度权重。
@@ -61,7 +61,6 @@ SYSTEM_PROMPT = """你是量化因子语义标注专家。给定因子的公式/
 USER_TEMPLATE = """分析因子,按四要素模板输出锚定文本(固定四行):
 
 类名: {class_name}
-信息角度: {angle}
 公式/代码:
 {formula}
 标签: {tags}
@@ -69,7 +68,7 @@ USER_TEMPLATE = """分析因子,按四要素模板输出锚定文本(固定四�
 只输出四行(机制/利润来源/信息源/预测)。"""
 
 
-def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: str) -> str:
+def call_llm(class_name: str, formula: str, tags: str, model: str) -> str:
     """调 LLM 返回四要素锚定文本。兼容官方 Anthropic API 和聚合代理。"""
     try:
         import anthropic
@@ -94,7 +93,6 @@ def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: s
                 class_name=class_name,
                 formula=(formula or "(无)")[:600],
                 tags=tags or "(无)",
-                angle=angle_desc or "(无)",
             ),
         }],
     )
@@ -103,23 +101,16 @@ def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: s
 
 def get_factor_input(conn, xname: str):
     row = conn.execute(
-        "SELECT class_name, formula_text, angle_code FROM factors WHERE xname=?", (xname,)
+        "SELECT class_name, formula_text FROM factors WHERE xname=?", (xname,)
     ).fetchone()
     if not row:
         return None
-    class_name, formula, angle_code = row
+    class_name, formula = row
     tags = ", ".join(r[0] for r in conn.execute(
         "SELECT t.name FROM factor_tags ft JOIN tags t ON t.id=ft.tag_id WHERE ft.factor_xname=?",
         (xname,),
     ))
-    angle_desc = ""
-    if angle_code:
-        a = conn.execute(
-            "SELECT name, signal_target FROM angle_ontology WHERE code=?", (angle_code,)
-        ).fetchone()
-        if a:
-            angle_desc = f"{a[0]}({a[1]})" if a[1] else a[0]
-    return class_name or xname, formula, tags, angle_desc
+    return class_name or xname, formula, tags
 
 
 def gen_one(conn, xname: str, model: str, dry_run: bool) -> dict:
@@ -127,11 +118,11 @@ def gen_one(conn, xname: str, model: str, dry_run: bool) -> dict:
     inp = get_factor_input(conn, xname)
     if not inp:
         info["action"] = "error"; info["error"] = "xname 不在 DB"; return info
-    class_name, formula, tags, angle_desc = inp
+    class_name, formula, tags = inp
     if dry_run:
         info["action"] = "dry_run"; return info
     try:
-        text = call_llm(class_name, formula, tags, angle_desc, model)
+        text = call_llm(class_name, formula, tags, model)
     except Exception as e:
         info["action"] = "error"; info["error"] = f"LLM 失败: {e}"; return info
     # 校验:必须含四要素前缀

@@ -5,6 +5,8 @@
 >
 > **比世界模型更硬**: 世界模型描述市场机制(可探索),本文档描述平台能力(不可超出的硬边界)。
 
+> **2026-08-20 入口变更**: Submit Feature (test) → **Submit ictest**; Submit GPU → **Submit restest**(ridge_svd 唯一入口); CPU restest/restest_1 已从导航隐藏(历史 URL 仍可访问); 在线查看统一在 **All results**, 主页 Download 列仅保留结果包下载。
+
 ## 因子评估平台(default_test)
 
 ### Y 目标(平台固定, 不可改)
@@ -29,7 +31,7 @@ Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@{horizon}
 - 可用运算: FeedIndicator 框架全部能力(算术/条件/ring buffer/percentile rank/...)
 - 约束: 输出必须是 scalar(setXValue(0, ...)),冷启动期输出 0
 
-### 因子评估产出(csv_ic)
+### 因子评估产出(csv_ic, Submit ictest)
 
 | 文件 | 内容 |
 |---|---|
@@ -37,30 +39,24 @@ Y.Y_YIndexSeconds<PriceMid>.SHFE-AG@{horizon}
 | csv_ic_ts.csv | 逐日 rank IC 时序(117 天 × 5 horizon) |
 | csv_ic_xcorr.md | 因子间相关性矩阵(同一次 submit 的所有 X↔Y 对) |
 
-## 冗余分析平台(restest / restest_1)
+CPU ictest 默认日期窗口同步为 **20250101~20250630**, 与 GPU restest 固定窗口对齐。
 
-### restest(固定版)
+## 冗余分析平台(Submit restest — GPU ridge_svd 唯一入口)
 
-- Feeds 固定: SHFE-AG, SHFE-AG@1, SHFE-AU, SHFE-AU@1
-- 正交化对象: AG/AU 72 因子库(qyshen/0727pass_v3)
-- α 固定: 0.1
-- 产出: R²_X / res_IC / dLOOCV_pct(每 x_col × horizon 一行)
+- 入口: Submit GPU 更名为 **Submit restest**, 只保留 ridge_svd 模式; GPU 表单不再有 mode/Feeds/日期。
+- 表单: `alpha`(推荐 0.05~0.2) / `lib_key`(AG_AU) / `n_workers`(默认 12, 表单留空即 12) / `transform_sweep`(可选)。
+- 日期: **固定半年 20250101~20250630**, 不再提供一年/半年单选; Feeds 由 lib_key 决定。
+- 正交化对象: AG/AU 72 因子库(qyshen/0727pass_v3)。
+- 平台只输出 **R2_X + res_IC**(dLOOCV_pct 已退役): R2_X>0.8 且 |res_IC|<0.01 → 冗余; R2_X≤0.8 → 不冗余。
+- CPU 版 restest / restest_1 已停用(从导航隐藏, 历史 URL 仍可访问), 新链路一律走 GPU。
+- GPU csv_ic 模式已移除: 需要 IC 分析一律走 CPU **Submit ictest**。
 
-### restest_1(可配置版)
-
-- α 可填(推荐 0.05~0.2)
-- 库可选: AG_AU / RU_NR_BR / SN_SN1_CU_ZN_AG_AL_AU / BC_BC1_CU_ZN_CU1_AL_AU_AG / ag_restest_v02
-- 日期可选: 一年(20240701~20250630) / 半年(20250101~20250630)
-- **Transform sweep**(可选): raw + 14 变换批量残差(delta/acceleration/impulse/ema/macd/kama/zscore/pct/slope/snr/tanh/cross_zero/tick_pressure)
-- **Random projection**(可选): 双 pass GELU 随机投影 NN 预筛(测新因子对 NN 天花板的增量)
-
-### restest 产出判据
+### restest 产出判据(平台唯一口径)
 
 | 指标 | 含义 | 判据 |
 |---|---|---|
-| dLOOCV_pct | 对线性模型的净增益% | >1% 显著增量; <0 过拟合; ≈0 无贡献 |
 | R²_X | 库能解释新因子多少方差 | >0.8 高冗余(X 空间重复) |
-| res_IC | 去掉库冗余后的增量 IC | 绝对值大=独立信号 |
+| res_IC | 去掉库冗余后的增量 IC | R²_X>0.8 且 \|res_IC\|<0.01 → 冗余; 绝对值大=独立信号 |
 
 ## 对认知协议的约束(minimal-repair 必须遵守)
 

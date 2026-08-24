@@ -46,8 +46,8 @@ from featuretool_common import HOST, BASE_URL, COOKIE_FILE, COOKIE_NAME, get_coo
 
 DEFAULT_START_COL = 2
 DEFAULT_HIGHLIGHT_LAST_N = 5
-DEFAULT_START_DATE = "2024-01-02"
-DEFAULT_END_DATE = "2024-06-30"
+DEFAULT_START_DATE = "2025-01-01"
+DEFAULT_END_DATE = "2025-06-30"
 DEFAULT_N_GROUPS = 5
 # ===============================================
 
@@ -2128,8 +2128,8 @@ def main():
     run_parser.add_argument("--names", help="因子名列表，逗号分隔（跳过提交）")
     run_parser.add_argument("--cookie", help="session cookie")
     run_parser.add_argument("--feeds", help="交易品种（默认 SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1）")
-    run_parser.add_argument("--start-date", help="起始日期 YYYY-MM-DD（默认 2024-01-02）")
-    run_parser.add_argument("--end-date", help="结束日期 YYYY-MM-DD（默认 2024-06-30）")
+    run_parser.add_argument("--start-date", help="起始日期 YYYY-MM-DD（默认 2025-01-01）")
+    run_parser.add_argument("--end-date", help="结束日期 YYYY-MM-DD（默认 2025-06-30）")
     run_parser.add_argument("--mode", choices=["feval", "pearson", "deep", "full", "none"], default="feval",
                             help="评估模式（默认 feval; none=跳过评估, adapt/default-test csv_ic 平台已算）")
     run_parser.add_argument("--skip-submit", action="store_true", help="跳过提交步骤")

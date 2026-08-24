@@ -1,7 +1,7 @@
 """AI 回填 factors.intuition(语义意图描述,embedding 主原料)。
 
 只处理 factors.intuition IS NULL/空的因子。
-- 读 formula_text + tags + angle 描述 → 调 LLM → 生成纯中文语义意图描述
+- 读 formula_text + tags → 调 LLM → 生成纯中文语义意图描述
 - UPDATE factors SET intuition=...
 - 不碰 formula/tags/.h(那些归 ai_backfill_factors.py 管)
 
@@ -32,23 +32,22 @@ from core.db import db
 # GLM-5.1(大写:代理 claudeaggr 认;小写 glm-5.1 / 环境变量 SONNET 的值代理报 unknown provider)
 DEFAULT_MODEL = "GLM-5.1"
 
-SYSTEM_PROMPT = """你是量化微观结构因子语义分析专家。给你一个因子的公式/代码、标签、信息角度,输出一段纯中文的**语义意图描述**(80-150 字),用于语义检索 embedding。
+SYSTEM_PROMPT = """你是量化微观结构因子语义分析专家。给你一个因子的公式/代码和标签,输出一段纯中文的**语义意图描述**(80-150 字),用于语义检索 embedding。
 
 严格规则:
 1. 描述这个因子"赚谁的什么钱、靠什么微观机制、什么信息源、预测什么"——用市场机制语言,不描述代码实现(变量名/算子/语法)
 2. 落到微观事件:谁在交易(知情者/套保者/做市商/噪声交易者)、对手方是谁、什么行为留下痕迹、为什么这个痕迹可预测
 3. 纯中文。禁止:代码符号、变量名、英文标签、YAML、markdown、解释性前缀
 4. 只输出描述正文,第一字就开始写机制,不要"该因子..."开场
-5. 若信息不足以判断机制,基于类名+信息角度给最合理的机制假设并标注"(推测)"
+5. 若信息不足以判断机制,基于类名+标签给最合理的机制假设并标注"(推测)"
 
 示例:
-输入: 公式=EMA(卖方撤单量), 标签=cancel/liquidity, 角度=撤单流
+输入: 公式=EMA(卖方撤单量), 标签=cancel/liquidity
 输出: 薄盘口流动性提供者挂单后遭遇撤单冲击的模式。卖方急于撤卖单往往意味虚假卖压、实际偏多,撤单累积方向与同期主动成交方向构成意图双确认。信息源是限价单撤销流的不对称累积,预测短期方向。"""
 
 USER_TEMPLATE = """分析因子,输出语义意图描述(80-150 字纯中文):
 
 类名: {class_name}
-信息角度: {angle}
 公式/代码:
 {formula}
 标签: {tags}
@@ -56,7 +55,7 @@ USER_TEMPLATE = """分析因子,输出语义意图描述(80-150 字纯中文):
 只输出描述正文。"""
 
 
-def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: str) -> str:
+def call_llm(class_name: str, formula: str, tags: str, model: str) -> str:
     """调 LLM 返回 intuition 文本。兼容官方 Anthropic API 和聚合代理。"""
     try:
         import anthropic
@@ -81,7 +80,6 @@ def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: s
                 class_name=class_name,
                 formula=(formula or "(无)")[:600],
                 tags=tags or "(无)",
-                angle=angle_desc or "(无)",
             ),
         }],
     )
@@ -90,23 +88,16 @@ def call_llm(class_name: str, formula: str, tags: str, angle_desc: str, model: s
 
 def get_factor_input(conn, xname: str):
     row = conn.execute(
-        "SELECT class_name, formula_text, angle_code FROM factors WHERE xname=?", (xname,)
+        "SELECT class_name, formula_text FROM factors WHERE xname=?", (xname,)
     ).fetchone()
     if not row:
         return None
-    class_name, formula, angle_code = row
+    class_name, formula = row
     tags = ", ".join(r[0] for r in conn.execute(
         "SELECT t.name FROM factor_tags ft JOIN tags t ON t.id=ft.tag_id WHERE ft.factor_xname=?",
         (xname,),
     ))
-    angle_desc = ""
-    if angle_code:
-        a = conn.execute(
-            "SELECT name, signal_target FROM angle_ontology WHERE code=?", (angle_code,)
-        ).fetchone()
-        if a:
-            angle_desc = f"{a[0]}({a[1]})" if a[1] else a[0]
-    return class_name or xname, formula, tags, angle_desc
+    return class_name or xname, formula, tags
 
 
 def backfill_one(conn, xname: str, model: str, dry_run: bool) -> dict:
@@ -114,11 +105,11 @@ def backfill_one(conn, xname: str, model: str, dry_run: bool) -> dict:
     inp = get_factor_input(conn, xname)
     if not inp:
         info["action"] = "error"; info["error"] = "xname 不在 DB"; return info
-    class_name, formula, tags, angle_desc = inp
+    class_name, formula, tags = inp
     if dry_run:
         info["action"] = "dry_run"; return info
     try:
-        text = call_llm(class_name, formula, tags, angle_desc, model)
+        text = call_llm(class_name, formula, tags, model)
     except Exception as e:
         info["action"] = "error"; info["error"] = f"LLM 失败: {e}"; return info
     if not text or len(text) < 20:

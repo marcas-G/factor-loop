@@ -17,18 +17,20 @@ class FactorProfileTest(unittest.TestCase):
                 operator_chain TEXT,
                 field_bindings TEXT,
                 params TEXT,
-                angle_code TEXT,
                 status TEXT,
                 quality_grade TEXT,
                 latest_ic REAL,
                 latest_icir REAL,
                 latest_sharpe REAL,
                 latest_rank_ic REAL,
-                latest_dloocv_pct REAL,
                 latest_r2_x REAL,
                 latest_res_ic REAL,
                 intuition TEXT,
                 deprecated_at TIMESTAMP
+            );
+            CREATE TABLE factor_lineage_edges (
+                parent_xname TEXT,
+                child_xname TEXT
             );
             CREATE TABLE factor_ic_daily (
                 factor_xname TEXT NOT NULL,
@@ -53,14 +55,14 @@ class FactorProfileTest(unittest.TestCase):
             """
             INSERT INTO factors (
                 xname, class_name, file_path, formula_text, operator_chain,
-                field_bindings, params, angle_code, status, quality_grade,
+                field_bindings, params, status, quality_grade,
                 latest_ic, latest_icir, latest_sharpe, latest_rank_ic,
-                latest_dloocv_pct, latest_r2_x, latest_res_ic, intuition
+                latest_r2_x, latest_res_ic, intuition
             ) VALUES (
                 'TestFactor', 'TestFactor', 'factors/TestFactor.h', 'x',
-                NULL, NULL, '{}', 'test_angle', 'dead_end', NULL,
+                NULL, NULL, '{}', 'dead_end', NULL,
                 0.1, 2.0, NULL, NULL,
-                0.012, 0.83, 0.0034, 'test'
+                0.83, 0.0034, 'test'
             )
             """
         )
@@ -75,11 +77,10 @@ class FactorProfileTest(unittest.TestCase):
 
         self.assertIsNotNone(profile)
         metrics = profile["evidence_view"]["latest_metrics"]
-        self.assertEqual(metrics["dloocv_pct"], 0.012)
         self.assertEqual(metrics["r2_x"], 0.83)
         self.assertEqual(metrics["res_ic"], 0.0034)
         self.assertIn(
-            "factors.latest_dloocv_pct/latest_r2_x/latest_res_ic",
+            "factors.latest_r2_x/latest_res_ic",
             profile["provenance"]["evidence_sources"],
         )
 
@@ -91,7 +92,7 @@ class FactorProfileTest(unittest.TestCase):
             conn.close()
 
         construction = profile["construction_view"]
-        for field in ("dloocv_pct", "r2_x", "res_ic"):
+        for field in ("r2_x", "res_ic"):
             self.assertNotIn(field, construction)
 
 

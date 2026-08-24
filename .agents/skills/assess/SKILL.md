@@ -18,7 +18,7 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 - `state.factors[i].name` — 因子类名
 - `state.factors[i].hypothesis` — 因子设计假设(brainstorm 阶段由 intuition + diff_check + coord_usage 拼接而成)
 - `state.factors[i].evidence.eval_metrics` — 评估数据 JSON(字段名历史命名,风是三维度各指标的数据载体)
-  - `eval_metrics.research_context` — 多重检验上下文(angle/lineage 已试次数 + 当前批次候选数)
+  - `eval_metrics.research_context` — 多重检验上下文(lineage 已试次数 + 当前批次候选数)
 - `state.factors[i].factor_file` — .h 文件绝对路径
 - `state.factors[i].last_rewrite` — retry 信息(可能为 null)
 - `state.idea_id` — 关联的 idea id
@@ -44,7 +44,7 @@ description: 量化因子结果评估。触发 `/assess <run_id> <factor_index>`
 
 **前提**:假设有结构化 argument_chain(hypothesize 产,在 ideas.argument_chain,用 `hypothesis_get` 读)。散文 hypothesis(旧 brainstorm 无论证链)→ 跳过本维(无法对照),仅经验维度评估。
 
-**审稿**:派 reviewer-agent 忠实度模式(模式二):
+**审稿**:派 reviewer-agent 忠实度模式(模式二)。Codex 环境按 AGENTS.md 文件协议派发：先把下方 prompt 写入 `.tmp/agent_task.json` 的 `input`，再 `spawn_agent(task_name="reviewer_agent", fork_turns="none", message="读取 .tmp/agent_task.json 并执行")`，等待终态后删除任务文件；Claude Code 环境可直接 Task:
 ```
 Task({
   subagent_type: "reviewer-agent",
@@ -60,7 +60,7 @@ Task({
 
 > **🎯 冗余度首要(全局原则)**:因子价值 = 对组合的边际信息贡献,**由冗余度决定,不由 ICIR 强弱决定**。ICIR 仅作过关闸门(可信口径≥0.3,见否决④);过闸门后**冗余度是首要排序键**。⚠️ 信噪比<0.3 不过闸门——低信噪比 IC 是噪声,和谁都低相关→假"正交",冗余度判定不可信。
 
-> **🔬 冗余判据 = 平台 Ridge-SVD**:CPU 版用 **dLOOCV_pct**(线性净增益主判据);GPU 版默认关闭 GCV,用 **R2_X + res_IC** 判 X 空间冗余/残差增量,并显式记录"线性净增益未测"。旧的 IC 空间 pearson 判据已删。平台在 X 空间对大库正交化,仍是最终边际贡献来源。
+> **🔬 冗余判据 = 平台 Ridge-SVD**:平台只输出 **R2_X + res_IC**(dLOOCV_pct 已随 2026-08-20 平台更新退役)。R2_X>0.8 且 |res_IC|<0.01 → X 空间冗余; R2_X≤0.8 → 不冗余。旧的 IC 空间 pearson 判据已删。平台在 X 空间对大库正交化,仍是最终边际贡献来源。
 
 ### 第一维 · 预测能力(秩空间,弃 pearson)
 
@@ -115,7 +115,7 @@ Task({
 | **换手率** | 日均换手低;高换手=追微波动 | `tradability.avg_turnover_per_day` |
 | **成本后 Sharpe(8bps)** | 毛 Sharpe vs 成本后(8bps 严格);转负=毛强净亏 | `tradability.sharpe_net_8bps` |
 | 容量 | 日换手>100 → 容量受限(固定代理) | `tradability.capacity_risk` |
-| 正交 | CPU: **dLOOCV_pct ≥ 1%**(线性显著增量); GPU: 无 dLOOCV 时看 `R2_X/res_IC`, R2_X>0.8 且 \|res_IC\|<0.01 判冗余, R2_X 低判 X 空间不冗余, 线性净增益标"未测" | 平台 ridge_svd(见"二、操作流程·查正交"); 无 restest 时标"冗余未检" |
+| 正交 | `R2_X>0.8` 且 \|res_IC\|<0.01 → 冗余; R2_X≤0.8 → X 空间不冗余 | 平台 ridge_svd(见"二、操作流程·查正交"); 无 restest 时标"冗余未检" |
 | **变换族预测力**(新增) | 最强变换 |IC| 显著优于原始(>20%) → 建议改用该变换；ridge_residual 最强=预测力来自新息 | transform_family(orig_ic / delta_ic / impulse_ic / asym_impulse_pos_ic / asym_impulse_neg_ic / ridge_residual_ic) |
 
 **变换族判定细则**(对原始因子 X 做 delta/impulse/asym_impulse/ridge_residual 四种变换,各算 pooled IC 对比;assess 自己从 6 个 |IC| 判最强变换):
@@ -144,7 +144,7 @@ Task({
 - **failure_reasons**:平台标的失败原因(low_icir / weak_beta / vol_regime_unstable / no_zero_diff / bad_bucket_shape / weak_train_test / weak_ic)
 - **top_pairs**:按 score 排序前 3 个 X-Y 对
 - **deep_best 其他**:conditional_sharpe / daily_ic_tstat / daily_rank_ic / daily_icir / signal_instability_pct(daily IC 已 per-horizon 尾盘截断防未来函数;旧字段 rank_ic_max 仅旧 run 兼容)
-- **多重检验计数**:`research_context.angle_attempt_count_including_current` / `research_context.lineage_attempt_count_including_current_batch`。当前不自动改阈值,但 ≥10 时属于高试探族;若指标只是贴线通过,`key_weaknesses` 必须注明统计膨胀风险;若 `available=false`,注明多重检验计数缺失
+- **多重检验计数**:`research_context.lineage_attempt_count_including_current_batch`。当前不自动改阈值,但 ≥10 时属于高试探族;若指标只是贴线通过,`key_weaknesses` 必须注明统计膨胀风险;若 `available=false`,注明多重检验计数缺失
 - **新增两指标**(来自 factor_check 深度分析 `[6/7][7/7]`,经 metrics.mjs 聚合进 `evidence.eval_metrics`):
   - **平稳性+差分**:`evidence.eval_metrics.stationarity`({adf_pvalue, need_differential_rate, orig_ic, diff_ic, diff_improvement})
   - **变换族预测力**:`evidence.eval_metrics.transform_family`({orig_ic, delta_ic, impulse_ic, asym_impulse_pos_ic, asym_impulse_neg_ic, ridge_residual_ic})
@@ -166,17 +166,15 @@ Task({
 1. **取数据**:从 state 读 evidence + hypothesis + factor_file + idea_id(见"输入")
 2. **忠实度审稿**(有 argument_chain 时):派 reviewer-agent 忠实度模式(见第零维)。`unfaithful` → 直接定 verdict=fail(一票否决),跳到步骤 5 commit(跳过 3/4)。无 argument_chain 跳过本步。
 3. **入表占位(prepare)**:`persist_factor {run_id, factor_index, mode: "prepare"}` —— 入 factors 表(status=draft),**不写 eval/lesson、不定 verdict**。目的是让因子进表,解锁步骤 4 路径 B 的 ingest(全新因子入库前 ingest 撞外键)。
-4. **查正交(第三维,check_done 必做)**:冗余判定只用**平台 dLOOCV 一个判据**。因子已入表(步骤 3)。结果作为步骤 5 定 verdict 的正交维度输入。
+4. **查正交(第三维,check_done 必做)**:冗余判定只用**平台 restest ridge_svd 的 R2_X + res_IC**。因子已入表(步骤 3)。结果作为步骤 5 定 verdict 的正交维度输入。
 
    - **唯一判据 = 平台 restest ridge_svd**: run-factor-agent 在 check_done 后已自动跑 restest, 结果在 `state.factors[i].evidence.ridge_svd`(metrics 数组)。读它:
         ```
-        # metrics = [{x_col, horizon, R2_X, res_IC, n, dLOOCV_pct}, ...]
+        # metrics = [{x_col, horizon, R2_X, res_IC, n}, ...]
         ```
-        聚合: CPU 取主力(非 @1)x_col 中 dLOOCV_pct 最大的那条; GPU 默认无 dLOOCV, 取 \|res_IC\| 最大那条并读 `ridge_svd_agg.engine=gpu`。
-        - CPU: **dLOOCV_pct < 0** → 过拟合否决, 写"restest dLOOCV={x}<0 过拟合"
-        - CPU: **dLOOCV_pct < 1% 且 R2_X > 0.8** → 冗余否决, 写"restest R2_X={x} dLOOCV={y}% X空间冗余且无增量"
-        - CPU: **dLOOCV_pct ≥ 1%** → 显著增量, 正交通过
-        - GPU: `dloocv_available=false` 是正常口径, 不按 null 当低分; **R2_X>0.8 且 |res_IC|<0.01** → 冗余否决; R2_X≤0.8 → X 空间不冗余; 其余场景 key_weaknesses 注"GPU restest 未输出 dLOOCV, 线性净增益未测"
+        聚合: 取主力(非 @1)x_col 中 \|res_IC\| 最大那条并读 `ridge_svd_agg.engine=gpu`。
+        - **R2_X>0.8 且 |res_IC|<0.01** → 冗余否决, 写"restest R2_X={x} res_IC={y} X空间冗余且无增量"
+        - **R2_X≤0.8** → X 空间不冗余, 正交通过
         - **无 ridge_svd(restest 没跑/失败)** → 冗余未检(不是 fail, 是缺这一维), key_weaknesses 注"restest 冗余未检(无 ridge_svd)", verdict 谨慎
 
    - **口径切换原料(与冗余无关, 稀疏因子 ICIR 口径)**: 直接从 evidence_file 的 daily_ts 算逐日 ICIR(主场景=非 @1 的 x_col, 按 horizon 分组的 rank_ic mean/std):

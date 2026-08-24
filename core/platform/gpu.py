@@ -44,7 +44,7 @@ def _plain_cell(value: str) -> str:
 
 
 def _parse_tasks(page_html: str) -> list[dict]:
-    """Parse index rows while accepting newer Mode labels such as '[GPU] csv_ic'."""
+    """Parse index rows while accepting newer Mode labels such as '[GPU] ridge_svd'."""
     tasks = []
     for row in re.findall(r"<tr[^>]*>(.*?)</tr>", page_html, re.S):
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
@@ -73,25 +73,33 @@ def _gpu_formkey(cookie: str) -> str:
     return match.group(1)
 
 
+def _gpu_feature_mode(mode: str) -> str:
+    """Map logical GPU modes to the mode token used in platform feature names.
+
+    The GPU restest entry names tasks '<stem>_gpu_restest_...' even though the
+    logical mode passed around by this codebase is 'ridge_svd'.
+    """
+    return "restest" if mode == "ridge_svd" else mode
+
+
 def _post_gpu(
     cookie: str,
     factor_file: str,
     features: str,
     mode: str,
     formkey: str,
-    feeds: str,
-    start_date: str,
-    end_date: str,
 ) -> dict:
+    """Submit to the GPU restest entry (Submit restest, ridge_svd only).
+
+    Platform 2026-08-20 update: the form no longer has mode/Feeds/start_date/
+    end_date/date_key; dates are fixed to half-year 20250101~20250630 and
+    n_workers defaults to 12. mode is kept for task naming/response only.
+    """
     fields = {
         "features": features,
-        "mode": mode,
-        "Feeds": feeds,
-        "start_date": start_date,
-        "end_date": end_date,
         "alpha": "0.1",
         "lib_key": "AG_AU",
-        "date_key": "YEAR",
+        "n_workers": "12",
         "_next": f"/featuretool/{APP}/index",
         "_formkey": formkey,
         "_formname": "default",
@@ -134,11 +142,12 @@ def _tasks(cookie: str) -> list[dict]:
 
 
 def _gpu_tasks(cookie: str, stem: str, mode: str) -> list[dict]:
-    prefix = f"{stem}_gpu_{mode}_"
+    prefix = f"{stem}_gpu_{_gpu_feature_mode(mode)}_"
     return [task for task in _tasks(cookie) if task.get("feature", "").startswith(prefix)]
 
 
 def _wait_new_gpu_tasks(cookie: str, stem: str, mode: str, before: set[str], timeout_sec: int) -> dict:
+    platform_mode = _gpu_feature_mode(mode)
     deadline = time.time() + timeout_sec
     latest = None
     while time.time() < deadline:
@@ -156,7 +165,7 @@ def _wait_new_gpu_tasks(cookie: str, stem: str, mode: str, before: set[str], tim
     return {
         "ok": False,
         "mode": mode,
-        "error": f"提交后 {timeout_sec}s 未找到 {prefix} GPU 任务",
+        "error": f"提交后 {timeout_sec}s 未找到 {stem}_gpu_{platform_mode}_ GPU 任务",
     }
 
 
@@ -237,20 +246,26 @@ def submit_gpu_tasks(
     factor_file: str,
     features: str,
     modes: list[str],
-    feeds: str,
-    start_date: str = "2024-01-02",
-    end_date: str = "2024-06-30",
+    feeds: str | None = None,
 ) -> dict:
-    """Submit selected GPU modes first, then wait for both platform rows.
+    """Submit GPU ridge_svd (Submit restest) and wait for the platform row.
 
-    The two POSTs are issued concurrently after their formkeys are fetched. Waiting
-    for task creation happens only after both requests have been sent.
+    GPU entry is ridge_svd only since the 2026-08-20 platform update; csv_ic
+    mode was removed from the GPU form (IC analysis goes through CPU Submit
+    ictest). Dates are fixed by the platform, so feeds/dates are no longer
+    part of the POST. feeds is kept for backward compatibility only.
     """
     if not modes:
         return {"ok": False, "error": "GPU modes 为空"}
-    invalid = set(modes) - {"csv_ic", "ridge_svd"}
+    invalid = set(modes) - {"ridge_svd"}
     if invalid:
-        return {"ok": False, "error": f"非法 GPU mode: {', '.join(sorted(invalid))}"}
+        return {
+            "ok": False,
+            "error": (
+                f"非法 GPU mode: {', '.join(sorted(invalid))}。"
+                "2026-08-20 起 GPU 入口只保留 ridge_svd(csv_ic 请走 CPU Submit ictest)"
+            ),
+        }
 
     cookie = ensure_cookie(app=APP)
     if not cookie:
@@ -277,7 +292,6 @@ def submit_gpu_tasks(
         futures = {
             mode: pool.submit(
                 _post_gpu, cookie, factor_file, features, mode, formkeys[mode],
-                feeds, start_date, end_date,
             )
             for mode in modes
         }
@@ -318,9 +332,9 @@ def submit_gpu_tasks(
 
 @_serialize_submit
 def submit_csv_and_gpu_ridge(factor_file: str, features: str, feeds: str,
-                             start_date: str = "2024-01-02",
-                             end_date: str = "2024-06-30") -> dict:
-    """Keep csv_ic on its CPU entry and submit GPU ridge_svd beside it."""
+                             start_date: str = "2025-01-01",
+                             end_date: str = "2025-06-30") -> dict:
+    """Submit CPU ictest (csv_ic) and GPU ridge_svd (Submit restest) together."""
     cookie = ensure_cookie(app=APP)
     if not cookie:
         return {"ok": False, "error": "无有效 cookie"}
@@ -351,7 +365,6 @@ def submit_csv_and_gpu_ridge(factor_file: str, features: str, feeds: str,
         )
         gpu_future = pool.submit(
             _post_gpu, cookie, factor_file, features, "ridge_svd", gpu_formkey,
-            feeds, start_date, end_date,
         )
         posts = {"csv_ic": cpu_future.result(), "ridge_svd": gpu_future.result()}
 

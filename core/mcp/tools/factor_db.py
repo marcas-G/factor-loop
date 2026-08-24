@@ -110,17 +110,16 @@ def factor_ic_refresh(xname: str, force: bool = False) -> dict:
             "stdout_tail": r["stdout"][-400:], "stderr_head": r["stderr"][:200]}
 
 
-def iteration_open(from_xname: str, change_note: str, reason: str = None, iterable: bool = True, idea_id: int = None) -> dict:
+def iteration_open(from_xname: str, change_note: str, reason: str = None, idea_id: int = None) -> dict:
     """evaluate 阶段开一个迭代建议(open suggestion):把当前因子的 suggested_iteration(换 horizon/品种/窗口)登记成待接续建议。pass 精进 / dead_end 显式重试用这个;dead_end 无救方向不用这个(改走 dead_end lesson 避雷)。同 (from,change) 已 open 则幂等返回已有 id。"""
     with db.get_conn() as conn:
         return {"suggestion_id": db.open_iteration(
             conn, from_xname, idea_id=idea_id, change_note=change_note, reason=reason,
-            iterable=iterable if iterable is not None else True,
         )}
 
 
 def iteration_realize(suggestion_id: int, to_xname: str, icir_delta: float = None) -> dict:
-    """接续因子 B 的 evaluate 阶段归档(在 persist_factor 之后调用,B 已入库):建议 in_progress→realized,填 to_xname=B、icir_delta。outcome 由 icir_delta 自动推导(improved/declined/neutral)。演进链 from→to 就此落定。"""
+    """接续因子 B 的 evaluate 阶段归档(在 persist_factor 之后调用,B 已入库):建议 in_progress→realized,血缘边写入 factor_lineage_edges(to_xname=B、icir_delta、outcome)。outcome 由 icir_delta 自动推导;建议表只保留状态,不再重复存边事实。"""
     with db.get_conn() as conn:
         return db.realize_iteration(conn, suggestion_id, to_xname, icir_delta=icir_delta)
 
@@ -135,6 +134,54 @@ def iteration_list_open(top_k: int = 5, source_status: str = None) -> list:
     """brainstorm 检索待接续的迭代建议(open suggestions),按 priority 降序。priority=(evaluated?2.0:0.5) × exp(-age/14)——pass 精进优先、老建议降权。接续高 priority 建选作为本轮候选之一。"""
     with db.get_conn() as conn:
         return _rows(db.list_open_iterations(conn, top_k=_norm_k(top_k, 5), source_status=source_status))
+
+
+def factor_lineage_branches(min_members: int = 2, limit: int = 20) -> list:
+    """血缘分支画像:root/成员数/深度/evaluated/dead_end/open suggestion。再播种的 Anchor Branch 和 saturation 判断读这里,不手写 SQL。"""
+    with db.get_conn() as conn:
+        return _rows(db.list_lineage_branches(
+            conn,
+            min_members=int(min_members) if min_members is not None else 2,
+            limit=_norm_k(limit, 20),
+        ))
+
+
+def factor_lineage_profile(xname: str) -> dict:
+    """单因子血缘画像:直连父子边 + 派生节点统计 + 所在 branch + open suggestions。"""
+    with db.get_conn() as conn:
+        return db.get_lineage_profile(conn, xname)
+
+
+def factor_saturation_status(xname: str) -> dict:
+    """返回因子所在分支的深度与饱和判定(饱和 = branch max_depth > 5)。再播种触发入口。"""
+    with db.get_conn() as conn:
+        return db.get_branch_saturation(conn, xname)
+
+
+def record_operator_family_edge(
+    op_id: int,
+    base_type: str,
+    family: str = None,
+    pearson: float = None,
+    residual: float = None,
+    tested_on: str = None,
+    verdict: str = "untested",
+    note: str = None,
+) -> dict:
+    """记录算子×基底撞族边界:平台评估/assess 得到 pearson/residual 后落库。"""
+    with db.get_conn() as conn:
+        edge_id = db.record_operator_family_edge(
+            conn,
+            int(op_id),
+            str(base_type),
+            family=family,
+            pearson=pearson,
+            residual=residual,
+            tested_on=tested_on,
+            verdict=verdict,
+            note=note,
+        )
+        return {"id": edge_id, "ok": True}
 
 
 def coverage_map(slice: dict = None, group_by: list = None, min_count: int = 0) -> list:
@@ -178,6 +225,10 @@ TOOLS = [
     ("iteration_realize", iteration_realize),
     ("iteration_reopen", iteration_reopen),
     ("iteration_list_open", iteration_list_open),
+    ("factor_lineage_branches", factor_lineage_branches),
+    ("factor_lineage_profile", factor_lineage_profile),
+    ("factor_saturation_status", factor_saturation_status),
+    ("record_operator_family_edge", record_operator_family_edge),
     ("coverage_map", coverage_map),
     ("coverage_gaps", coverage_gaps),
     ("factor_residual_ic_strength", factor_residual_ic_strength),
