@@ -23,7 +23,8 @@ from core.config import CREDS_FILE  # noqa: E402  自动登录账号密码,单�
 HOST = "https://tools.xyz.abc"
 # 双平台分工:
 #   default      → 下载 .xy 原始数据(dailyX, GenerateXs=on, download_file)
-#   default_test → 跑 IC + 残差评估(csv_ic, ComputeCsvIc=on, download_ic)
+#   default_test → Submit ictest(CPU csv_ic) + Submit restest(GPU ridge_svd);
+#                  在线查看统一走 All results, Download 列仅保留结果包下载
 # 按需使用: 调用 base_url(app) 取 URL; CLI 按子命令推断(submit→default_test, xy→default)。
 # 环境变量 FEATURETOOL_APP 仍可全局覆盖(向后兼容)。
 VALID_APPS = ("default", "default_test")
@@ -40,7 +41,7 @@ def base_url(app: str | None = None) -> str:
 
     app 语义:
       'default'      → .xy 原始数据平台(download_file, GenerateXs)
-      'default_test' → IC/残差评估平台(download_ic, ComputeCsvIc)
+      'default_test' → Submit ictest(CPU csv_ic) + Submit restest(GPU ridge_svd)
     """
     if app is None:
         app = DEFAULT_APP

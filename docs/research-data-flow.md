@@ -35,7 +35,7 @@ flowchart LR
   H --> I["8. check<br/>下载 IC 产物写 run state"]
   I --> J["9. restest<br/>下载 Ridge-SVD 写 run state"]
   J --> K["10. assess/persist<br/>写 factors/evals/lessons"]
-  K --> L["11. iteration 与收尾<br/>写 iterations+run state"]
+  K --> L["11. iteration 与收尾<br/>写 iteration_suggestions+run state"]
 ```
 
 ## 3. 逐阶段数据交互
@@ -70,11 +70,9 @@ flowchart LR
 从 `factors` 表读取：
 
 - `xname`
-- `angle_code`
 - `status`
 - `created_ts`
 - `latest_icir`
-- `latest_dloocv_pct`
 - `latest_r2_x`
 - `latest_res_ic`
 
@@ -88,8 +86,8 @@ flowchart LR
 同时读取：
 
 - idea/factor link 与 open idea
-- angle family 覆盖情况
-- 同族 dead_end 密度
+- lineage 分支覆盖情况
+- 同分支 dead_end 密度
 
 **写入**
 
@@ -128,7 +126,7 @@ flowchart LR
 - dead_end/success/iteration lesson
 - lesson evidence
 
-从同 `angle_code` 因子读取 siblings：
+从 `factor_lineage_edges` 读取同父节点的 siblings：
 
 - xname
 - IC/ICIR
@@ -144,7 +142,7 @@ flowchart LR
 
 **注意**
 
-当前 `factor_profile` 的 `evidence_view.latest_metrics` 尚未包含 `latest_dloocv_pct/latest_r2_x/latest_res_ic`。R1 选对象时能看到这些字段，后续认知链会丢失这层信息，这是目前的一个数据断点。
+`factor_profile` 的 `evidence_view.latest_metrics` 已包含 `latest_r2_x/latest_res_ic`。
 
 ### 3.3 Assumption 抽取
 
@@ -274,7 +272,8 @@ flowchart LR
 
 - operator contract 或 repair contract
 - `ideas`
-- `iterations`
+- `iteration_suggestions`
+- `factor_lineage_edges`
 - run state
 - 可选：coverage、最近 lesson、semantic neighbors
 
@@ -331,7 +330,10 @@ flowchart LR
 - 上传 `.h`
 - 提交 feature class/template name
 - categories 转换为 feeds，例如 `["AG"]` → `SHFE-AG,SHFE-AG@1`
-- 平台创建 test IC DAG
+- CPU 侧走 **Submit ictest**（原 Submit Feature (test)），创建 test IC DAG
+- GPU 侧走 **Submit restest**（原 Submit GPU），并发创建 ridge_svd DAG
+- 在线查看统一在 **All results**；主页 Download 列仅保留结果包下载
+- CPU ictest 与 GPU restest 默认日期窗口统一为 `20250101~20250630`，保证 IC 与冗余分析同窗口
 
 ### 3.9 platform check
 
@@ -430,6 +432,14 @@ flowchart LR
 
 将新因子提交 Ridge-SVD，与 AG/AU 72 个既有因子比较。
 
+2026-08-20 起 ridge_svd 唯一入口是 GPU 版 **Submit restest**：
+
+- 表单含 `alpha / lib_key / n_workers(默认 12) / transform_sweep`，不再有 mode/Feeds/日期
+- 日期固定半年 `20250101~20250630`，Feeds 由 lib_key 决定
+- 平台只输出 `R2_X + res_IC`，冗余判定用 `R2_X>0.8 且 |res_IC|<0.01`
+- CPU 版 restest / restest_1 从导航隐藏（历史 URL 仍可访问），新链路一律走 GPU
+- GPU csv_ic 模式已移除，IC 分析走 CPU Submit ictest
+
 **下载字段**
 
 每个 `x_col × horizon` 输出：
@@ -437,7 +447,6 @@ flowchart LR
 - `R2_X`
 - `res_IC`
 - `n`
-- `dLOOCV_pct`
 
 **写入**
 
@@ -477,7 +486,6 @@ restest 提交的“取 formkey → POST → 确认任务出现”临界区使�
 - IC/ICIR/zero rate
 - horizon IC
 - restest：
-  - `dLOOCV_pct`
   - `R2_X`
   - `res_IC`
 - 强弱点与迭代建议
@@ -489,7 +497,6 @@ restest 提交的“取 formkey → POST → 确认任务出现”临界区使�
 - `latest_icir`
 - `latest_sharpe`
 - `latest_rank_ic`
-- `latest_dloocv_pct`
 - `latest_r2_x`
 - `latest_res_ic`
 
@@ -514,7 +521,8 @@ restest 提交的“取 formkey → POST → 确认任务出现”临界区使�
 
 **数据源**
 
-- `iterations`
+- `iteration_suggestions`
+- `factor_lineage_edges` / `factor_lineage_paths`
 - `ideas`
 - run state
 
@@ -530,7 +538,7 @@ restest 提交的“取 formkey → POST → 确认任务出现”临界区使�
 **写入**
 
 - `iteration_open` 写 suggestion
-- `iteration_realize` 写目标因子与 icir_delta
+- `iteration_realize` 写目标因子、icir_delta，并在 `factor_lineage_edges` 生成真实血缘边；随后重建 `factor_lineage_paths/nodes`
 - run state 写：
   - idea support summary
   - idea verdict/conclusion
@@ -577,7 +585,6 @@ restest 提交的“取 formkey → POST → 确认任务出现”临界区使�
 
 R1 能看到：
 
-- `latest_dloocv_pct`
 - `latest_r2_x`
 - `latest_res_ic`
 
@@ -592,7 +599,6 @@ R1 能看到：
 
 现已修复：`evidence_view.latest_metrics` 会输出：
 
-- `dloocv_pct`
 - `r2_x`
 - `res_ic`
 
@@ -601,8 +607,6 @@ R1 能看到：
 `platform_check_factor` 现在会在 check_done 后查询因子库，并把以下上下文写入
 `state.factors[i].evidence.eval_metrics.research_context`：
 
-- `angle_prior_attempt_count`
-- `angle_attempt_count_including_current`
 - `lineage_prior_attempt_count`
 - `lineage_attempt_count_including_current_batch`
 - `current_batch_size`
@@ -630,7 +634,7 @@ R1 能看到：
 - behavioral neighbors
 - neighbors 的 restest 画像
 - coverage thin/hot/stale areas
-- open iterations
+- open iteration suggestions
 - dead_end warnings
 
 每个候选应显式输出：
@@ -648,7 +652,7 @@ R1 能看到：
 - rank IC 强
 - ICIR 高
 - `R2_X` 高
-- `dLOOCV_pct` 接近 0 或为负
+- `res_IC` 接近 0
 
 因此候选设计阶段必须同时看：
 

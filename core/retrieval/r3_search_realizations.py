@@ -7,8 +7,8 @@
   semantic   measurement_question → factors_vec ANN(bge-small-zh 语义)
   structural template_hash 精确撞 + primitives 集合 Jaccard 相似度
   field      field_signature 交集(factor_structure)
-  operator   factor_operator_usage(待建,先 stub)
-  lineage    iterations 链(待库有数据)
+  operator   factor_operator_usage
+  lineage    factor_lineage_paths 传递闭包 + factor_lineage_edges 语义
   dead_end   lessons_fts(待库有数据)
 
 判据:
@@ -171,23 +171,29 @@ def _channel_dead_end(conn, query_text: str, top_k=5) -> list:
 
 
 def _channel_lineage(conn, candidate_xname: str | None, top_k=5) -> list:
-    """lineage 通道:iterations 链(若给了候选 xname,看它的迭代亲缘)。"""
+    """lineage 通道:真实血缘 DAG 的祖先/后代及其最近边语义。"""
     if not candidate_xname:
         return []
-    results = []
-    try:
-        rows = conn.execute("""
-            SELECT from_xname, to_xname, change_note, icir_delta
-            FROM iterations
-            WHERE from_xname=? OR to_xname=?
-            LIMIT ?
-        """, (candidate_xname, candidate_xname, top_k)).fetchall()
-        for r in rows:
-            other = r[1] if r[0] == candidate_xname else r[0]
-            results.append({"xname": other, "change_note": r[2], "icir_delta": r[3]})
-    except Exception:
-        pass
-    return results
+    rows = conn.execute("""
+        SELECT ancestor_xname AS xname, min_depth AS depth,
+               ROUND(1.0 / min_depth, 4) AS score,
+               e.relation_type, e.change_note, e.icir_delta
+        FROM factor_lineage_paths p
+        LEFT JOIN factor_lineage_edges e
+          ON e.parent_xname=p.ancestor_xname AND e.child_xname=p.descendant_xname
+        WHERE p.descendant_xname=? AND p.ancestor_xname<>?
+        UNION ALL
+        SELECT descendant_xname AS xname, min_depth AS depth,
+               ROUND(1.0 / min_depth, 4) AS score,
+               e.relation_type, e.change_note, e.icir_delta
+        FROM factor_lineage_paths p
+        LEFT JOIN factor_lineage_edges e
+          ON e.parent_xname=p.ancestor_xname AND e.child_xname=p.descendant_xname
+        WHERE p.ancestor_xname=? AND p.descendant_xname<>?
+        ORDER BY depth LIMIT ?
+    """, (candidate_xname, candidate_xname,
+          candidate_xname, candidate_xname, top_k)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def search_factor_realizations(

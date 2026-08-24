@@ -79,52 +79,10 @@ def graph_mark_contradiction_bounded(edge_id: int, regime: str, reason: str) -> 
     return {"ok": True}
 
 
-def graph_angle_coverage() -> list:
-    """信息角度覆盖度:每角度的因子数/dead_end/饱和度(unexplored/thin/partial/saturated)。explore_uncovered_angle 的输入——看哪些角度饱和该跳过、哪些未探索该开挖。不靠人喂角度,图自己看地图换方向。"""
-    with db.get_conn() as conn:
-        return db.query_angle_coverage(conn)
-
-
 def graph_select_operation() -> dict:
-    """动态优先级打分:按图状态(角度饱和度/聚簇位置/操作历史diversity)给 5 操作打分,推荐最高分+理由。替代 graph-engine G1 固定优先级表——角度饱和时强推 explore 换角度,防深度优先扎堆。graph-engine G1 调它选操作,不再用固定优先级表。"""
+    """动态优先级打分:按图状态(聚簇位置/操作历史diversity)给操作打分,推荐最高分+理由。graph-engine G1 调它选操作。"""
     with db.get_conn() as conn:
         return db.select_graph_operation(conn)
-
-
-def angle_candidate_add(code: str, field_family: str = None, extraction: str = None,
-                        signal_target: str = None, theory_axiom: str = None, description: str = None,
-                        novelty_argument: str = None, trigger_angle: str = None, status: str = "proposed") -> dict:
-    """写 angle 自发现候选(proposed)。hypothesize angle_discovery 分支:meta-angle-discoverer 产出后调。"""
-    with db.get_conn() as conn:
-        return {"id": db.add_angle_candidate(
-            conn, code=code, field_family=field_family, extraction=extraction,
-            signal_target=signal_target, theory_axiom=theory_axiom, description=description,
-            novelty_argument=novelty_argument, trigger_angle=trigger_angle,
-            status=status or "proposed",
-        )}
-
-
-def angle_candidate_update(candidate_id: int, status: str, reject_reason: str = None, nearest_existing: str = None) -> dict:
-    """更新候选状态:reviewer accept→accepted(并 addAngle);reject→rejected+reason。"""
-    with db.get_conn() as conn:
-        db.update_angle_candidate(conn, candidate_id, status=status,
-                                  reject_reason=reject_reason, nearest_existing=nearest_existing)
-    return {"ok": True}
-
-
-def angle_candidate_list(status: str = None) -> list:
-    """列 angle 候选(可按 status)。meta-angle-discoverer 查 rejected 防循环用。"""
-    with db.get_conn() as conn:
-        return [dict(r) for r in db.list_angle_candidates(conn, status=status)]
-
-
-def angle_add(code: str, name: str, field_family: str, extraction: str,
-              signal_target: str = None, theory_axiom: str = None, description: str = None) -> dict:
-    """写 angle_ontology(新角度入库,explore 能选)。hypothesize angle_discovery accept 后调。"""
-    with db.get_conn() as conn:
-        db.add_angle(conn, code, name, field_family, extraction,
-                     signal_target=signal_target, theory_axiom=theory_axiom, description=description)
-    return {"ok": True}
 
 
 TOOLS = [
@@ -137,10 +95,5 @@ TOOLS = [
     ("graph_add_edges", graph_add_edges),
     ("graph_mark_contradiction_resolved", graph_mark_contradiction_resolved),
     ("graph_mark_contradiction_bounded", graph_mark_contradiction_bounded),
-    ("graph_angle_coverage", graph_angle_coverage),
     ("graph_select_operation", graph_select_operation),
-    ("angle_candidate_add", angle_candidate_add),
-    ("angle_candidate_update", angle_candidate_update),
-    ("angle_candidate_list", angle_candidate_list),
-    ("angle_add", angle_add),
 ]

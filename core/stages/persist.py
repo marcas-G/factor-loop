@@ -81,23 +81,28 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
 
 
 def _aggregate_ridge_svd(metrics: list | None) -> dict | None:
-    """Aggregate ridge_svd rows; GPU rows omit dLOOCV by design."""
+    """Aggregate ridge_svd rows by the strongest |res_IC| among main scenarios."""
     if not metrics:
         return None
     main = [m for m in metrics if "@1" not in (m.get("x_col") or "")]
     if not main:
         main = metrics
-    has_dloocv = any(m.get("dLOOCV_pct") is not None for m in main)
-    if has_dloocv:
-        best = max(main, key=lambda m: m.get("dLOOCV_pct") if m.get("dLOOCV_pct") is not None else -1)
-    else:
-        best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
+    best = max(main, key=lambda m: abs(m.get("res_IC") or 0))
     return {
-        "dloocv_pct": best.get("dLOOCV_pct"),
         "r2_x": best.get("R2_X"),
         "res_ic": best.get("res_IC"),
-        "engine": "gpu" if not has_dloocv else "cpu",
-        "dloocv_available": has_dloocv,
+        "engine": "gpu",
+    }
+
+
+def _normalize_ridge_agg(agg: dict | None) -> dict | None:
+    """归一化 ridge_svd_agg 键名(R2_X/res_IC → r2_x/res_ic)。"""
+    if not agg:
+        return None
+    return {
+        "r2_x": agg.get("r2_x", agg.get("R2_X")),
+        "res_ic": agg.get("res_ic", agg.get("res_IC")),
+        "engine": agg.get("engine"),
     }
 
 
@@ -184,8 +189,9 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
         ts = datetime.now().isoformat()
         eval_metrics = (check_result.get("evidence") or {}).get("eval_metrics") or None
         ridge_svd = (check_result.get("evidence") or {}).get("ridge_svd") or None
-        ridge_agg = ((check_result.get("evidence") or {}).get("ridge_svd_agg")
-                     or _aggregate_ridge_svd(ridge_svd))
+        ridge_agg = _normalize_ridge_agg(
+            (check_result.get("evidence") or {}).get("ridge_svd_agg")
+        ) or _aggregate_ridge_svd(ridge_svd)
         metrics = _extract_metrics(eval_metrics)
 
         # === 早期否决(不依赖入库数据) ===
@@ -230,7 +236,7 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
                             raw_path=check_result.get("checkOutput"), status="evaluated", verdict="pass")
                 if ridge_agg:
                     db.update_factor_ridge_svd(conn, written,
-                                              ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
+                                              ridge_agg["r2_x"], ridge_agg["res_ic"])
                 lesson_id = db.add_lesson(conn, "success_pattern", "factor",
                                           _build_success_lesson_text(factor, verdict, eval_metrics),
                                           idea_id=idea_id, factor_xname=written,
@@ -261,7 +267,7 @@ def persist_verdict(factor: dict, factor_file: str, check_result: dict, retry_in
                             raw_path=check_result.get("checkOutput"), status="dead_end", verdict="fail")
                 if ridge_agg:
                     db.update_factor_ridge_svd(conn, written,
-                                              ridge_agg["dloocv_pct"], ridge_agg["r2_x"], ridge_agg["res_ic"])
+                                              ridge_agg["r2_x"], ridge_agg["res_ic"])
                 lesson_id = db.add_lesson(conn, "dead_end", "factor",
                                           _build_dead_end_lesson_text(factor, verdict, eval_metrics),
                                           idea_id=idea_id, factor_xname=written,

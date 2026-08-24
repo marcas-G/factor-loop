@@ -3,7 +3,6 @@
 验证判据集中(core/db/graph_constants.json)后:
   1. py 端 loader 正确读共享文件
   2. query_contradictions / graph_stats 用 resolved_clause 常量判据(不是硬编码)
-  3. query_angle_coverage 用 saturation 常量阈值
 
 node 端(factor-db.mjs)共读同一文件 → resolved_clause 天然一致(同文件);
 node 语法由 `node --check` 保证,运行时由 MCP server 调 graph_stats 间接验证。
@@ -22,10 +21,8 @@ def test_loader_reads_shared_file():
     """loader 读的常量 = graph_constants.json 文件内容(单一真相)。"""
     c = db.graph_constants()
     assert "resolved_clause" in c and "resolved_by" in c["resolved_clause"], "resolved_clause 缺失"
-    assert "saturation" in c, "saturation 缺失"
     file_c = json.loads((Path(__file__).resolve().parents[2] / "core" / "db" / "graph_constants.json").read_text(encoding="utf-8"))
     assert c["resolved_clause"] == file_c["resolved_clause"], "loader 与文件不一致"
-    assert c["saturation"] == file_c["saturation"], "loader saturation 与文件不一致"
     print("✓ loader 读 graph_constants.json 正确(单一真相)")
 
 
@@ -33,12 +30,11 @@ def test_graph_stats_uses_resolved_clause():
     """graph_stats 的 unresolved 判据来自常量:建未解矛盾→1,mark resolved→0。"""
     tmp = tempfile.mktemp(suffix=".db")
     with db.get_conn(tmp) as conn:
-        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT, parent_idea_id INTEGER, status TEXT, angle_code TEXT)",
+        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT, parent_idea_id INTEGER, status TEXT)",
                     "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
                     "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, deprecated_at TIMESTAMP)"]:
             conn.execute(ddl)
         db.ensure_graph_schema(conn)
-        db.ensure_angle_schema(conn)
         aid = db.add_axiom(conn, "test_axiom", "microstructure", "test statement")
         iid = db.add_idea(conn, "test idea")
         eid = db.add_graph_edge(conn, "ideas", iid, "axioms", aid, "CONTRADICTS")
@@ -51,25 +47,7 @@ def test_graph_stats_uses_resolved_clause():
     os.unlink(tmp)
 
 
-def test_angle_coverage_uses_saturation():
-    """query_angle_coverage 的饱和度阈值来自常量。"""
-    tmp = tempfile.mktemp(suffix=".db")
-    with db.get_conn(tmp) as conn:
-        for ddl in ["CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, necessity_grade TEXT, parent_idea_id INTEGER, status TEXT, angle_code TEXT)",
-                    "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
-                    "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, deprecated_at TIMESTAMP)"]:
-            conn.execute(ddl)
-        db.ensure_graph_schema(conn)
-        db.ensure_angle_schema(conn)
-        db.add_angle(conn, "unexplored_angle", "未探索", "size", "分布矩")
-        cov = db.query_angle_coverage(conn)
-        assert len(cov) == 1 and cov[0]["saturation"] == "unexplored", "0因子应判 unexplored"
-        print("✓ query_angle_coverage 用 saturation 常量阈值(0因子→unexplored)")
-    os.unlink(tmp)
-
-
 if __name__ == "__main__":
     test_loader_reads_shared_file()
     test_graph_stats_uses_resolved_clause()
-    test_angle_coverage_uses_saturation()
     print("\n=== 图常量一致性测试全部通过 ===")

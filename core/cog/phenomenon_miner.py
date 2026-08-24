@@ -21,12 +21,12 @@ def mine(conn):
     # → "总体有效但某条件下行为不稳"
     print("=== Source A: 成功因子局部裂缝 ===")
     factors_a = conn.execute("""
-        SELECT f.xname, f.latest_icir, f.latest_ic, COALESCE(f.angle_code,'?')
+        SELECT f.xname, f.latest_icir, f.latest_ic
         FROM factors f
         WHERE f.status='evaluated' AND f.latest_icir IS NOT NULL AND f.latest_icir > 1.5
         ORDER BY f.latest_icir DESC LIMIT 20
     """).fetchall()
-    for xn, icir, ic, ang in factors_a:
+    for xn, icir, ic in factors_a:
         rows = conn.execute("""
             SELECT y_horizon, AVG(ic), COUNT(*)
             FROM factor_ic_daily
@@ -43,7 +43,7 @@ def mine(conn):
                 phenomena.append({
                     "phenomenon_id": f"P-A-{len([p for p in phenomena if p['source_type']=='A'])+1}",
                     "source_type": "A_local_break",
-                    "representations": {"factor": xn[:35], "angle": ang},
+                    "representations": {"factor": xn[:35]},
                     "matched_conditions": {"symbol": "SHFE-AG", "feed": "main"},
                     "expected_regular_relation": "成功因子跨 horizon 应同号平滑衰减",
                     "observed_deviation": f"h{h1} IC={ics[h1]:.4f} vs h{h2} IC={ics[h2]:.4f} 符号翻转",
@@ -55,11 +55,18 @@ def mine(conn):
                 break
 
     # === Source B: 两有效因子冲突 ===
-    # 同 angle_code 的两个 icir>1 因子, IC 序列 pearson < 0 (稳定反向)
+    # 同 lineage 分支的两个 icir>1 因子, IC 序列 pearson < 0 (稳定反向)
     print(f"\n=== Source B: 两有效因子冲突 ===")
-    angles = conn.execute("SELECT DISTINCT angle_code FROM factors WHERE status='evaluated' AND angle_code IS NOT NULL").fetchall()
-    for (ang,) in angles:
-        fs = conn.execute("SELECT xname FROM factors WHERE angle_code=? AND status='evaluated' AND latest_icir>1.5",(ang,)).fetchall()
+    branches = conn.execute(
+        "SELECT DISTINCT primary_root_xname FROM factor_lineage_nodes"
+    ).fetchall()
+    for (branch,) in branches:
+        fs = conn.execute(
+            """SELECT f.xname FROM factors f
+               JOIN factor_lineage_nodes n ON n.xname=f.xname
+               WHERE n.primary_root_xname=? AND f.status='evaluated' AND f.latest_icir>1.5""",
+            (branch,),
+        ).fetchall()
         if len(fs) < 2: continue
         for i in range(len(fs)):
             for j in range(i+1, min(i+3, len(fs))):
@@ -75,15 +82,15 @@ def mine(conn):
                     phenomena.append({
                         "phenomenon_id": f"P-B-{len([p for p in phenomena if p['source_type']=='B'])+1}",
                         "source_type": "B_conflict",
-                        "representations": {"factor_a": fs[i][0][:30], "factor_b": fs[j][0][:30], "angle": ang},
+                        "representations": {"factor_a": fs[i][0][:30], "factor_b": fs[j][0][:30], "branch": branch[:35]},
                         "matched_conditions": {"symbol": "SHFE-AG", "horizon": 1, "n_days": len(common)},
-                        "expected_regular_relation": "同 angle 有效因子应方向一致",
+                        "expected_regular_relation": "同 lineage 有效因子应方向一致",
                         "observed_deviation": f"IC corr={c:.3f} (反向)",
                         "persistence": {"n_days": len(common)},
                         "evidence_strength": "MODERATE",
                         "interpretation": "FORBIDDEN"
                     })
-                    print(f"  [{ang}] {fs[i][0][:20]} vs {fs[j][0][:20]} corr={c:.3f}")
+                    print(f"  [{branch[:24]}] {fs[i][0][:20]} vs {fs[j][0][:20]} corr={c:.3f}")
                     break
             else: continue
             break

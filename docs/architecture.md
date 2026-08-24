@@ -33,13 +33,13 @@ mcp/          ← db+stages+metrics+infra  quant-mcp server(编排层)
 
 ### 数据层(core/db)
 
-- `db.py`(2029 行):全部 DB 访问函数(因子/评估/迭代/lesson/idea/图/角度/检索)
+- `db.py`(2029 行):全部 DB 访问函数(因子/评估/迭代/lesson/idea/图/检索)
 - `schema.sql` + `migrations.py`(v15):schema 版本链
 - `seed_axioms.py`:23 条理论公理种子
 
 ### 检索层(core/retrieval)
 
-3 个 Capability-scoped 检索 Contract(R4 已删——冗余判定改平台 Ridge-SVD dLOOCV, 不再本地 IC 空间检索):
+3 个 Capability-scoped 检索 Contract(R4 已删——冗余判定改平台 Ridge-SVD R2_X/res_IC, 不再本地 IC 空间检索):
 
 | Contract | 服务阶段 | 问什么 |
 |---|---|---|
@@ -71,7 +71,7 @@ Step 1  cog-protocol:
           → register_operator(算子=资产,4 Gate 过即注册)
 Step 2  write-factor(contract 或修复路径 → .h)
 Step 3  run-factor-agent(submit → check → .xy)
-Step 4  assess(平台 dLOOCV 查冗余 + 忠实度 + 三维度 + 一票否决)
+Step 4  assess(平台 restest R2_X/res_IC 查冗余 + 忠实度 + 三维度 + 一票否决)
 Step 5  persist_factor + iteration 归档
 Step 6  汇总 → 换 Research Object 循环
 ```

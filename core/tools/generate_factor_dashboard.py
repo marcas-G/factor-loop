@@ -28,8 +28,8 @@ DEFAULT_OUTPUT = DB_PATH.parent / "factor_dashboard.html"
 FACTOR_COLUMNS = [
     "xname", "class_name", "file_path", "formula_text", "params", "status",
     "verdict", "latest_ic", "latest_icir", "latest_sharpe", "latest_rank_ic",
-    "latest_dloocv_pct", "latest_r2_x", "latest_res_ic", "created_ts",
-    "last_updated_ts", "deprecated_at", "angle_code", "quality_score",
+    "latest_r2_x", "latest_res_ic", "created_ts",
+    "last_updated_ts", "deprecated_at", "quality_score",
     "quality_grade", "intuition", "anchor_text", "origin_type", "cohort_tag",
     "operator_chain", "evaluation_status",
 ]
@@ -54,7 +54,10 @@ def _require_tables(conn: sqlite3.Connection) -> None:
         str(row[0])
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
-    required = {"factors", "factor_evals", "iterations", "lessons", "tags", "factor_tags"}
+    required = {
+        "factors", "factor_evals", "iteration_suggestions",
+        "lessons", "tags", "factor_tags",
+    }
     missing = sorted(required - tables)
     if missing:
         raise RuntimeError(f"database is missing factor tables: {', '.join(missing)}")
@@ -88,13 +91,53 @@ def _select_iterations(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         dict(row)
         for row in conn.execute(
             """
-            SELECT id, from_xname, to_xname, idea_id, change_note, reason,
-                   outcome, icir_delta, ts, status, iterable
-            FROM iterations
-            ORDER BY ts DESC, id DESC
+            SELECT s.suggestion_id AS id, s.from_xname,
+                   COALESCE(e.child_xname, s.from_xname) AS to_xname,
+                   s.idea_id, s.change_note, s.reason,
+                   e.outcome, e.icir_delta,
+                   s.created_ts AS ts, s.status
+            FROM iteration_suggestions s
+            LEFT JOIN factor_lineage_edges e
+              ON e.suggestion_id = s.suggestion_id AND e.origin = 'suggestion'
+            ORDER BY s.created_ts DESC, s.suggestion_id DESC
             """
         )
     ]
+
+
+def _select_lineage_edges(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    try:
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT e.parent_xname, e.child_xname, e.relation_type, e.outcome,
+                       e.confidence, e.op_id, o.name AS operator_name
+                FROM factor_lineage_edges e
+                LEFT JOIN operators o ON o.op_id = e.op_id
+                ORDER BY e.parent_xname, e.child_xname
+                """
+            )
+        ]
+    except sqlite3.OperationalError:
+        return []
+
+
+def _select_lineage_branches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    try:
+        return [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT root_xname, root_status, member_count, max_depth,
+                       evaluated_count, dead_end_count
+                FROM factor_lineage_branches
+                ORDER BY member_count DESC, root_xname
+                """
+            )
+        ]
+    except sqlite3.OperationalError:
+        return []
 
 
 def _select_lessons(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -146,6 +189,8 @@ def collect_snapshot(db_path: Path) -> dict[str, Any]:
         factors = _clean_records(_select_factors(conn))
         evals = _clean_records(_select_evals(conn))
         iterations = _clean_records(_select_iterations(conn))
+        lineage_edges = _clean_records(_select_lineage_edges(conn))
+        lineage_branches = _clean_records(_select_lineage_branches(conn))
         lessons = _clean_records(_select_lessons(conn))
         tags = _clean_records(_select_tags(conn))
 
@@ -171,6 +216,8 @@ def collect_snapshot(db_path: Path) -> dict[str, Any]:
  "factors": factors,
         "evaluations": evals,
         "iterations": iterations,
+        "lineage_edges": lineage_edges,
+        "lineage_branches": lineage_branches,
         "lessons": lessons,
         "meta": {
             "dbPath": str(db_file),
@@ -330,6 +377,109 @@ button { cursor: pointer; }
   font-weight: 650;
 }
 .chart-note { padding: 0 11px 9px; margin: 0; color: var(--subtle); font-size: 11px; }
+.lineage-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lineage-controls .control { width: min(260px, 34vw); }
+.lineage-stage {
+  position: relative;
+  height: 560px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(244, 246, 248, .4), rgba(255, 255, 255, 0) 46%),
+    #fbfcfe;
+}
+#lineageChart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+#lineageChart.dragging { cursor: grabbing; }
+.lineage-legend {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  max-width: 62%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: var(--shadow);
+  font-size: 11px;
+  color: #42515f;
+  pointer-events: none;
+}
+.lineage-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+.lineage-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  max-width: 44%;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: rgba(238, 242, 246, .94);
+  color: var(--subtle);
+  font-size: 11px;
+  pointer-events: none;
+}
+.lineage-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--subtle);
+}
+.lineage-empty[hidden] { display: none; }
+.graph-node { cursor: pointer; }
+.graph-node rect {
+  stroke-width: 1.5;
+  filter: drop-shadow(0 2px 3px rgba(16, 24, 40, .08));
+  transition: stroke-width .12s ease, filter .12s ease;
+}
+.graph-node:hover rect { stroke-width: 2.2; filter: drop-shadow(0 3px 6px rgba(16, 24, 40, .16)); }
+.graph-node.selected rect { stroke-width: 2.5; }
+.graph-node text {
+  pointer-events: none;
+  fill: #1f2a37;
+  font-size: 10.5px;
+  font-weight: 650;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.graph-node .node-status {
+  font-size: 9px;
+  font-weight: 600;
+  fill: #667085;
+}
+.graph-edge {
+  stroke: #8da0b3;
+  stroke-opacity: .55;
+  stroke-width: 1.4;
+  marker-end: url(#lineageArrow);
+}
+.graph-edge.improved { stroke: #12805c; stroke-opacity: .72; }
+.graph-edge.declined { stroke: #c2410c; stroke-opacity: .72; }
+.graph-edge.operator-edge {
+  stroke: #0f766e;
+  stroke-opacity: .8;
+  stroke-dasharray: 6 3;
+}
 .controls {
   display: grid;
   grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(120px, 1fr)) auto;
@@ -658,6 +808,34 @@ HTML = r"""<!doctype html>
       </div>
     </section>
 
+    <section class="section" aria-labelledby="lineageTitle">
+      <div class="section-header">
+        <div>
+          <h2 id="lineageTitle">血缘图谱</h2>
+          <span id="lineageMeta">拖拽平移，滚轮缩放，点击节点查看因子</span>
+        </div>
+        <div class="lineage-controls">
+          <label class="sr-only" for="lineageBranchFilter">分支</label>
+          <select class="control" id="lineageBranchFilter"></select>
+          <button class="action" id="lineageFitButton" type="button">适应</button>
+          <button class="action" id="lineageResetButton" type="button">重置</button>
+        </div>
+      </div>
+      <div class="lineage-stage" id="lineageStage">
+        <svg id="lineageChart" role="img" aria-label="因子血缘关系图"></svg>
+        <div class="lineage-legend" aria-hidden="true">
+          <span><i style="background:#12805c"></i>已评估</span>
+          <span><i style="background:#c2410c"></i>放弃</span>
+          <span><i style="background:#2563eb"></i>草稿</span>
+          <span><i style="background:#b7791f"></i>已提交</span>
+          <span><i style="background:#7c3aed"></i>失败</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><i style="background:#0f766e;border-radius:2px;height:2px;width:14px;margin-right:0"></i>算子应用</span>
+        </div>
+        <div class="lineage-hint">滚轮缩放 · 拖拽平移 · 点击节点查看详情</div>
+        <div class="lineage-empty" id="lineageEmpty" hidden>暂无血缘数据</div>
+      </div>
+    </section>
+
     <section class="section" aria-labelledby="factorTitle">
       <div class="section-header">
         <div>
@@ -683,7 +861,6 @@ HTML = r"""<!doctype html>
               <th><button class="sort-header" data-key="verdict" data-label="结论" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_ic" data-label="IC" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_icir" data-label="ICIR" type="button"></button></th>
-              <th><button class="sort-header" data-key="latest_dloocv_pct" data-label="dLOOCV%" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_r2_x" data-label="R²" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_res_ic" data-label="残差IC" type="button"></button></th>
               <th><button class="sort-header" data-key="resic_ic_ratio" data-label="残差IC/IC" type="button"></button></th>
@@ -805,7 +982,7 @@ function searchFactor(factor) {
   if (!state.query) return true;
   const q = state.query.toLowerCase();
   return [factor.xname, factor.class_name, factor.formula_text, factor.intuition,
-          factor.angle_code, factor.status, factor.verdict, ...(factor.tags || []).map(t => t.name)]
+          factor.status, factor.verdict, ...(factor.tags || []).map(t => t.name)]
     .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
 }
 function useInlineDetails() {
@@ -909,6 +1086,270 @@ function renderStatusChart() {
       <text x="${left+width+7}" y="${y+14}" font-size="11" font-weight="650" fill="#344054">${count}</text>`;
   }).join("");
 }
+const graphState = {
+  branch: "all",
+  cache: null,
+  view: null,
+  dragging: false,
+  lastX: 0,
+  lastY: 0
+};
+function shortFactorName(name) {
+  return String(name || "").length > 20 ? String(name).slice(0, 18) + "…" : String(name || "—");
+}
+function buildLineageModel(branch) {
+  const allNodes = DATA.factors.map(f => ({
+    xname: f.xname,
+    label: f.xname,
+    status: f.status
+  }));
+  const byName = new Map(allNodes.map(n => [n.xname, n]));
+  const adj = new Map();
+  const rev = new Map();
+  for (const e of DATA.lineage_edges || []) {
+    if (!byName.has(e.parent_xname) || !byName.has(e.child_xname)) continue;
+    if (!adj.has(e.parent_xname)) adj.set(e.parent_xname, []);
+    adj.get(e.parent_xname).push(e.child_xname);
+    rev.set(e.child_xname, e.parent_xname);
+  }
+  const roots = allNodes.filter(n => !rev.has(n.xname));
+  const rootOf = new Map();
+  for (const root of roots) {
+    const queue = [root.xname];
+    if (!rootOf.has(root.xname)) rootOf.set(root.xname, root.xname);
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const child of adj.get(cur) || []) {
+        if (!rootOf.has(child)) {
+          rootOf.set(child, root.xname);
+          queue.push(child);
+        }
+      }
+    }
+  }
+  for (const n of allNodes) {
+    if (!rootOf.has(n.xname)) rootOf.set(n.xname, n.xname);
+  }
+  const nodes = allNodes.filter(n => branch === "all" || rootOf.get(n.xname) === branch);
+  const nodeSet = new Set(nodes.map(n => n.xname));
+  const edges = (DATA.lineage_edges || []).filter(e =>
+    nodeSet.has(e.parent_xname) && nodeSet.has(e.child_xname)
+  );
+  return {nodes, edges, rootOf};
+}
+function computeLineageLayout(model) {
+  const nodes = model.nodes.map(n => ({
+    ...n,
+    x: 0, y: 0, vx: 0, vy: 0,
+    w: Math.min(172, Math.max(104, String(n.label).length * 6.1 + 18)),
+    h: 34,
+    root: model.rootOf.get(n.xname) || n.xname
+  }));
+  const byName = new Map(nodes.map(n => [n.xname, n]));
+  const edges = model.edges.filter(e => byName.has(e.parent_xname) && byName.has(e.child_xname));
+  const roots = [...new Set(nodes.map(n => n.root))];
+  const W = 1600, H = 1000;
+  const centers = new Map();
+  roots.forEach((root, i) => {
+    const angle = (i / Math.max(1, roots.length)) * 2 * Math.PI;
+    const radius = Math.min(W, H) * 0.32;
+    centers.set(root, {
+      x: W / 2 + Math.cos(angle) * radius,
+      y: H / 2 + Math.sin(angle) * radius * 0.7
+    });
+  });
+  let seed = 20260820;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  nodes.forEach(n => {
+    const c = centers.get(n.root) || {x: W / 2, y: H / 2};
+    n.x = c.x + (rnd() - 0.5) * 420;
+    n.y = c.y + (rnd() - 0.5) * 420;
+  });
+  const repulsion = 290000;
+  const edgeSpring = 0.045;
+  const rootSpring = 0.006;
+  const gravity = 0.0015;
+  for (let iter = 0; iter < 520; iter++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy + 1;
+        const d = Math.sqrt(d2);
+        const force = repulsion / d2;
+        const fx = (dx / d) * force, fy = (dy / d) * force;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+    for (const e of edges) {
+      const a = byName.get(e.parent_xname), b = byName.get(e.child_xname);
+      if (!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      const fx = (dx / d) * d * edgeSpring, fy = (dy / d) * d * edgeSpring;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+    for (const n of nodes) {
+      const c = centers.get(n.root) || {x: W / 2, y: H / 2};
+      n.vx += (c.x - n.x) * rootSpring;
+      n.vy += (c.y - n.y) * rootSpring;
+      n.vx += (W / 2 - n.x) * gravity;
+      n.vy += (H / 2 - n.y) * gravity;
+      const maxV = 9;
+      n.vx = Math.max(-maxV, Math.min(maxV, n.vx));
+      n.vy = Math.max(-maxV, Math.min(maxV, n.vy));
+      n.x += n.vx;
+      n.y += n.vy;
+      n.vx *= 0.84;
+      n.vy *= 0.84;
+    }
+  }
+  return {nodes, edges};
+}
+function getLineageLayout() {
+  if (!graphState.cache || graphState.cache.branch !== graphState.branch) {
+    graphState.cache = {
+      branch: graphState.branch,
+      layout: computeLineageLayout(buildLineageModel(graphState.branch))
+    };
+  }
+  return graphState.cache.layout;
+}
+function fitGraphView() {
+  const layout = getLineageLayout();
+  if (!layout.nodes.length) return;
+  const minX = Math.min(...layout.nodes.map(n => n.x - n.w / 2)) - 120;
+  const minY = Math.min(...layout.nodes.map(n => n.y - n.h / 2)) - 90;
+  const maxX = Math.max(...layout.nodes.map(n => n.x + n.w / 2)) + 120;
+  const maxY = Math.max(...layout.nodes.map(n => n.y + n.h / 2)) + 90;
+  graphState.view = {
+    branch: graphState.branch,
+    x: minX,
+    y: minY,
+    w: Math.max(960, maxX - minX),
+    h: Math.max(560, maxY - minY)
+  };
+}
+function applyGraphView(svg) {
+  if (!graphState.view || graphState.view.branch !== graphState.branch) fitGraphView();
+  svg.setAttribute("viewBox",
+    `${graphState.view.x} ${graphState.view.y} ${graphState.view.w} ${graphState.view.h}`);
+}
+function lineageEdgePath(e, byId) {
+  const p = byId.get(e.parent_xname), c = byId.get(e.child_xname);
+  if (!p || !c) return "";
+  const dx = c.x - p.x, dy = c.y - p.y;
+  const d = Math.max(1, Math.hypot(dx, dy));
+  const sx = p.x + (dx / d) * (p.w / 2 + 4);
+  const sy = p.y + (dy / d) * (p.h / 2 + 4);
+  const ex = c.x - (dx / d) * (c.w / 2 + 9);
+  const ey = c.y - (dy / d) * (c.h / 2 + 9);
+  const cls = (e.outcome === "improved" ? " improved" : e.outcome === "declined" ? " declined" : "")
+    + (e.operator_name ? " operator-edge" : "");
+  const title = e.operator_name ? `<title>算子: ${esc(e.operator_name)}</title>` : "";
+  return `<line class="graph-edge${cls}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}">${title}</line>`;
+}
+function lineageNodeHtml(n) {
+  const color = STATUS_COLORS[n.status] || "#64748b";
+  const selected = state.selected === n.xname ? " selected" : "";
+  const label = shortFactorName(n.label);
+  return `<g class="graph-node${selected}" data-xname="${esc(n.xname)}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})" tabindex="0" role="button" aria-label="${esc(n.xname)}">
+    <rect x="${(-n.w / 2).toFixed(1)}" y="${(-n.h / 2).toFixed(1)}" width="${n.w}" height="${n.h}" rx="6" fill="${color}18" stroke="${selected ? "#0f766e" : color}"></rect>
+    <text x="0" y="-2" text-anchor="middle">${esc(label)}</text>
+    <text class="node-status" x="0" y="12" text-anchor="middle">${esc(STATUS_LABELS[n.status] || n.status)}</text>
+  </g>`;
+}
+function renderLineage() {
+  const svg = document.getElementById("lineageChart");
+  const empty = document.getElementById("lineageEmpty");
+  const layout = getLineageLayout();
+  empty.hidden = layout.nodes.length > 0;
+  if (!layout.nodes.length) {
+    svg.innerHTML = "";
+    return;
+  }
+  applyGraphView(svg);
+  const byId = new Map(layout.nodes.map(n => [n.xname, n]));
+  svg.innerHTML = `
+    <defs>
+      <marker id="lineageArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#8da0b3"></path>
+      </marker>
+    </defs>
+    <g>${layout.edges.map(e => lineageEdgePath(e, byId)).join("")}</g>
+    <g>${layout.nodes.map(lineageNodeHtml).join("")}</g>`;
+  svg.querySelectorAll(".graph-node").forEach(g => {
+    g.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selected = g.dataset.xname;
+      render();
+    });
+    g.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        state.selected = g.dataset.xname;
+        render();
+      }
+    });
+  });
+  document.getElementById("lineageMeta").textContent =
+    `${layout.nodes.length} 节点 · ${layout.edges.length} 边 · ${new Set(layout.nodes.map(n => n.root)).size} 分支`;
+}
+function fillLineageSelect() {
+  const select = document.getElementById("lineageBranchFilter");
+  const branches = (DATA.lineage_branches || []).slice();
+  select.innerHTML = `<option value="all">全部分支 (${DATA.factors.length})</option>` +
+    branches.map(b =>
+      `<option value="${esc(b.root_xname)}">${esc(shortFactorName(b.root_xname))} · ${b.member_count} 因子</option>`
+    ).join("");
+  select.value = graphState.branch;
+}
+function onLineageWheel(event) {
+  event.preventDefault();
+  const svg = document.getElementById("lineageChart");
+  const rect = svg.getBoundingClientRect();
+  const px = (event.clientX - rect.left) / Math.max(1, rect.width);
+  const py = (event.clientY - rect.top) / Math.max(1, rect.height);
+  const factor = event.deltaY > 0 ? 1.18 : 0.85;
+  const v = graphState.view;
+  const nw = Math.min(14000, Math.max(420, v.w * factor));
+  const nh = Math.min(12000, Math.max(360, v.h * factor));
+  v.x += px * (v.w - nw);
+  v.y += py * (v.h - nh);
+  v.w = nw;
+  v.h = nh;
+  svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+}
+function onLineagePointerDown(event) {
+  if (event.target.closest && event.target.closest(".graph-node")) return;
+  graphState.dragging = true;
+  graphState.lastX = event.clientX;
+  graphState.lastY = event.clientY;
+  document.getElementById("lineageChart").classList.add("dragging");
+  document.getElementById("lineageChart").setPointerCapture(event.pointerId);
+}
+function onLineagePointerMove(event) {
+  if (!graphState.dragging || !graphState.view) return;
+  const svg = document.getElementById("lineageChart");
+  const rect = svg.getBoundingClientRect();
+  graphState.view.x -= (event.clientX - graphState.lastX) * graphState.view.w / Math.max(1, rect.width);
+  graphState.view.y -= (event.clientY - graphState.lastY) * graphState.view.h / Math.max(1, rect.height);
+  graphState.lastX = event.clientX;
+  graphState.lastY = event.clientY;
+  svg.setAttribute("viewBox",
+    `${graphState.view.x} ${graphState.view.y} ${graphState.view.w} ${graphState.view.h}`);
+}
+function onLineagePointerUp(event) {
+  graphState.dragging = false;
+  const svg = document.getElementById("lineageChart");
+  svg.classList.remove("dragging");
+  if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+}
 function factorCell(f, open) {
   const tags = (f.tags || []).slice(0,3).map(t => `<span class="tag">${esc(t.name)}</span>`).join("");
   const chevron = open ? "▾" : "▸";
@@ -936,7 +1377,6 @@ function renderTable() {
       <td>${verdictBadge(f)}</td>
       <td class="number ${cls(f.latest_ic)}">${fmt(f.latest_ic)}</td>
       <td class="number ${cls(f.latest_icir)}">${fmt(f.latest_icir, 2)}</td>
-      <td class="number ${cls(f.latest_dloocv_pct)}">${pct(f.latest_dloocv_pct)}</td>
       <td class="number">${pct(f.latest_r2_x)}</td>
       <td class="number ${cls(f.latest_res_ic)}">${fmt(f.latest_res_ic)}</td>
       <td class="number ${cls(f.resic_ic_ratio)}">${pct(f.resic_ic_ratio)}</td>
@@ -984,7 +1424,6 @@ function detailBody(f) {
     <div class="detail-grid">
       ${detailMetric("IC", fmt(f.latest_ic))}
       ${detailMetric("ICIR", fmt(f.latest_icir,2))}
-      ${detailMetric("dLOOCV", pct(f.latest_dloocv_pct))}
       ${detailMetric("库内 R²", pct(f.latest_r2_x))}
       ${detailMetric("残差 IC", fmt(f.latest_res_ic))}
       ${detailMetric("残差IC/IC", pct(f.resic_ic_ratio))}
@@ -1050,7 +1489,7 @@ function renderHeader() {
 }
 function csvCell(value) { return `"${String(value ?? "").replaceAll('"','""')}"`; }
 function exportCsv() {
-  const headers = ["xname","class_name","status","verdict","latest_ic","latest_icir","latest_dloocv_pct","latest_r2_x","latest_res_ic","resic_ic_ratio","last_updated_ts"];
+  const headers = ["xname","class_name","status","verdict","latest_ic","latest_icir","latest_r2_x","latest_res_ic","resic_ic_ratio","last_updated_ts"];
   const rows = currentFactors();
   const csv = [headers.join(","), ...rows.map(f => headers.map(h => csvCell(f[h])).join(","))].join("\n");
   const blob = new Blob(["\ufeff" + csv], {type: "text/csv;charset=utf-8"});
@@ -1060,7 +1499,7 @@ function exportCsv() {
   link.click(); URL.revokeObjectURL(link.href);
 }
 function render() {
-  renderMetrics(); renderScatter(); renderStatusChart(); renderTable();
+  renderMetrics(); renderScatter(); renderStatusChart(); renderLineage(); renderTable();
   if (!useInlineDetails()) {
     renderDetail();
   } else {
@@ -1070,7 +1509,7 @@ function render() {
 }
 function init() {
   state.selected = null;
-  renderHeader(); fillSelects(); render();
+  renderHeader(); fillSelects(); fillLineageSelect(); render();
   document.getElementById("searchInput").addEventListener("input", event => {
     state.query = event.target.value.trim(); renderTable();
   });
@@ -1100,6 +1539,29 @@ function init() {
   document.getElementById("exportButton").addEventListener("click", exportCsv);
   document.getElementById("printButton").addEventListener("click", () => window.print());
   document.getElementById("refreshHint").addEventListener("click", () => alert("这是只读静态快照。更新数据后重新运行：python3 core/tools/generate_factor_dashboard.py"));
+  document.getElementById("lineageBranchFilter").addEventListener("change", event => {
+    graphState.branch = event.target.value;
+    graphState.cache = null;
+    graphState.view = null;
+    renderLineage();
+  });
+  document.getElementById("lineageFitButton").addEventListener("click", () => {
+    graphState.view = null;
+    renderLineage();
+  });
+  document.getElementById("lineageResetButton").addEventListener("click", () => {
+    graphState.branch = "all";
+    document.getElementById("lineageBranchFilter").value = "all";
+    graphState.cache = null;
+    graphState.view = null;
+    renderLineage();
+  });
+  const lineageSvg = document.getElementById("lineageChart");
+  lineageSvg.addEventListener("wheel", onLineageWheel, {passive: false});
+  lineageSvg.addEventListener("pointerdown", onLineagePointerDown);
+  lineageSvg.addEventListener("pointermove", onLineagePointerMove);
+  lineageSvg.addEventListener("pointerup", onLineagePointerUp);
+  lineageSvg.addEventListener("pointercancel", onLineagePointerUp);
   document.addEventListener("keydown", event => {
     if (event.key === "/" && event.target.tagName !== "INPUT") {
       event.preventDefault(); document.getElementById("searchInput").focus();

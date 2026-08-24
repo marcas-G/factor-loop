@@ -1,7 +1,7 @@
 # 数据补全任务
 
 > 数据库全面审查(2026-07-16)后发现的数据缺口。每项独立,可分别执行。
-> 补全后 quality_score / angle_coverage / 知识图血缘全准。
+> 补全后 quality_score / 知识图血缘全准。
 
 ## 总览
 
@@ -10,7 +10,6 @@
 | 1 | 33 个 factor_ic_daily | independence=0 保守,quality 独立性维不准 | 中(refresh) | ⭐⭐ |
 | 2 | 29 个无 factor_evals | quality_score=NULL,不参与排序 | 大(重评)/可选 | ⭐(可选) |
 | 3 | 5 个缺 core_metrics.train_test | quality 样本维用默认(不准) | 小(重评5个) | ⭐ |
-| 4 | 26 个缺 angle_code | angle_coverage 地图漏这 26 | 小(可选) | ⭐(可选) |
 
 ---
 
@@ -180,46 +179,6 @@ print('缺 train_test:', n)
 ```
 
 ---
-
-## 4. 补 26 个缺 angle_code(小,可选)⭐
-
-### 背景
-
-26 个 evaluated 无 `angle_code`(非 explore_uncovered_angle 产的,generalize/resolve 不标 angle)。`angle_coverage` 地图漏这 26,饱和度统计偏低。
-
-### 影响
-
-`angle_coverage` 的角度因子数/dead_end 统计少 26 个(探索方向选择可能偏)。但 explore 已能工作(12 角度覆盖度够)。
-
-### 步骤(可选)
-
-按因子主题手动标 angle(`tag_factor_angle`),或扩展 `seed_angles.py` 自动按 formula 关键词标。
-
-```bash
-# 手动标(示例)
-/home/lgao/quant-venv/bin/python -c "
-import sqlite3
-c=sqlite3.connect('factors.db')
-# 查缺 angle 的 evaluated
-for r in c.execute(\"SELECT xname FROM factors WHERE status='evaluated' AND angle_code IS NULL\"):
-    print(r[0])
-# 标(按主题映射 angle_ontology 12 角度)
-# c.execute('UPDATE factors SET angle_code=? WHERE xname=?', ('<angle>', '<xname>'))
-"
-```
-
-### 验证
-
-```bash
-/home/lgao/quant-venv/bin/python -c "
-import sqlite3
-c=sqlite3.connect('factors.db')
-n=c.execute(\"SELECT COUNT(*) FROM factors WHERE status='evaluated' AND angle_code IS NULL\").fetchone()[0]
-print('evaluated 缺 angle_code:', n)
-"
-```
-
-**⚠ 可选**:angle_coverage 已能指导 explore。26 个漏标影响小,优先级最低。
 
 ---
 

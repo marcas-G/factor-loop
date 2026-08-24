@@ -27,7 +27,6 @@ CREATE TABLE factors (
   verdict TEXT,
   latest_ic REAL,
   latest_icir REAL,
-  latest_dloocv_pct REAL,
   latest_r2_x REAL,
   latest_res_ic REAL,
   last_updated_ts TEXT
@@ -49,18 +48,23 @@ CREATE TABLE factor_evals (
   significant INTEGER,
   raw_path TEXT
 );
-CREATE TABLE iterations (
-  id INTEGER PRIMARY KEY,
+CREATE TABLE iteration_suggestions (
+  suggestion_id INTEGER PRIMARY KEY,
   from_xname TEXT,
-  to_xname TEXT,
   idea_id INTEGER,
   change_note TEXT,
   reason TEXT,
+  created_ts TEXT,
+  status TEXT
+);
+CREATE TABLE factor_lineage_edges (
+  edge_id INTEGER PRIMARY KEY,
+  parent_xname TEXT,
+  child_xname TEXT,
+  suggestion_id INTEGER,
+  origin TEXT,
   outcome TEXT,
-  icir_delta REAL,
-  ts TEXT,
-  status TEXT,
-  iterable INTEGER
+  icir_delta REAL
 );
 CREATE TABLE lessons (
   id INTEGER PRIMARY KEY,
@@ -94,7 +98,7 @@ def _fixture_db(path: Path) -> None:
             INSERT INTO factors VALUES (
               'TestFactor', 'TestClass', 'factors/TestFactor.h',
               'output = rank(imbalance)', 'evaluated', 'pass', 0.12, 2.4,
-              0.01, 0.35, 0.08, '2026-08-17 08:00:00'
+              0.35, 0.08, '2026-08-17 08:00:00'
             )
             """
         )
@@ -106,7 +110,10 @@ def _fixture_db(path: Path) -> None:
             )
             """
         )
-        conn.execute("INSERT INTO iterations VALUES (1, 'TestFactor', 'TestFactor', NULL, 'next test', NULL, 'neutral', 0, '2026-08-17', 'planned', 1)")
+        conn.execute(
+            "INSERT INTO iteration_suggestions VALUES "
+            "(1, 'TestFactor', NULL, 'next test', NULL, '2026-08-17', 'open')"
+        )
         conn.execute("INSERT INTO lessons VALUES (1, 'success_pattern', 'factor', 'stable signal', '{}', NULL, 'TestFactor', '2026-08-17', NULL)")
         conn.execute("INSERT INTO tags VALUES (1, 'order_book', NULL)")
         conn.execute("INSERT INTO factor_tags VALUES ('TestFactor', 1)")
@@ -125,10 +132,13 @@ def test_snapshot_and_html_render() -> None:
         assert abs(snapshot["factors"][0]["resic_ic_ratio"] - 0.08 / 0.12) < 1e-9
         assert len(snapshot["evaluations"]) == 1
         assert len(snapshot["iterations"]) == 1
+        assert "lineage_edges" in snapshot
+        assert "lineage_branches" in snapshot
         assert len(snapshot["lessons"]) == 1
 
         html = render_html(snapshot)
         assert "TestFactor" in html
+        assert "血缘图谱" in html
         assert "FACTOR_DASHBOARD_DATA" in html
         assert "</script>" in html
         assert "state.sort = {key, dir: defaultDir};" in html

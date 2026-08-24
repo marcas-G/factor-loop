@@ -1,6 +1,6 @@
 """anchor_text/embedding 链路测试。
 
-- build_text 直接用 anchor_text(不再 intuition/降级/angle)
+- build_text 直接用 anchor_text(不再 intuition/降级)
 - update_embedding DELETE+INSERT 幂等(vec0 不支持 INSERT OR REPLACE)
 
 用法: /home/lgao/quant-venv/bin/python core/tools/test_anchor_embedding.py
@@ -19,12 +19,12 @@ from core.db import init_db  # noqa: E402
 
 
 def test_build_text_uses_anchor_text():
-    """build_text 直接返回 anchor_text,不依赖 intuition/formula/angle。"""
+    """build_text 直接返回 anchor_text,不依赖其他因子字段。"""
     assert build_text({"anchor_text": "机制:X\n利润来源:Y"}) == "机制:X\n利润来源:Y"
     assert build_text({"anchor_text": None}) == ""
     assert build_text({"anchor_text": ""}) == ""
     # 旧字段存在也不读(只用 anchor_text)
-    row = {"anchor_text": "A", "intuition": "B", "formula_text": "C", "angle_code": "D"}
+    row = {"anchor_text": "A", "intuition": "B", "formula_text": "C"}
     assert build_text(row) == "A"
 
 

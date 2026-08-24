@@ -1,9 +1,4 @@
 {
   "comment": "图查询的共享常量(判据/阈值)。db.py(Python)与 factor-db.mjs(node)共读此文件 → 判据一处,防双端漂移。改这里两端自动一致。",
-  "resolved_clause": "(json_extract(properties,'$.resolved_by') IS NOT NULL OR json_extract(properties,'$.resolution') IS NOT NULL)",
-  "saturation": {
-    "min_n_saturated": 5,
-    "dead_ratio_saturated": 0.6,
-    "max_n_thin": 2
-  }
+  "resolved_clause": "(json_extract(properties,'$.resolved_by') IS NOT NULL OR json_extract(properties,'$.resolution') IS NOT NULL)"
 }

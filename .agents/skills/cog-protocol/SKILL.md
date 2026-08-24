@@ -18,6 +18,17 @@ description: 认知协议 — 统一链路(因子表示审查 → 新算子发�
 
 每 Step 完成**必须立即在同一回合**发起下一 Step 的第一个 tool call。禁止纯文字回合断流。
 
+## ⚠️ 子代理派发（Codex 文件协议）
+
+在 Codex 桌面环境，`spawn_agent` 的 message 载荷不会进入子代理上下文。本文所有“派 agent / Task(...)”统一按 AGENTS.md 协议执行：
+
+1. 把该 agent 的 `task` / `input` / `expect` 写入 `.tmp/agent_task.json`（写入必须发生在 spawn 前）。
+2. `spawn_agent(task_name="<role>", fork_turns="none", message="读取 .tmp/agent_task.json 并执行")`。
+3. 等待该 agent 终态并接收结果后，由主会话删除 `.tmp/agent_task.json`，再派下一个；**同一时刻只允许一个子代理**。
+4. 子代理不得再派发子代理，也不得修改/删除任务文件。
+
+Claude Code 环境可继续使用 Task prompt；但输入内容必须与上述 `input` 完全一致，保持视图隔离。
+
 ## S1 · 选 Research Object + 构造 Factor Profile
 
 ```
@@ -213,7 +224,7 @@ OUTCOME 按产出类型:
 3. `assess`(ICIR + 撞族 + 残差, **IC 判定和因子入库归 assess**)
 4. **算子注册在 S3 产出 contract 后立即做**(register_operator, 语义 4 Gate 过即注册 operators 表 source='cog'; 不受 ICIR 影响 — 算子=资产, 因子=产品)
 
-**⚠️ contract 翻译成因子字段时**: `categories` = 品种代码 `["AG"]`(合法 AG/AU/CU/AL/NI), 不是 angle_code/tags。填错 → `platform_submit_factor` 拦截 `config_error`。
+**⚠️ contract 翻译成因子字段时**: `categories` = 品种代码 `["AG"]`(合法 AG/AU/CU/AL/NI), 不是 tags。填错 → `platform_submit_factor` 拦截 `config_error`。
 
 ---
 

@@ -5,7 +5,7 @@
 
 校验:
 - rank_ic 域:abs(latest_rank_ic)>1 = 0(防 metrics 命名错配 rank_ic_max→rank_ic)
-- 孤儿:graph_edges 白名单 + factor_evals/lessons/iterations/factor_tags + vec 引用完整(防删因子不级联)
+- 孤儿:graph_edges 白名单 + factor_evals/lessons/iteration_suggestions/factor_tags + vec 引用完整(防删因子不级联)
 - deepbest 完整性:近期 eval_metrics deepbest 全 None 比例(>50% 报警,factor_check deep 没产出)
 """
 from __future__ import annotations
@@ -42,7 +42,15 @@ def test_no_orphans():
             ("factor_evals", "factor_xname not in (select xname from factors)"),
             ("lessons", "factor_xname not in (select xname from factors)"),
             ("factor_tags", "factor_xname not in (select xname from factors)"),
-            ("iterations", "from_xname not in (select xname from factors) or to_xname not in (select xname from factors)"),
+            (
+                "iteration_suggestions",
+                "from_xname not in (select xname from factors)",
+            ),
+            (
+                "factor_lineage_edges",
+                """parent_xname not in (select xname from factors)
+                   or child_xname not in (select xname from factors)""",
+            ),
             ("factors_vec", "xname not in (select xname from factors)"),
             ("factor_ic_vec", "factor_xname not in (select xname from factors)"),
             ("factor_ic_vec_meta", "factor_xname not in (select xname from factors)"),

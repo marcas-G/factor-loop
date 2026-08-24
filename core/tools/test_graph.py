@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from core.db import db
 
 _BASE_DDLS = [
-    "CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, parent_idea_id INTEGER, status TEXT, argument_chain TEXT, necessity_grade TEXT, node_layer TEXT, angle_code TEXT)",
+    "CREATE TABLE ideas(id INTEGER PRIMARY KEY, text TEXT, parent_idea_id INTEGER, status TEXT, argument_chain TEXT, necessity_grade TEXT, node_layer TEXT)",
     "CREATE TABLE factors(xname TEXT PRIMARY KEY, status TEXT, latest_icir REAL, deprecated_at TIMESTAMP)",
     "CREATE TABLE lessons(id INTEGER PRIMARY KEY, type TEXT, factor_xname TEXT, idea_id INTEGER, deprecated_at TIMESTAMP)",
 ]
@@ -23,7 +23,7 @@ _CMS = []  # 保持 contextmanager 引用,防 GC 触发 __exit__ 关库
 
 
 def _setup():
-    """临时库 + 基础表 + ensure_graph_schema/angle。"""
+    """临时库 + 基础表 + ensure_graph_schema。"""
     tmp = tempfile.mktemp(suffix=".db")
     cm = db.get_conn(tmp)
     conn = cm.__enter__()
@@ -31,7 +31,6 @@ def _setup():
     for ddl in _BASE_DDLS:
         conn.execute(ddl)
     db.ensure_graph_schema(conn)
-    db.ensure_angle_schema(conn)
     return tmp, conn
 
 

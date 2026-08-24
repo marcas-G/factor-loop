@@ -24,8 +24,7 @@ def missing_factors(conn, statuses: list[str]) -> list[dict]:
         SELECT xname, class_name, file_path, status
         FROM factors
         WHERE status IN ({placeholders})
-          AND (latest_dloocv_pct IS NULL
-               OR latest_r2_x IS NULL
+          AND (latest_r2_x IS NULL
                OR latest_res_ic IS NULL)
         ORDER BY CASE status WHEN 'evaluated' THEN 0 ELSE 1 END, xname
         """,
@@ -52,10 +51,7 @@ def historical_results(runs_root: Path) -> dict[str, dict]:
                 metrics = [metrics]
             if not xname or not isinstance(metrics, list) or not metrics:
                 continue
-            agg = evidence.get("ridge_svd_agg")
-            if not agg and isinstance(metrics[0], dict) and "max_dLOOCV_pct" in metrics[0]:
-                agg = metrics[0]
-            agg = agg or aggregate_ridge_svd(metrics)
+            agg = evidence.get("ridge_svd_agg") or aggregate_ridge_svd(metrics)
             results[xname] = {
                 "metrics": metrics,
                 "agg": agg,
@@ -71,7 +67,7 @@ def save_result(
     agg: dict,
     source: str,
 ) -> None:
-    values = (agg.get("max_dLOOCV_pct"), agg.get("R2_X"), agg.get("res_IC"))
+    values = (agg.get("R2_X"), agg.get("res_IC"))
     if any(value is None for value in values):
         raise ValueError(f"{xname}: incomplete aggregate {agg}")
 

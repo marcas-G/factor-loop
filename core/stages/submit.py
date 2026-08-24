@@ -2,7 +2,7 @@
 """submit(吸收 runtime/stages/submit.mjs)。
 
 推送评估任务:CPU csv_ic 与 GPU ridge_svd 在同一提交阶段并发触发。
-categories 白名单校验(防 P0:angle 标签误填 → DAG failed)。
+categories 白名单校验(防 P0:非品种代码误填 → DAG failed)。
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from core.platform.gpu import submit_csv_and_gpu_ridge
 from core.stages.write_factor import extract_class_name_from_h, is_template_class
 
 # 合法品种代码白名单(沪金银铜铝镍,5 品种)。
-# categories 必须是这些代码之一,不是 angle 标签(oi_anomaly/regime_gate 等)。
+# categories 必须是这些代码之一,不是 tags 或因子名。
 VALID_CATEGORIES = ["AG", "AU", "CU", "AL", "NI"]
 
 
@@ -22,7 +22,7 @@ def validate_categories(categories) -> dict:
     if invalid:
         return {
             "valid": False, "invalid": invalid,
-            "error": f"categories 必须是品种代码 {'/'.join(VALID_CATEGORIES)} 之一(如 ['AG']), 不是 angle 标签或 tags。非法值: {', '.join(invalid)}",
+            "error": f"categories 必须是品种代码 {'/'.join(VALID_CATEGORIES)} 之一(如 ['AG']), 不是 tags 或因子名。非法值: {', '.join(invalid)}",
         }
     return {"valid": True, "invalid": []}
 

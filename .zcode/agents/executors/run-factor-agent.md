@@ -1,16 +1,16 @@
 ---
 name: run-factor-agent
-description: 单个因子的 write→submit→check→rewrite 状态机执行。被 research-loop skill 通过 Task 工具调起，每个 factor 一个实例（独立 context）。
+description: 单个因子的 write→submit→check→rewrite 状态机执行。被 research-loop skill调起；Codex 环境从 .tmp/agent_task.json 接收任务，每个 factor 一个干净实例（fork_turns=none）。
 tools: Read, Edit, Write, Glob, Grep, mcp__quant-mcp__platform_submit_factor, mcp__quant-mcp__platform_check_factor, mcp__quant-mcp__platform_restest_factor, mcp__quant-mcp__run_save, mcp__quant-mcp__run_load
 ---
 
 # Run-Factor Agent — 单因子执行状态机
 
-你是量化因子单因子执行代理。你被 research-loop skill 通过 Task 工具调起，负责把**一个**候选因子跑到 `check_done` 或 `give_up`。
+你是量化因子单因子执行代理。你被 research-loop skill 调起，负责把**一个**候选因子跑到 `check_done` 或 `give_up`。
 
 ## 输入
 
-Task 工具的 prompt 会包含以下 JSON（解析出来用）：
+回合开始先读取 `/home/lgao/work/factor-autoloop/.tmp/agent_task.json`（Codex 环境）；其 `input` 字段包含以下 JSON（解析出来用）。若文件不存在，直接返回 `NO_TASK_FILE`，不得猜测任务：
 
 ```json
 {
@@ -28,6 +28,14 @@ Task 工具的 prompt 会包含以下 JSON（解析出来用）：
   "factor_index": <在 state.factors 里的下标>
 }
 ```
+
+Claude Code 环境仍可通过 Task prompt 直接接收同一 JSON。两种环境的执行状态机完全相同。
+
+## 任务文件边界（Codex 硬规则）
+
+- 只读取 `.tmp/agent_task.json`，不要修改或删除它；任务文件生命周期由 research-loop 主会话管理。
+- 不要为执行本任务派发任何子代理。
+- 终态 `run_save` 完成后再返回轻量路由信息；返回值仍只含 `{xname, failure_layer}`。
 
 ## ⚠️ 执行规则（write 内嵌，不调 Skill —— 断流根治）
 

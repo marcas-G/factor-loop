@@ -19,15 +19,12 @@ CREATE TABLE IF NOT EXISTS factors (
     latest_sharpe    REAL,
     latest_rank_ic   REAL,
     -- 冗余度画像(平台 restest Ridge-SVD, 与 latest_icir 对称的最新一次评估)
-    -- 主判据 dLOOCV: >1% 对线性模型显著增量, <0 过拟合, ≈0 无增益
-    latest_dloocv_pct REAL,        -- 对线性模型净增益%(Ridge 近似 Lasso 的 LOOCV 下降%)
     latest_r2_x      REAL,         -- X 空间冗余度(别人72因子库解释方差, >0.8 高冗余)
     latest_res_ic    REAL,         -- 去掉库冗余后的增量 IC
     created_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_updated_ts  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deprecated_at    TIMESTAMP,
     emb_generated_at TIMESTAMP,
-    angle_code       TEXT,         -- 信息角度元层标注(见 angle_ontology)
     quality_score    REAL,         -- 多指标聚合分(0-1,独立+稳定加权,方案1)
     quality_grade    TEXT,         -- 等级 A(≥0.7)/B(0.4-0.7)/C(<0.4),方案4
     intuition        TEXT,         -- 语义意图描述(研究用,带 idea#/上下文;人看)
@@ -38,7 +35,7 @@ CREATE TABLE IF NOT EXISTS factors (
     need_id                  TEXT,        -- NeedCard id（mechanical_control 产）
     plan_id                  TEXT,        -- chain_planner plan id（确定性 plan0）
     program_id               TEXT,        -- plan_to_program program id
-    operator_chain           TEXT,        -- 算子链 JSON（与 angleontology 血缘）
+    operator_chain           TEXT,        -- 算子链 JSON
     field_bindings           TEXT,        -- 字段绑定 JSON（冻结，后验搜索守卫）
     parameter_hash           TEXT,        -- 参数冻结 hash（sha16）
     kernel_hash              TEXT,        -- kernel hash（sha16）
@@ -92,7 +89,6 @@ CREATE TABLE IF NOT EXISTS ideas (
     support_score_computed_at TIMESTAMP,
     necessity_grade           TEXT,      -- 必然性分级: necessary|identification|conditional|draft（区分硬必然与可识别但非唯一）
     node_layer                TEXT DEFAULT 'HYPOTHESIS',  -- 知识图层: DERIVED(机制推导)|HYPOTHESIS(可算假设)；AXIOM 在 axioms 表
-    angle_code                TEXT,        -- 信息角度(explore 产时标;因子 angle_code 从这继承血缘,不靠关键词)
     FOREIGN KEY (parent_idea_id) REFERENCES ideas(id)
 );
 
@@ -152,30 +148,126 @@ CREATE TABLE IF NOT EXISTS idea_factor_links (
 
 CREATE INDEX IF NOT EXISTS idx_ifl_factor ON idea_factor_links(factor_xname);
 
--- ============ iterations（迭代关系）============
-CREATE TABLE IF NOT EXISTS iterations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_xname  TEXT NOT NULL,
-    to_xname    TEXT NOT NULL,
-    idea_id     INTEGER,
-    change_note TEXT,
-    reason      TEXT,
-    outcome     TEXT CHECK (outcome IN ('improved','declined','neutral')),
-    icir_delta  REAL,
-    ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status      TEXT NOT NULL DEFAULT 'realized',
-    iterable    INTEGER NOT NULL DEFAULT 1,
-    op_id       INTEGER,                 -- v12: 本次迭代用的算子(算子库主体)。可空=非算子迭代(参数调整等)
-    FOREIGN KEY (from_xname) REFERENCES factors(xname),
-    FOREIGN KEY (to_xname)   REFERENCES factors(xname),
-    FOREIGN KEY (idea_id)    REFERENCES ideas(id),
-    FOREIGN KEY (op_id)      REFERENCES operators(op_id)
+-- ============ iteration_suggestions（因子节点待办建议）============
+-- 本表是因子节点的待办属性：从某因子出发建议下一步做什么。realize 后血缘事实
+-- 只写 factor_lineage_edges；本表不重复存 target/outcome/icir。
+CREATE TABLE IF NOT EXISTS iteration_suggestions (
+    suggestion_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_xname        TEXT NOT NULL,
+    idea_id           INTEGER,
+    op_id             INTEGER,
+    change_note       TEXT,
+    reason            TEXT,
+    status            TEXT NOT NULL DEFAULT 'open'
+                      CHECK (status IN ('open','in_progress','realized','abandoned')),
+    created_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (from_xname)        REFERENCES factors(xname),
+    FOREIGN KEY (idea_id)           REFERENCES ideas(id),
+    FOREIGN KEY (op_id)             REFERENCES operators(op_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_iter_from ON iterations(from_xname);
-CREATE INDEX IF NOT EXISTS idx_iter_to   ON iterations(to_xname);
-CREATE INDEX IF NOT EXISTS idx_iter_idea ON iterations(idea_id);
-CREATE INDEX IF NOT EXISTS idx_iter_op   ON iterations(op_id);
+CREATE INDEX IF NOT EXISTS idx_is_from   ON iteration_suggestions(from_xname);
+CREATE INDEX IF NOT EXISTS idx_is_status ON iteration_suggestions(status);
+CREATE INDEX IF NOT EXISTS idx_is_idea   ON iteration_suggestions(idea_id);
+CREATE INDEX IF NOT EXISTS idx_is_op     ON iteration_suggestions(op_id);
+
+-- v19 兼容视图：老报表/SQL 仍可用 iterations 名称读取建议，但真相只在
+-- iteration_suggestions。该 view 不可写；新状态机必须走 iteration_* API。
+CREATE VIEW IF NOT EXISTS iterations AS
+SELECT
+    s.suggestion_id AS id,
+    s.from_xname,
+    COALESCE(e.child_xname, s.from_xname) AS to_xname,
+    s.idea_id,
+    s.change_note,
+    s.reason,
+    e.outcome,
+            e.icir_delta,
+            s.created_ts AS ts,
+            s.status,
+            s.op_id
+FROM iteration_suggestions s
+LEFT JOIN factor_lineage_edges e
+  ON e.suggestion_id = s.suggestion_id AND e.origin = 'suggestion';
+
+-- ============ factor_lineage（真实血缘 DAG）============
+-- 一条边 = 一个已存在因子到另一个已存在因子的 derivation。open/in_progress 建议
+-- 不产生边；这保证血缘查询永远不会把自指占位当成真实父子关系。
+CREATE TABLE IF NOT EXISTS factor_lineage_edges (
+    edge_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_xname  TEXT NOT NULL,
+    child_xname   TEXT NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'iteration'
+                  CHECK (relation_type IN ('iteration','repair','operator_application','manual','reseed')),
+    origin        TEXT NOT NULL DEFAULT 'suggestion'
+                  CHECK (origin IN ('suggestion','retry','cog_repair','operator_contract','manual_backfill','reseeding')),
+    suggestion_id INTEGER,
+    idea_id       INTEGER,
+    op_id         INTEGER,
+    change_note   TEXT,
+    reason        TEXT,
+    outcome       TEXT CHECK (outcome IN ('improved','declined','neutral')),
+    icir_delta    REAL,
+    evidence      TEXT,
+    confidence    TEXT NOT NULL DEFAULT 'observed'
+                  CHECK (confidence IN ('observed','declared','inferred')),
+    created_ts    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (parent_xname, child_xname, relation_type),
+    FOREIGN KEY (parent_xname)   REFERENCES factors(xname),
+    FOREIGN KEY (child_xname)    REFERENCES factors(xname),
+    FOREIGN KEY (suggestion_id)  REFERENCES iteration_suggestions(suggestion_id),
+    FOREIGN KEY (idea_id)        REFERENCES ideas(id),
+    FOREIGN KEY (op_id)          REFERENCES operators(op_id),
+    CHECK (parent_xname <> child_xname)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fle_parent ON factor_lineage_edges(parent_xname);
+CREATE INDEX IF NOT EXISTS idx_fle_child  ON factor_lineage_edges(child_xname);
+CREATE INDEX IF NOT EXISTS idx_fle_sugg   ON factor_lineage_edges(suggestion_id);
+CREATE INDEX IF NOT EXISTS idx_fle_idea   ON factor_lineage_edges(idea_id);
+CREATE INDEX IF NOT EXISTS idx_fle_op     ON factor_lineage_edges(op_id);
+
+-- Transitive closure: one row per (ancestor, descendant), including depth-0 self paths.
+-- path_count counts minimum-length paths and is capped during rebuild; it is for
+-- diagnostics, not a replacement for edge provenance.
+CREATE TABLE IF NOT EXISTS factor_lineage_paths (
+    ancestor_xname   TEXT NOT NULL,
+    descendant_xname TEXT NOT NULL,
+    min_depth        INTEGER NOT NULL,
+    path_count       INTEGER NOT NULL DEFAULT 1,
+    is_direct        INTEGER NOT NULL DEFAULT 0 CHECK (is_direct IN (0,1)),
+    rebuilt_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ancestor_xname, descendant_xname),
+    FOREIGN KEY (ancestor_xname)   REFERENCES factors(xname),
+    FOREIGN KEY (descendant_xname) REFERENCES factors(xname)
+);
+
+CREATE INDEX IF NOT EXISTS idx_flp_descendant ON factor_lineage_paths(descendant_xname, min_depth);
+
+-- Materialized per-factor lineage profile. primary_root is a topological root; a
+-- factor with multiple roots remains a DAG node and is not collapsed into one tree.
+CREATE TABLE IF NOT EXISTS factor_lineage_nodes (
+    xname                    TEXT PRIMARY KEY,
+    is_root                  INTEGER NOT NULL DEFAULT 1 CHECK (is_root IN (0,1)),
+    is_leaf                  INTEGER NOT NULL DEFAULT 1 CHECK (is_leaf IN (0,1)),
+    parent_count             INTEGER NOT NULL DEFAULT 0,
+    child_count              INTEGER NOT NULL DEFAULT 0,
+    primary_root_xname       TEXT NOT NULL,
+    depth_from_primary_root  INTEGER NOT NULL DEFAULT 0,
+    descendant_count         INTEGER NOT NULL DEFAULT 0,
+    max_descendant_depth     INTEGER NOT NULL DEFAULT 0,
+    evaluated_descendant_count INTEGER NOT NULL DEFAULT 0,
+    dead_end_descendant_count  INTEGER NOT NULL DEFAULT 0,
+    open_suggestion_count      INTEGER NOT NULL DEFAULT 0,
+    last_lineage_ts            TIMESTAMP,
+    updated_ts                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (xname)              REFERENCES factors(xname),
+    FOREIGN KEY (primary_root_xname) REFERENCES factors(xname)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fln_root ON factor_lineage_nodes(primary_root_xname);
+CREATE INDEX IF NOT EXISTS idx_fln_leaf ON factor_lineage_nodes(is_leaf);
 
 -- ============ lessons（仅 check_done 实验结果：dead_end 或 success_pattern）============
 CREATE TABLE IF NOT EXISTS lessons (
@@ -347,45 +439,10 @@ CREATE INDEX IF NOT EXISTS idx_edges_to        ON graph_edges(to_table, to_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type      ON graph_edges(edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_type_from ON graph_edges(edge_type, from_table, from_id);
 
--- ============ angle_ontology（信息角度元层：数据→提取角度字典）============
--- 让 graph-engine 感知"哪些信息角度被探索/饱和/未探索",自动换角度(不靠人喂)。
--- 角度 = 字段族 × 提取结构。factors.angle_code 标注每因子属哪角度。
--- 覆盖度(query_angle_coverage)聚合每角度的因子数/dead_end/饱和度,驱动 explore_uncovered_angle。
-CREATE TABLE IF NOT EXISTS angle_ontology (
-    code          TEXT PRIMARY KEY,           -- 'book_imbalance'/'depth_shape'/...
-    name          TEXT NOT NULL,
-    field_family  TEXT NOT NULL,              -- size/add_cancel/volume/turnover/oi/mid/price/time
-    extraction    TEXT NOT NULL,               -- 截面差/分布矩/时间聚类/时序存活/游程/异常/水平动量
-    signal_target TEXT,                        -- 方向/流动性/冲击/意图/状态/资金事件
-    theory_axiom  TEXT,                        -- 关联 axiom code(软引用 axioms.code)
-    description   TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_angle_family ON angle_ontology(field_family);
-
--- ============ angle_candidates（angle 自发现候选记录,防归纳循环）============
--- meta-angle-discoverer 产候选 → proposed;reviewer accept → accepted(并 addAngle 入 angle_ontology);
--- reject → rejected(reject_reason)。下次 meta-angle-discoverer 查 rejected 已试维度,避免重产相似。
-CREATE TABLE IF NOT EXISTS angle_candidates (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    code              TEXT NOT NULL,
-    field_family      TEXT,
-    extraction        TEXT,
-    signal_target     TEXT,
-    theory_axiom      TEXT,
-    description       TEXT,
-    novelty_argument  TEXT,
-    trigger_angle     TEXT,                -- 从哪个 saturated 角度归纳(book_imbalance 等)
-    status            TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected')),
-    reject_reason     TEXT,                -- reviewer reject reason(reskin/weak_support/ungrounded)
-    nearest_existing  TEXT,                -- reviewer 说最像的现有角度
-    tried_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_ac_status ON angle_candidates(status);
-
 -- ============ 算子库 v12（算子为主体，因子为应用实例）============
 -- 算子 = 从因子故事里抽取的可复用测量方法（如"对手吸收"/"弹性变化"）。
 -- 算子是主体：定义纯抽象（不绑具体因子/基底），可配任何基底复用。
--- 因子是算子的应用实例（记在 iterations.op_id：在故事节点 from 上用算子 op 产出 to）。
+-- 因子是算子的应用实例（记在 iteration_suggestions.op_id / factor_lineage_edges.op_id）。
 -- 撞族边界 = 算子×基底类型 → 撞了哪个族（复用/发明的避让依据）。
 CREATE TABLE IF NOT EXISTS operators (
     op_id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -412,6 +469,7 @@ CREATE TABLE IF NOT EXISTS operator_family_edges (
     verdict     TEXT CHECK(verdict IN ('outside_closure','inside_closure','untested')),
     note        TEXT,
     ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(op_id, base_type),                        -- 一个算子×基底类型只保留最新一次撞族结果
     FOREIGN KEY (op_id)     REFERENCES operators(op_id),
     FOREIGN KEY (tested_on)  REFERENCES factors(xname)
 );
@@ -496,7 +554,7 @@ CREATE INDEX IF NOT EXISTS idx_oci_temporal ON operator_capability_index(tempora
 -- ============ factor_research_state（因子研究态, R1 检索主体）============
 -- 一因子一行:这个 Factor 作为 Research Object 被认知协议研究过多少次。
 -- 区分 Factor Product State(factors.status) vs Factor Research State(本表)。
--- 数据源:从 ideas/iterations/lessons 聚合。R1 select_research_object 用 exhaustion_score 选下一只。
+-- 数据源:从 ideas/factor_lineage_edges/lessons 聚合。R1 select_research_object 用 exhaustion_score 选下一只。
 CREATE TABLE IF NOT EXISTS factor_research_state (
     xname                       TEXT PRIMARY KEY,
     times_selected              INTEGER NOT NULL DEFAULT 0,
@@ -552,13 +610,11 @@ CREATE INDEX IF NOT EXISTS idx_fer_factor ON factor_evidence_rollup(factor_xname
 CREATE INDEX IF NOT EXISTS idx_fer_scene  ON factor_evidence_rollup(symbol, freq, y_horizon);
 
 -- ============ library_map（全库聚合视图, R1 选 Research Object 用）============
--- 全库 coverage 索引:按 status/angle/field_family/structure_family 聚合因子数 + dead_end/success 密度。
+-- 全库 coverage 索引:按 status/structure_family 聚合因子数 + dead_end/success 密度。
 -- 不是 prompt 背景,是 Step 0 检索索引——让 selector 对 100% 因子库有覆盖意识。
--- 普通因子 angle_code 推断后可用;structure_family 从 factor_structure.complexity 粗分(细粒度待结构族聚类)。
 CREATE VIEW IF NOT EXISTS library_map AS
 SELECT
     f.status                                              AS status,
-    f.angle_code                                          AS angle_code,
     COALESCE(fs.complexity, 'unknown')                    AS structure_family,
     COUNT(DISTINCT f.xname)                               AS total_factors,
     COUNT(DISTINCT CASE WHEN f.status='dead_end' THEN f.xname END)  AS dead_end_count,
@@ -570,7 +626,72 @@ LEFT JOIN factor_structure fs ON fs.xname = f.xname
 LEFT JOIN lessons l_de ON l_de.factor_xname = f.xname AND l_de.type='dead_end' AND l_de.deprecated_at IS NULL
 LEFT JOIN lessons l_su ON l_su.factor_xname = f.xname AND l_su.type='success_pattern' AND l_su.deprecated_at IS NULL
 WHERE f.deprecated_at IS NULL
-GROUP BY f.status, f.angle_code, COALESCE(fs.complexity, 'unknown');
+GROUP BY f.status, COALESCE(fs.complexity, 'unknown');
+
+-- ============ factor_lineage_branches（root 视角分支画像）============
+-- Root = 没有非自身祖先的因子。闭包包含 depth-0 self path，所以孤立项也成为一个
+-- 单节点 branch。该视图是派生读模型，真实来源仍是 factors + suggestions + lineage edges。
+CREATE VIEW IF NOT EXISTS factor_lineage_branches AS
+WITH roots AS (
+    SELECT f.xname AS root_xname
+    FROM factors f
+    WHERE f.deprecated_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM factor_lineage_paths p
+          WHERE p.descendant_xname = f.xname
+            AND p.ancestor_xname <> f.xname
+      )
+),
+members AS (
+    SELECT p.ancestor_xname AS root_xname,
+           p.descendant_xname AS member_xname,
+           p.min_depth AS member_depth
+    FROM factor_lineage_paths p
+    JOIN roots r ON r.root_xname = p.ancestor_xname
+),
+suggestion_stats AS (
+    SELECT from_xname,
+           SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) AS open_suggestion_count,
+           MAX(updated_ts) AS last_suggestion_ts
+    FROM iteration_suggestions
+    GROUP BY from_xname
+),
+edge_stats AS (
+    SELECT parent_xname,
+           COUNT(*) AS realized_child_count,
+           MAX(created_ts) AS last_edge_ts
+    FROM factor_lineage_edges
+    GROUP BY parent_xname
+),
+aggregated AS (
+    SELECT m.root_xname,
+           COUNT(*) AS member_count,
+           MAX(m.member_depth) AS max_depth,
+           SUM(CASE WHEN f.status='evaluated' THEN 1 ELSE 0 END) AS evaluated_count,
+           SUM(CASE WHEN f.status='dead_end' THEN 1 ELSE 0 END) AS dead_end_count,
+           MAX(f.last_updated_ts) AS last_factor_ts,
+           COALESCE(SUM(ss.open_suggestion_count), 0) AS open_suggestion_count,
+           MAX(ss.last_suggestion_ts) AS last_suggestion_ts,
+           COALESCE(SUM(es.realized_child_count), 0) AS realized_edge_count,
+           MAX(es.last_edge_ts) AS last_edge_ts
+    FROM members m
+    JOIN factors f ON f.xname=m.member_xname AND f.deprecated_at IS NULL
+    LEFT JOIN suggestion_stats ss ON ss.from_xname=m.member_xname
+    LEFT JOIN edge_stats es ON es.parent_xname=m.member_xname
+    GROUP BY m.root_xname
+)
+SELECT a.root_xname,
+       rf.status AS root_status,
+       a.member_count,
+       a.max_depth,
+       a.evaluated_count,
+       a.dead_end_count,
+       ROUND(CAST(a.dead_end_count AS REAL) / CAST(a.member_count AS REAL), 4) AS dead_end_ratio,
+       a.open_suggestion_count,
+       a.realized_edge_count,
+       MAX(a.last_factor_ts, a.last_suggestion_ts, a.last_edge_ts) AS last_activity_ts
+FROM aggregated a
+JOIN factors rf ON rf.xname=a.root_xname;
 
 -- ============ schema_version（schema 版本追踪）============
 -- 记录库当前结构版本 + 已应用的迁移。migrate(conn) 每步成功后写一行。
@@ -583,4 +704,3 @@ CREATE TABLE IF NOT EXISTS schema_version (
     name        TEXT NOT NULL,
     applied_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-

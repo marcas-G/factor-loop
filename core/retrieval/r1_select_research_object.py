@@ -7,10 +7,10 @@
   ② 程序过滤: 排除 recently_selected + exhaustion_score > τ
   ③ 打分:
        score = w1·(1-exhaustion)          # 研究新颖度(越没研究过分越高)
-             + w2·fertility               # 结构生育度(族小且 dead_end 少)
+             + w2·fertility               # 结构生育度(lineage 分支小且 dead_end 少)
              + w3·has_open_idea           # 有未关 idea
              + w4·recency_falloff         # 久未被选(鼓励覆盖盲区)
-             - w5·dead_end_proximity      # 同族 dead_end 密度
+             - w5·dead_end_proximity      # 同 lineage 分支 dead_end 密度
   ④ 返回 top_k + rationale + coverage(never_selected_count 必报)
 
 库空(0 因子)→ 报 library_empty + 建议:先跑 factor loop 产因子。
@@ -45,31 +45,30 @@ def _load_library_stats(conn) -> dict:
     by_status = dict(conn.execute(
         "SELECT status, COUNT(*) FROM factors WHERE deprecated_at IS NULL GROUP BY status"
     ).fetchall())
-    # 族分布(angle_code)
-    by_angle = dict(conn.execute(
-        "SELECT COALESCE(angle_code,'(none)'), COUNT(*) FROM factors "
-        "WHERE deprecated_at IS NULL GROUP BY angle_code"
-    ).fetchall())
     return {
         "total": total,
         "by_status": by_status,
-        "by_angle": by_angle,
     }
 
 
-def _fertility_score(conn, xname: str, angle_code: str | None) -> tuple[float, dict]:
-    """结构生育度:族小 + 族内 dead_end 少 = 高生育度(还有探索空间)。
-    返回 (score 0-1, detail)。"""
-    if not angle_code:
-        return (0.5, {"reason": "无 angle_code,中性", "family_size": 0, "family_dead_end": 0})
-    fam = conn.execute(
-        "SELECT COUNT(*), "
-        "SUM(CASE WHEN status='dead_end' THEN 1 ELSE 0 END) "
-        "FROM factors WHERE angle_code=? AND deprecated_at IS NULL", (angle_code,)
+def _branch_stats(conn, xname: str):
+    row = conn.execute(
+        "SELECT primary_root_xname FROM factor_lineage_nodes WHERE xname=?", (xname,)
     ).fetchone()
-    fam_size, fam_de = fam[0], fam[1]
-    if fam_size == 0:
-        return (0.5, {"reason": "族空", "family_size": 0, "family_dead_end": 0})
+    root = row[0] if row else xname
+    return conn.execute(
+        "SELECT member_count, dead_end_count FROM factor_lineage_branches WHERE root_xname=?",
+        (root,),
+    ).fetchone()
+
+
+def _fertility_score(conn, xname: str) -> tuple[float, dict]:
+    """结构生育度:lineage 分支小 + 分支内 dead_end 少 = 高生育度(还有探索空间)。
+    返回 (score 0-1, detail)。"""
+    branch = _branch_stats(conn, xname)
+    if not branch or branch["member_count"] is None:
+        return (0.5, {"reason": "无 lineage 分支,中性", "family_size": 0, "family_dead_end": 0})
+    fam_size, fam_de = branch["member_count"], branch["dead_end_count"]
     dead_ratio = fam_de / fam_size
     # 族小(1-3)且 dead_end 少 → 高分;族大且 dead_end 多 → 低分
     size_score = max(0.0, 1.0 - (fam_size - 1) / 20.0)  # 1 个=1.0, 21+个=0
@@ -103,17 +102,12 @@ def _recency_falloff(last_selected_ts, now_ts=None) -> float:
     return 0.5
 
 
-def _dead_end_proximity(conn, xname: str, angle_code: str | None) -> float:
-    """同族 dead_end 密度(扣分项)。"""
-    if not angle_code:
+def _dead_end_proximity(conn, xname: str) -> float:
+    """同 lineage 分支 dead_end 密度(扣分项)。"""
+    branch = _branch_stats(conn, xname)
+    if not branch or not branch["member_count"]:
         return 0.0
-    fam = conn.execute(
-        "SELECT COUNT(*), SUM(CASE WHEN status='dead_end' THEN 1 ELSE 0 END) "
-        "FROM factors WHERE angle_code=? AND deprecated_at IS NULL", (angle_code,)
-    ).fetchone()
-    if fam[0] == 0:
-        return 0.0
-    return round(fam[1] / fam[0], 4)
+    return round(branch["dead_end_count"] / branch["member_count"], 4)
 
 
 def select_research_object(
@@ -151,8 +145,8 @@ def select_research_object(
 
         # ── 候选池 ───────────────────────────────────────────────
         pool = conn.execute(
-            "SELECT xname, angle_code, status, created_ts, "
-            "       latest_icir, latest_dloocv_pct, latest_r2_x, latest_res_ic "
+            "SELECT xname, status, created_ts, "
+            "       latest_icir, latest_r2_x, latest_res_ic "
             "FROM factors "
             "WHERE deprecated_at IS NULL AND status IN ('evaluated','failed','dead_end') "
             "ORDER BY xname"
@@ -163,14 +157,11 @@ def select_research_object(
         never_selected = 0
         for r in pool:
             xn = r["xname"]
-            angle, status = r["angle_code"], r["status"]
+            status = r["status"]
             icir = r["latest_icir"]
-            dloocv = r["latest_dloocv_pct"]
             r2_x = r["latest_r2_x"]
             res_ic = r["latest_res_ic"]
             if xn in recently_selected:
-                continue
-            if exclude.get("angle") and angle == exclude["angle"]:
                 continue
             # research_state
             rs = conn.execute(
@@ -186,17 +177,16 @@ def select_research_object(
                 continue
 
             novelty = 1.0 - exhaustion
-            fertility, fam_detail = _fertility_score(conn, xn, angle)
+            fertility, fam_detail = _fertility_score(conn, xn)
             open_q = 1.0 if _has_open_idea(conn, xn) else 0.0
             recency = _recency_falloff(last_sel)
-            de_prox = _dead_end_proximity(conn, xn, angle)
+            de_prox = _dead_end_proximity(conn, xn)
 
-            # 非线性价值(RunLength 教训): ICIR 强 + X空间不冗余(R2_X低) + 线性增量低(dLOOCV低)
+            # 非线性价值(RunLength 教训): ICIR 强 + X空间不冗余(R2_X低)
             # = 可能是非线性信号, 线性冗余判定误杀, 值得换方向/换变换重试
             nonlinear = 1.0 if (
                 (icir or 0) is not None and abs(icir or 0) >= 0.3
                 and (r2_x is None or (r2_x or 0) < 0.5)
-                and (dloocv is None or (dloocv or 0) < 1.0)
             ) else 0.0
 
             score = (
@@ -221,13 +211,11 @@ def select_research_object(
                     "composite": round(score, 4),
                 },
                 "ridge_svd": {
-                    "dloocv_pct": dloocv,
                     "r2_x": r2_x,
                     "res_ic": res_ic,
                     "icir": icir,
                 },
                 "family": fam_detail,
-                "angle_code": angle,
                 "status": status,
             })
 
@@ -239,14 +227,13 @@ def select_research_object(
             "alternatives": [
                 {"xname": t["xname"], "score": t["score"],
                  "rationale": t["rationale"], "ridge_svd": t["ridge_svd"],
-                 "angle_code": t["angle_code"], "status": t["status"]}
+                 "status": t["status"]}
                 for t in top[1:]
             ],
             "rationale": top[0]["rationale"] if top else None,
             "context": {
                 "library_total": stats["total"],
                 "by_status": stats["by_status"],
-                "by_angle": stats["by_angle"],
                 "explored_fraction": round(
                     sum(1 for t in scored if t["rationale"]["times_selected"] > 0)
                     / max(1, len(scored), 4)),

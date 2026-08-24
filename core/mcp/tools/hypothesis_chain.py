@@ -5,12 +5,12 @@ from core.db import db
 
 
 def persist_argument_chain(text: str, argument_chain: dict, parent_idea_id: int = None,
-                           necessity_grade: str = None, angle_code: str = None) -> dict:
+                           necessity_grade: str = None) -> dict:
     """必然假设生成机:写一条假设 + 结构化论证链到 ideas 表。携带论证链(Σ/超加性耦合/唯一性证明/竞争解释/可证伪痕迹),区别于 persist_idea 的纯文本。论证链是假设的属性,不是因子的属性。"""
     with db.get_conn() as conn:
         idea_id = db.add_hypothesis(
             conn, text, argument_chain,
-            parent_idea_id=parent_idea_id, necessity_grade=necessity_grade, angle_code=angle_code,
+            parent_idea_id=parent_idea_id, necessity_grade=necessity_grade,
         )
     return {"idea_id": idea_id}
 

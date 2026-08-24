@@ -48,7 +48,8 @@ from featuretool_common import (
 # ==================== 平台按需选择 ====================
 # 双平台分工(自动按需):
 #   default      → .xy 原始数据(download .xy / GenerateXs)
-#   default_test → IC + 残差评估(submit 评估 / download csv_ic)
+#   default_test → Submit ictest(CPU csv_ic) + Submit restest(GPU ridge_svd);
+#                  在线查看统一走 All results
 # 全局 --app 可显式覆盖; 不给时按子命令推断:
 #   submit  → default_test(评估)
 #   download --xy → default;  download(csv_ic) → default_test
@@ -302,7 +303,7 @@ def cmd_download(args):
 
 
 def cmd_submit(args):
-    """提交因子计算任务(默认 default_test 跑 IC; --app default 生 .xy)"""
+    """提交因子计算任务(默认 default_test 跑 Submit ictest; --app default 生 .xy)"""
     app = _infer_app(args, "default_test")
     bu = base_url(app)
     cookie = ensure_cookie(args, app=app)
@@ -346,12 +347,12 @@ def cmd_submit(args):
 
     # 2. 构建 multipart POST（用 curl -F 实现）
     feeds = args.feeds or "SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1"
-    start_date = args.start_date or "2024-01-02"
-    end_date = args.end_date or "2024-06-30"
+    start_date = args.start_date or "2025-01-01"
+    end_date = args.end_date or "2025-06-30"
     generate_xs = args.generate_xs
 
     print(f"提交因子: {args.features}")
-    print(f"平台: {app} ({'IC+残差评估' if app == 'default_test' else '生 .xy'})")
+    print(f"平台: {app} ({'Submit ictest (CPU csv_ic) + Submit restest (GPU ridge_svd)' if app == 'default_test' else '生 .xy'})")
     print(f"文件: {file_path.name}")
     print(f"品种: {feeds}")
     print(f"日期: {start_date} ~ {end_date}")
@@ -488,14 +489,14 @@ def build_parser():
   # 提交新因子（template 类必须带 <> 尖括号！）
   python featuretool.py submit --file factor.h --features "MyClass<>"
   python featuretool.py submit --file factor.h --features "MyClass<20>" --generate-xs
-  python featuretool.py submit --file factor.h --features "ClassA<>|ClassB<>" --feeds "SHFE-AG" --start-date 2024-01-02 --end-date 2024-06-30
+  python featuretool.py submit --file factor.h --features "ClassA<>|ClassB<>" --feeds "SHFE-AG" --start-date 2025-01-01 --end-date 2025-06-30
 """
     )
 
     # 全局选项
     p.add_argument("--cookie", help="session cookie 值（也可通过 FEATURETOOL_COOKIE 环境变量设置）")
     p.add_argument("--app", choices=["default", "default_test", "auto"], default="auto",
-                   help="平台: default(.xy 原始数据) | default_test(IC+残差评估) | auto(按子命令推断, 默认)")
+                   help="平台: default(.xy 原始数据) | default_test(Submit ictest + Submit restest) | auto(按子命令推断, 默认)")
 
     sub = p.add_subparsers(dest="command")
 
@@ -505,11 +506,11 @@ def build_parser():
     lg.add_argument("--password", "-p", required=True, help="密码")
 
     # list
-    lp = sub.add_parser("list", help="查看所有因子任务状态（默认 default_test 平台）")
+    lp = sub.add_parser("list", help="查看所有因子任务状态（默认 default_test 平台; 在线查看统一在 All results）")
     lp.add_argument("--json", action="store_true", help="输出 JSON（便于程序化解析）")
 
     # download
-    dl = sub.add_parser("download", help="下载因子计算结果（默认 csv_ic/default_test; --xy 走 default 下 dailyX）")
+    dl = sub.add_parser("download", help="下载因子结果包（默认 csv_ic/default_test; --xy 走 default 下 dailyX; 在线查看在 All results）")
     dl.add_argument("--names", help="指定因子名，逗号分隔（如 hawkes_oc,hawkes_oc_freq）")
     dl.add_argument("--all", action="store_true", help="下载全部成功的因子")
     dl.add_argument("--output", "-o", help="输出目录（默认当前目录）")
@@ -520,8 +521,8 @@ def build_parser():
     sb.add_argument("--file", "-f", required=True, help="因子代码文件路径（.h）")
     sb.add_argument("--features", required=True, help='因子类名，| 分隔（如 "ClassA|ClassB<10,14>"）')
     sb.add_argument("--feeds", help="交易品种，逗号分隔（默认 SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1）")
-    sb.add_argument("--start-date", help="起始日期 YYYY-MM-DD（默认 2024-01-02）")
-    sb.add_argument("--end-date", help="结束日期 YYYY-MM-DD（默认 2024-06-30）")
+    sb.add_argument("--start-date", help="起始日期 YYYY-MM-DD（默认 2025-01-01）")
+    sb.add_argument("--end-date", help="结束日期 YYYY-MM-DD（默认 2025-06-30）")
     sb.add_argument("--generate-xs", action="store_true", help="生成 Xs")
     sb.add_argument("--json", action="store_true", help="输出 JSON（便于程序化解析）")
 

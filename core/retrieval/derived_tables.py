@@ -3,8 +3,8 @@
 
 4 张派生表的维护:
   1. factor_evidence_rollup      factor_ic_daily → 场景聚合(FULL/RECENT)
-  2. factor_research_state       ideas/iterations/lessons → 因子研究态聚合 + 增量更新
-  3. factor_operator_usage       factor_structure.primitives → operator 映射(operators 有数据时)
+  2. factor_research_state       ideas/lineage/lessons → 因子研究态聚合 + 增量更新
+  3. factor_operator_usage       factor_lineage_edges.op_id 权威映射 + factor_structure.primitives 兜底
   4. operator_capability_index   operators → capability 字段(需外部填, 提供骨架)
 
 调用时机:
@@ -91,7 +91,7 @@ def rebuild_evidence_rollup(conn) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 2. factor_research_state — ideas/iterations/lessons → 研究态聚合
+# 2. factor_research_state — ideas/lineage/lessons → 研究态聚合
 # ═══════════════════════════════════════════════════════════════════════
 # 认知协议 outcome → research_state 计数列映射
 _OUTCOME_TO_COL = {
@@ -118,7 +118,7 @@ def _exhaustion_score(times_selected, cognitive_attempts,
 
 
 def rebuild_research_state(conn) -> int:
-    """全量重建 factor_research_state(从 ideas/iterations/lessons 聚合)。
+    """全量重建 factor_research_state(从 ideas/lineage/lessons 聚合)。
     每个因子一行。返回写入条数。"""
     factors = conn.execute(
         "SELECT xname FROM factors WHERE deprecated_at IS NULL"
@@ -135,20 +135,26 @@ def _upsert_research_state(conn, xname: str, recompute_exhaustion: bool = True):
     """更新单因子 research_state(从源表重算聚合列,保留 times_selected)。"""
     # 读已有
     existing = conn.execute(
-        "SELECT times_selected, last_selected_ts FROM factor_research_state WHERE xname=?",
+        """SELECT times_selected, last_selected_ts, cognitive_attempts
+           FROM factor_research_state WHERE xname=?""",
         (xname,)
     ).fetchone()
     times_sel = existing[0] if existing else 0
     last_sel = existing[1] if existing else None
+    cognitive_attempts = existing[2] if existing else 0
 
-    # 聚合:作为 from 的迭代(success/declined)
+    # 聚合:作为 parent 的已确认血缘结果;open suggestion 与 inferred 历史回填
+    # 不参与 exhaustion,避免推断边稀释真实耗尽度。
     iter_rows = conn.execute("""
-        SELECT outcome, status FROM iterations WHERE from_xname=?
+        SELECT outcome FROM factor_lineage_edges
+        WHERE parent_xname=?
+          AND confidence IN ('observed','declared')
+          AND outcome IS NOT NULL
     """, (xname,)).fetchall()
     successful_child = sum(1 for r in iter_rows if r[0] == "improved")
     dead_end_child = sum(1 for r in iter_rows if r[0] == "declined")
     total_child = len(iter_rows)
-    factor_iter = sum(1 for r in iter_rows if r[1] == "realized")
+    factor_iter = total_child
 
     # dead_end lessons
     de_lessons = conn.execute(
@@ -166,7 +172,10 @@ def _upsert_research_state(conn, xname: str, recompute_exhaustion: bool = True):
     except Exception:
         open_ideas = 0
 
-    exhaustion = _exhaustion_score(times_sel, 0, dead_end_child, total_child) if recompute_exhaustion else 0.0
+    exhaustion = (
+        _exhaustion_score(times_sel, cognitive_attempts, dead_end_child, total_child)
+        if recompute_exhaustion else 0.0
+    )
     # 注:cognitive_attempts/outcome 由 record_cognitive_attempt 增量维护,rebuild 不覆盖
 
     conn.execute("""
@@ -240,8 +249,27 @@ def mark_research_object_selected(conn, xname: str):
 # ═══════════════════════════════════════════════════════════════════════
 # 3. factor_operator_usage — factor_structure.primitives → operator 映射
 # ═══════════════════════════════════════════════════════════════════════
-def rebuild_operator_usage(conn) -> int:
-    """从 factor_structure.operator_primitives 反推因子用到的算子。
+def rebuild_operator_usage_from_lineage(conn) -> int:
+    """从 factor_lineage_edges.op_id 回填因子×算子映射(权威来源)。"""
+    conn.execute("DELETE FROM factor_operator_usage")
+    conn.execute("""
+        INSERT INTO factor_operator_usage (xname, op_id, op_role, use_count, note)
+        SELECT e.child_xname, e.op_id, 'operator_application', COUNT(*),
+               'from factor_lineage_edges'
+        FROM factor_lineage_edges e
+        WHERE e.op_id IS NOT NULL
+        GROUP BY e.child_xname, e.op_id
+        ON CONFLICT(xname, op_id, op_role) DO UPDATE SET
+            use_count = excluded.use_count,
+            note = excluded.note
+    """)
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM factor_operator_usage"
+    ).fetchone()[0])
+
+
+def rebuild_operator_usage_from_primitives(conn) -> int:
+    """从 factor_structure.operator_primitives 兜底映射因子用到的算子。
     operators 表空 → 无法映射(跳过)。有算子时,按 primitives 名模糊匹配 operators.name。
     返回写入条数(粗映射,后续 agent 可精修)。"""
     op_count = conn.execute("SELECT COUNT(*) FROM operators").fetchone()[0]
@@ -250,7 +278,6 @@ def rebuild_operator_usage(conn) -> int:
     # 读所有算子名
     ops = {row[1]: row[0] for row in conn.execute("SELECT op_id, name FROM operators").fetchall()}
     written = 0
-    conn.execute("DELETE FROM factor_operator_usage")
     for fs in conn.execute("SELECT xname, operator_primitives FROM factor_structure").fetchall():
         xn = fs[0]
         try:
@@ -271,6 +298,11 @@ def rebuild_operator_usage(conn) -> int:
                 """, (xn, matched_op_id, "primitive:" + prim_name, count))
                 written += 1
     return written
+
+
+def rebuild_operator_usage(conn) -> int:
+    """全量重建 factor_operator_usage:血缘 op_id 权威 + 结构 primitives 兜底。"""
+    return rebuild_operator_usage_from_lineage(conn) + rebuild_operator_usage_from_primitives(conn)
 
 
 # ═══════════════════════════════════════════════════════════════════════

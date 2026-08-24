@@ -195,7 +195,7 @@ def platform_restest_factor(xname: str, factorFile: str, run_id: str, factor_ind
     """等待/解析 GPU ridge_svd。工具内部把 ridge_svd 结果落 state, 返回路由信息。
 
     正常链路中任务已由 platform_submit_factor 与 csv_ic 同批提交;这里只轮询该任务、下载解析
-    ridge_svd CSV 并聚合。GPU 版默认不输出 dLOOCV_pct,聚合会显式标记 dloocv_available=false。
+    ridge_svd CSV 并聚合。平台只输出 R2_X + res_IC, 冗余判定只用这两个指标。
     """
     from core.stages.write_factor import extract_class_name_from_h, is_template_class
     class_name = extract_class_name_from_h(factorFile) or xname
@@ -213,13 +213,7 @@ def platform_restest_factor(xname: str, factorFile: str, run_id: str, factor_ind
         result = run_submitted_restest(submitted["feature"])
     else:
         # 兼容直接调用 MCP 工具的旧 state:只补交 GPU ridge_svd,不再走 CPU submit_restest。
-        categories = factor.get("categories") or []
-        if categories:
-            from core.stages.submit import _categories_to_feeds
-            feeds = _categories_to_feeds(categories)
-        else:
-            feeds = "SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1"
-        submission = submit_gpu_tasks(factorFile, features, ["ridge_svd"], feeds or "SHFE-AG,SHFE-AG@1,SHFE-CU,SHFE-CU@1")
+        submission = submit_gpu_tasks(factorFile, features, ["ridge_svd"])
         if not submission.get("ok"):
             result = submission
         else:
@@ -259,7 +253,6 @@ def platform_restest_factor(xname: str, factorFile: str, run_id: str, factor_ind
 
     return {
         "ok": True,
-        "dloocv_pct": agg.get("max_dLOOCV_pct"),
         "r2_x": agg.get("R2_X"),
         "res_ic": agg.get("res_IC"),
     }
