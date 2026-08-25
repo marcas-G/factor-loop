@@ -76,6 +76,13 @@ def persist_candidates(run_id: str, idea_text: str, factors: list) -> dict:
     if not validation["ok"]:
         return {"ok": False, "error": validation["error"], "n_factors": 0}
 
+    # 算子回写链路: operator_refs 缺失只警告不拒绝(老流程 brainstorm 无此字段),
+    # 警告让漏填可见, write-factor frontmatter `operators:` 为权威落点
+    missing_ops = [f.get("name") for f in factors
+                   if not (f.get("operator_refs") or f.get("operators"))]
+    ops_warning = (f"operator_refs 缺失({len(missing_ops)} 个): {missing_ops}"
+                   if missing_ops else None)
+
     with db.get_conn() as conn:
         idea_id = db.add_idea(conn, idea_text)
 
@@ -94,6 +101,7 @@ def persist_candidates(run_id: str, idea_text: str, factors: list) -> dict:
             "params": f.get("params") or {},
             "db_research": f.get("db_research"),
             "repair_contract": f.get("repair_contract"),  # 认知协议 FACTOR_ITERATION 产出的结构化修复 spec
+            "operator_refs": f.get("operator_refs") or f.get("operators"),  # 算子绑定(算子回写链路: cog contract/repair_contract 必填, write-factor frontmatter 同义)
             "suggestion_id": f.get("suggestion_id"),
             "iterates_from": f.get("iterates_from"),
             "factor_file": None, "status": "pending", "failure_layer": None,
@@ -117,7 +125,8 @@ def persist_candidates(run_id: str, idea_text: str, factors: list) -> dict:
         state["factors"] = full_factors
 
     run_store.run_apply(run_id, apply)
-    return {"idea_id": idea_id, "n_factors": len(full_factors), "claimed": claimed}
+    return {"idea_id": idea_id, "n_factors": len(full_factors), "claimed": claimed,
+            **({"ops_warning": ops_warning} if ops_warning else {})}
 
 
 TOOLS = [

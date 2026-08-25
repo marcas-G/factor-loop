@@ -24,9 +24,55 @@ GEN_EMBEDDINGS = str(_PROJECT_ROOT / "core" / "tools" / "gen_embeddings.py")
 GEN_ANCHOR = str(_PROJECT_ROOT / "core" / "tools" / "ai_generate_anchor.py")
 
 
+def _normalize_operator_refs(raw) -> list[int]:
+    """frontmatter operators / state operator_refs → 合法 op_id 列表。
+
+    接受 ["op21", 23, "op23"] 混合形态; 校验 operators 表存在性, 过滤非法值。
+    """
+    if not raw:
+        return []
+    if isinstance(raw, (str, int)):
+        raw = [raw]
+    ids = []
+    for v in raw:
+        m = re.search(r"(?:op)?(\d+)", str(v))
+        if not m:
+            continue
+        ids.append(int(m.group(1)))
+    if not ids:
+        return []
+    with db.get_conn() as conn:
+        placeholders = ",".join("?" * len(ids))
+        valid = {
+            r[0] for r in conn.execute(
+                f"SELECT op_id FROM operators WHERE op_id IN ({placeholders})", ids)
+        }
+    return [i for i in ids if i in valid]
+
+
+def _record_operator_usage(conn, xname: str, op_ids: list[int], confidence: str = "declared") -> None:
+    """因子×算子绑定落 factor_operator_usage(算子回写链路)。
+
+    复用调用方连接(嵌套 get_conn 会 database locked)。
+    """
+    if not op_ids:
+        return
+    for op_id in op_ids:
+        conn.execute("""
+            INSERT INTO factor_operator_usage (xname, op_id, op_role, use_count, note)
+            VALUES (?, ?, 'operator_application', 1, ?)
+            ON CONFLICT(xname, op_id, op_role) DO UPDATE SET
+                use_count = factor_operator_usage.use_count + 1
+        """, (xname, op_id, f"confidence={confidence}"))
+
+
 def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str = "draft",
                            intuition: str | None = None, verdict: str | None = None) -> str | None:
-    """从 .h frontmatter 提取 meta → INSERT factors。返回 xname 或 None。"""
+    """从 .h frontmatter 提取 meta → INSERT factors。返回 xname 或 None。
+
+    frontmatter `operators: [op21, op23]` → factors.operator_chain + factor_operator_usage
+    (算子回写链路: 绑定在因子入库时自动落库, 不依赖手工登记)。
+    """
     text = Path(h_file).read_text(encoding="utf-8", errors="replace")
     meta = pf.parse_frontmatter(text) or {}
     if "class_name" not in meta:
@@ -40,6 +86,7 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
     if not meta.get("xname") and not meta.get("class_name"):
         return None
     xname = meta.get("xname") or meta.get("class_name")
+    operator_refs = _normalize_operator_refs(meta.get("operators"))
 
     with db.get_conn() as conn:
         exists = conn.execute("SELECT 1 FROM factors WHERE xname = ?", (xname,)).fetchone()
@@ -52,13 +99,19 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
             if verdict:
                 updates.append("verdict = ?")
                 params.append(verdict)
+            if operator_refs:
+                updates.append("operator_chain = ?")
+                params.append(json.dumps(operator_refs, ensure_ascii=False))
             params.append(xname)
             conn.execute(f"UPDATE factors SET {', '.join(updates)} WHERE xname = ?", params)
+            # 算子回写: 已存在因子更新时同样落绑定
+            if operator_refs:
+                _record_operator_usage(conn, xname, operator_refs, confidence="declared")
             return xname
         conn.execute(
             """INSERT INTO factors
-               (xname, class_name, file_path, formula_text, params, status, verdict, created_ts, intuition)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (xname, class_name, file_path, formula_text, params, status, verdict, created_ts, intuition, operator_chain)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 xname,
                 meta.get("class_name") or None,
@@ -69,8 +122,12 @@ def add_factor_from_h_file(h_file: str, idea_id: int | None = None, status: str 
                 verdict,
                 meta.get("created_ts") or datetime.now().isoformat()[:10],
                 meta.get("intuition") or intuition,
+                json.dumps(operator_refs, ensure_ascii=False) if operator_refs else None,
             ),
         )
+        # 算子回写: frontmatter 声明的绑定落 usage 表(declared 置信)
+        if operator_refs:
+            _record_operator_usage(conn, xname, operator_refs, confidence="declared")
         # 建 idea_factor_links(update_idea_support_score 依赖此关联查因子)
         if idea_id is not None:
             conn.execute(

@@ -180,7 +180,9 @@ calculateX()                → 【框架自动调用】在 onEndBook() 之后�
 
 ## 4. Standard Factor Template（标准因子模板）
 
-**【硬规则】.h 必须在 `#pragma once` 前含 frontmatter**（`// ---` YAML 块），字段：`xname` / `class_name` / `formula`（多行用 `|`）/ `tags`（数组）/ `params`（dict）/ `created_ts`。格式严格按 `core/tools/parse_frontmatter.py`（每行 `// ` 前缀，`// ---` 边界）。**这是入库时 `addFactorFromHFile` 提取 formula_text/tags 的源头——漏写会导致三件套（formula_text/tags/emb）缺失**。字段来源：xname/class_name/params 从因子 spec；formula 从 spec.formula；tags 从 spec.tags；created_ts 当天。rewrite 改公式后同步更新 `formula` 字段、保留 frontmatter。
+**【硬规则】.h 必须在 `#pragma once` 前含 frontmatter**（`// ---` YAML 块），字段：`xname` / `class_name` / `formula`（多行用 `|`）/ `tags`（数组）/ `params`（dict）/ `operators`（数组，算子绑定）/ `created_ts`。格式严格按 `core/tools/parse_frontmatter.py`（每行 `// ` 前缀，`// ---` 边界）。**这是入库时 `addFactorFromHFile` 提取 formula_text/tags 的源头——漏写会导致三件套（formula_text/tags/emb）缺失**。字段来源：xname/class_name/params 从因子 spec；formula 从 spec.formula；tags 从 spec.tags；created_ts 当天。rewrite 改公式后同步更新 `formula` 字段、保留 frontmatter。
+
+**【算子绑定硬规则】`operators: [op21, op23]`——因子用了 operators 表里哪个算子就写哪个**（库内算子见 `operators` 表，如 op21=IndexAnchoredProfileDecomposition 位置矩族）。这是算子回写链路的权威落点：入库时自动落 `factors.operator_chain` + `factor_operator_usage`（confidence=declared），算子复用统计靠它。spec 带 `operator_refs`/`operators` 字段时**原样抄入**；因子实现某算子语义（如索引加权矩=op21、乘性门控调制=op22、条件分箱响应=op23）但 spec 未标时，写因子者负责补上。没绑任何算子可省略本行，但 cognize 协议产出的 contract/repair_contract 候选不允许省略。
 
 ```cpp
 // ---
@@ -191,6 +193,7 @@ calculateX()                → 【框架自动调用】在 onEndBook() 之后�
 //   _value2 = computeOther()
 // tags: [order_book, imbalance, exponential_decay]
 // params: {window: 21}
+// operators: [op21, op23]
 // created_ts: 2026-06-26
 // ---
 #pragma once
@@ -475,6 +478,7 @@ void onEndBookSuper(FeedNumberT feedId) {
 18. feed 档位不足时 `bidSize/askSize(i)` 越界 → 用 `availableLevels = min(MaxLevels, min(bidNumLevels, askNumLevels))` 约束循环上界,`L==0` 直接返回。
 19. 除法/log 加 eps 保底(`std::max(v, 1e-20)`)+ 最终 `std::isfinite` 守卫,防 NaN/Inf 传播成 UB。
 20. 多 feed 因子:跨品种聚合只在主 feed(`feedId == _feedIndex`)触发输出,其余 feed 只更新各自状态;冷启动未就绪(容器空/样本不足)输出 0,不访问空容器。
+21. **状态容器(`vector` ring 等)必须在 `initialize()` 里完成首次 assign/resize,不能只在 `onStarted()` 里做**。平台 DAG 回放路径存在 `onEndBook()` 先于 `onStarted()` 到达的时序:只在 `onStarted()` 初始化 → 首批 book 到达时容器还是空的 → 空 `vector` 索引写入 → SIGSEGV(exit 134 core dumped),DAG 全部 93 个 map 实例同型崩溃,check 层只看到 `check_failed(exit=3)` 无任何因子侧错误信号。**正确写法: `initialize()` 和 `onStarted()` 都 assign(前者保首帧前就绪,后者保重置语义),成员声明同时给默认尺寸兜底**(`std::array` 或带 `{}` 初始化)。实证案例 2026-08-25: `DepthPosMomentThickWallCentroid_W200` 三个 ring 只在 `onStarted` assign,连续 3 次 check_failed;补 `initialize()` assign 后同配置一次通过。
 
 ---
 
@@ -513,6 +517,7 @@ void onEndBookSuper(FeedNumberT feedId) {
 ### Step 5: 包含必要模板代码
 - `using FeedIndicator::receive;`
 - `FeedIndicator::initialize(args)` 在 `initialize()` 中
+- **有状态容器(ring buffer 等)在 `initialize()` 中首次 assign/resize**(§6.5 条 21:平台回放 `onEndBook` 可能先于 `onStarted` 到达,只靠 `onStarted` 初始化会空容器崩溃)
 - 所有状态在 `onStarted()` 中重置
 
 ### Step 6: 自包含输出

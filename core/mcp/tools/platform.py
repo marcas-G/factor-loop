@@ -59,6 +59,32 @@ def _offload_large_evidence(evidence, run_dir: str, xname: str) -> tuple:
     return slimmed, evidence_file
 
 
+def _retry_with_resubmit(xname, factor, check_output, submit_fn, check_fn):
+    """平台任务图抖动自愈:check_output_missing 且非全零 → 原名 resubmit + recheck 一次。
+
+    实证(2026-08-24/25 两案例): 配对提交后的首次 DAG run 偶发生成异常任务图
+    (尾部任务缺失或走 cleanup_xy 分支), DAG 报 success 但无 IC 产物可下载;
+    原名单重提交后任务图恢复正常, 产物即出。conf/代码均相同, 属平台侧竞态。
+    成功返回 {result, submit}; 仍 missing/提交失败返回 None(交上层换名或 agent 兜底)。
+    """
+    factor_file = factor.get("factor_file")
+    if not factor_file or not Path(factor_file).exists():
+        return None
+
+    new_submit = submit_fn(
+        {"name": xname, "categories": factor.get("categories") or [],
+         "params": factor.get("params") or {}},
+        factor_file,
+    )
+    if not new_submit or not new_submit.get("ok"):
+        return None
+
+    new_result = check_fn(factor, new_submit, check_output)
+    if new_result.get("failureLayer") == "check_output_missing":
+        return None  # 仍 missing → 非任务图抖动, 不自愈
+    return {"result": new_result, "submit": new_submit}
+
+
 def _retry_with_rename(xname, factor, check_output, submit_fn, check_fn):
     """DAG 缓存陷阱自愈:换名 + 重 submit + 重 check。成功返回 {result},失败 None。"""
     factors_dir = Path(factor.get("factor_file")).parent if factor.get("factor_file") else Path("factors")
@@ -116,7 +142,7 @@ def _attach_research_context(result: dict, state: dict | None, factor_index: int
 
 
 def platform_check_factor(xname: str, submitRef: dict, checkOutput: str, run_id: str, factor_index: int) -> dict:
-    """检查因子评估结果(调 factor_check.py run + 抓 evidence + 诊断)。工具内部直接把完整 evidence + failure_layer 落到 state(不经 agent 手,避免 LLM 二次加工丢字段)。返回给调用方的只有路由信息 {failureLayer, summary},不含 evidence。check_output_missing + 因子值全零时自动换名重试一次(DAG 缓存陷阱自愈)。"""
+    """检查因子评估结果(调 factor_check.py run + 抓 evidence + 诊断)。工具内部直接把完整 evidence + failure_layer 落到 state(不经 agent 手,避免 LLM 二次加工丢字段)。返回给调用方的只有路由信息 {failureLayer, summary},不含 evidence。check_output_missing 时两级自愈:非全零先原名 resubmit(平台任务图抖动),全零换名重试(DAG 缓存陷阱)。"""
     factor = {"name": xname}
     state = None
     if run_id and factor_index is not None:
@@ -136,7 +162,8 @@ def platform_check_factor(xname: str, submitRef: dict, checkOutput: str, run_id:
 
     result = check_factor_programmatic(factor, submitRef, checkOutput)
 
-    # DAG 缓存陷阱自愈:check_output_missing + 全零 → 换名重试
+    # 自愈 1(平台任务图抖动): check_output_missing 且非全零 → 原名 resubmit + recheck 一次
+    # 自愈 2(DAG 缓存陷阱): check_output_missing + 全零 → 换名重试
     if result.get("failureLayer") == "check_output_missing" and factor.get("factor_file"):
         feature_key = Path(factor["factor_file"]).stem
         if is_all_zero_from_screening(checkOutput, feature_key):
@@ -155,6 +182,34 @@ def platform_check_factor(xname: str, submitRef: dict, checkOutput: str, run_id:
                         })
                     except Exception:
                         pass
+        else:
+            retried = _retry_with_resubmit(xname, factor, checkOutput,
+                                           submit_factor_programmatic, check_factor_programmatic)
+            if retried:
+                result = retried["result"]
+                new_submissions = (retried.get("submit") or {}).get("tasks")
+                if run_id and isinstance(new_submissions, dict):
+                    try:
+                        run_store.run_save(run_id, {
+                            f"factors.{factor_index}.evaluation_submissions": new_submissions,
+                            f"factors.{factor_index}.gpu_submissions": {
+                                "ridge_svd": new_submissions.get("ridge_svd")
+                            },
+                        })
+                    except Exception:
+                        pass
+                # 记 trace(非阻塞): resubmit 自愈成功
+                try:
+                    prev_trace = factor.get("retry_trace") if isinstance(factor.get("retry_trace"), list) else []
+                    run_store.run_save(run_id, {
+                        f"factors.{factor_index}.retry_trace": prev_trace + [{
+                            "attempt": len(prev_trace) + 1, "failure_layer": "check_output_missing",
+                            "fix": "platform_taskgraph_resubmit",
+                            "summary": "missing(非全零) 疑似平台任务图抖动 → 原名 resubmit 自愈成功",
+                        }],
+                    })
+                except Exception:
+                    pass
 
     _attach_research_context(result, state if run_id else None, factor_index if run_id else None)
 
