@@ -36,10 +36,22 @@ FACTOR_COLUMNS = [
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
-    db_path = db_path.expanduser().resolve()
-    if not db_path.is_file():
-        raise FileNotFoundError(f"factor database not found: {db_path}")
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+    raw = str(db_path)
+    if raw.startswith("file:"):
+        # Pre-built URI (e.g. file:...?mode=ro&immutable=1): used when the db
+        # sits on a read-only mount where SQLite must skip creating -shm/-wal.
+        # Path.query sticks on "?" so split manually.
+        path_part, _, query = raw.partition("?")
+        fs_path = Path(path_part[len("file:"):]).expanduser().resolve()
+        if not fs_path.is_file():
+            raise FileNotFoundError(f"factor database not found: {raw}")
+        uri = f"file:{fs_path}?{query}" if query else f"file:{fs_path}?mode=ro"
+    else:
+        fs_path = db_path.expanduser().resolve()
+        if not fs_path.is_file():
+            raise FileNotFoundError(f"factor database not found: {db_path}")
+        uri = f"file:{fs_path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only = ON")
     return conn
@@ -211,7 +223,12 @@ def collect_snapshot(db_path: Path) -> dict[str, Any]:
             else None
         )
 
-    db_file = db_path.expanduser().resolve()
+    raw_path = str(db_path)
+    db_file = (
+        Path(raw_path.partition("?")[0][len("file:"):])
+        if raw_path.startswith("file:")
+        else db_path
+    ).expanduser().resolve()
     return {
  "factors": factors,
         "evaluations": evals,
