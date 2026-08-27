@@ -680,3 +680,7 @@ button:focus-visible, .search:focus-visible, .control:focus-visible {
 th { padding: 9px 10px; }
 th .sort-header { display: inline-flex; align-items: center; gap: 2px; }
 th:not(:first-child) .sort-header { justify-content: flex-end; width: 100%; }
+
+/* 行内详情展开行：内容正常换行（全局 td nowrap 会撑爆页面） */
+.expanded-row td { white-space: normal; }
+.expanded-row td .detail-table td, .expanded-row td .detail-table th { white-space: normal; }
