@@ -800,9 +800,47 @@ function render() {
     document.body.classList.remove("sheet-open");
   }
 }
+function armReload() {
+  if (state.autoRefreshPaused || armReload.armed) return;
+  armReload.armed = true;
+  const banner = document.getElementById("refreshBanner");
+  banner.hidden = false;
+  requestAnimationFrame(() => banner.classList.add("show"));
+  let left = 10;
+  const timer = setInterval(() => {
+    document.getElementById("refreshCountdown").textContent = String(--left);
+    if (left <= 0) { clearInterval(timer); location.reload(); }
+  }, 1000);
+  document.getElementById("refreshNow").addEventListener("click", () => location.reload());
+  document.getElementById("refreshPause").addEventListener("click", () => {
+    state.autoRefreshPaused = true;
+    clearInterval(timer);
+    banner.classList.remove("show");
+    setTimeout(() => { banner.hidden = true; }, 350);
+  });
+}
+async function startAutoRefresh() {
+  // 基线取自首次 HEAD 响应（serve.py 提供 Last-Modified）；
+  // 页面自身的 document.lastModified 格式与其不一致，不可混用。
+  let baseline = null;
+  const poll = async () => {
+    if (state.autoRefreshPaused) return;
+    try {
+      const res = await fetch(location.pathname, { method: "HEAD", cache: "no-store" });
+      if (!res.ok) return;
+      const modified = res.headers.get("Last-Modified");
+      if (!modified) return;
+      if (baseline === null) baseline = modified;
+      else if (modified !== baseline) armReload();
+    } catch (_) { /* 网络断：静默，下轮重试 */ }
+  };
+  await poll();
+  setInterval(poll, 60_000);
+}
 function init() {
   state.selected = null;
   renderHeader(); fillSelects(); fillLineageSelect(); render();
+  startAutoRefresh();
   document.getElementById("searchInput").addEventListener("input", event => {
     state.query = event.target.value.trim(); renderTable();
   });
