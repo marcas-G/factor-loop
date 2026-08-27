@@ -153,6 +153,15 @@ def test_snapshot_and_html_render() -> None:
         assert "d3js.org/d3-hierarchy" in html
         for feat in ("hierarchy", "stratify", "tree"):
             assert feat in html, f"vendor missing export: {feat}"
+        # 重写后关键 DOM 与函数存在性
+        for dom_id in ("lineageChart", "scatterChart", "trendChart", "statusChart",
+                       "factorRows", "detailPanel", "metricCards", "refreshBanner",
+                       "generatedMeta", "trendLegend"):
+            assert f'id="{dom_id}"' in html, f"missing DOM id: {dom_id}"
+        assert '"lineage_edges"' in html
+        for fn in ("computeLineageLayout", "startAutoRefresh", "aggregateByGeneration",
+                   "renderPathBreadcrumb", "sparkline"):
+            assert f"function {fn}" in html, f"missing function: {fn}"
         assert "state.sort = {key, dir: defaultDir};" in html
         assert "state.sort.dir *= -1;" in html
         assert "state.sorts" not in html
