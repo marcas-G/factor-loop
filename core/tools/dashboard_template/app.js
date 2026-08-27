@@ -584,6 +584,16 @@ function renderTable() {
 function detailMetric(label, value) {
   return `<div class="detail-metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`;
 }
+function renderPathBreadcrumb(xname) {
+  const parentOf = new Map((DATA.lineage_edges || []).map(e => [e.child_xname, e.parent_xname]));
+  const chain = [];
+  for (let cur = xname; cur; cur = parentOf.get(cur) || null) chain.unshift(cur);
+  if (chain.length < 2) return ""; // 根因子无路径
+  return `<nav class="path-crumbs" aria-label="进化路径">` + chain.map((x, i) =>
+    (i ? `<span class="crumb-sep">→</span>` : "") +
+    `<button class="crumb${x === xname ? " current" : ""}" data-select="${esc(x)}" type="button" title="${esc(x)}">${esc(shortFactorName(x))}</button>`
+  ).join("") + `</nav>`;
+}
 function detailBody(f) {
   const evals = evalsByName.get(f.xname) || [];
   const lessons = lessonsByName.get(f.xname) || [];
@@ -600,6 +610,7 @@ function detailBody(f) {
     ${iterations.slice(0,12).map(i => `<tr><td>${shortTime(i.ts)}</td><td>${esc(i.change_note || i.reason)}</td></tr>`).join("")}</tbody></table>`
     : `<p class="empty">暂无迭代记录</p>`;
   return `
+    ${renderPathBreadcrumb(f.xname)}
     ${tagHtml ? `<div class="tag-row" style="margin-top:8px">${tagHtml}</div>` : ""}
     <div class="detail-grid">
       ${detailMetric("IC", fmt(f.latest_ic))}
@@ -649,6 +660,13 @@ function renderDetail() {
     ${detailBody(f)}`;
   document.getElementById("closeDetail").addEventListener("click", () => {
     state.selected = null; render();
+  });
+  panel.querySelectorAll("button.crumb[data-select]").forEach(btn => {
+    btn.addEventListener("click", event => {
+      event.stopPropagation();
+      state.selected = btn.dataset.select;
+      render();
+    });
   });
 }
 function fillSelects() {
