@@ -334,78 +334,43 @@ function buildLineageModel(branch) {
   return {nodes, edges, rootOf};
 }
 function computeLineageLayout(model) {
-  const nodes = model.nodes.map(n => ({
-    ...n,
-    x: 0, y: 0, vx: 0, vy: 0,
-    w: Math.min(172, Math.max(104, String(n.label).length * 6.1 + 18)),
-    h: 34,
-    root: model.rootOf.get(n.xname) || n.xname
-  }));
-  const byName = new Map(nodes.map(n => [n.xname, n]));
-  const edges = model.edges.filter(e => byName.has(e.parent_xname) && byName.has(e.child_xname));
-  const roots = [...new Set(nodes.map(n => n.root))];
-  const W = 1600, H = 1000;
-  const centers = new Map();
-  roots.forEach((root, i) => {
-    const angle = (i / Math.max(1, roots.length)) * 2 * Math.PI;
-    const radius = Math.min(W, H) * 0.32;
-    centers.set(root, {
-      x: W / 2 + Math.cos(angle) * radius,
-      y: H / 2 + Math.sin(angle) * radius * 0.7
-    });
-  });
-  let seed = 20260820;
-  const rnd = () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  nodes.forEach(n => {
-    const c = centers.get(n.root) || {x: W / 2, y: H / 2};
-    n.x = c.x + (rnd() - 0.5) * 420;
-    n.y = c.y + (rnd() - 0.5) * 420;
-  });
-  const repulsion = 290000;
-  const edgeSpring = 0.045;
-  const rootSpring = 0.006;
-  const gravity = 0.0015;
-  for (let iter = 0; iter < 520; iter++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const d2 = dx * dx + dy * dy + 1;
-        const d = Math.sqrt(d2);
-        const force = repulsion / d2;
-        const fx = (dx / d) * force, fy = (dy / d) * force;
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
-      }
-    }
-    for (const e of edges) {
-      const a = byName.get(e.parent_xname), b = byName.get(e.child_xname);
-      if (!a || !b) continue;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.max(1, Math.hypot(dx, dy));
-      const fx = (dx / d) * d * edgeSpring, fy = (dy / d) * d * edgeSpring;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
-    }
-    for (const n of nodes) {
-      const c = centers.get(n.root) || {x: W / 2, y: H / 2};
-      n.vx += (c.x - n.x) * rootSpring;
-      n.vy += (c.y - n.y) * rootSpring;
-      n.vx += (W / 2 - n.x) * gravity;
-      n.vy += (H / 2 - n.y) * gravity;
-      const maxV = 9;
-      n.vx = Math.max(-maxV, Math.min(maxV, n.vx));
-      n.vy = Math.max(-maxV, Math.min(maxV, n.vy));
-      n.x += n.vx;
-      n.y += n.vy;
-      n.vx *= 0.84;
-      n.vy *= 0.84;
-    }
+  // 垂直 tidy tree：根在上，代际向下分层，确定性布局（无随机）。
+  const children = new Map();
+  for (const e of model.edges) {
+    if (!children.has(e.parent_xname)) children.set(e.parent_xname, []);
+    children.get(e.parent_xname).push(e.child_xname);
   }
-  return {nodes, edges};
+  const NODE_W = 168, NODE_H = 34, COL_GAP = 18, ROW_GAP = 78, BRANCH_GAP = 2;
+  const pos = new Map(); // xname -> {col, depth}
+  function place(x, depth, colCursor) {
+    const kids = children.get(x) || [];
+    if (!kids.length) {
+      pos.set(x, { col: colCursor, depth });
+      return 1;
+    }
+    let used = 0;
+    for (const k of kids) used += place(k, depth + 1, colCursor + used);
+    const cols = kids.map(k => pos.get(k).col);
+    pos.set(x, { col: (Math.min(...cols) + Math.max(...cols)) / 2, depth });
+    return used;
+  }
+  const roots = [...new Set(model.nodes.map(n => model.rootOf.get(n.xname)))];
+  let cursor = 0;
+  for (const r of roots) {
+    cursor += place(r, 0, cursor) + BRANCH_GAP;
+  }
+  const nodes = model.nodes.map(n => {
+    const q = pos.get(n.xname) || { col: 0, depth: 0 };
+    return {
+      ...n,
+      x: q.col * (NODE_W + COL_GAP),
+      y: q.depth * (NODE_H + ROW_GAP),
+      w: NODE_W, h: NODE_H,
+      root: model.rootOf.get(n.xname) || n.xname
+    };
+  });
+  const byName = new Map(nodes.map(n => [n.xname, n]));
+  return { nodes, edges: model.edges, rootOf: model.rootOf, byName, children };
 }
 function getLineageLayout() {
   if (!graphState.cache || graphState.cache.branch !== graphState.branch) {
@@ -439,23 +404,20 @@ function applyGraphView(svg) {
 function lineageEdgePath(e, byId) {
   const p = byId.get(e.parent_xname), c = byId.get(e.child_xname);
   if (!p || !c) return "";
-  const dx = c.x - p.x, dy = c.y - p.y;
-  const d = Math.max(1, Math.hypot(dx, dy));
-  const sx = p.x + (dx / d) * (p.w / 2 + 4);
-  const sy = p.y + (dy / d) * (p.h / 2 + 4);
-  const ex = c.x - (dx / d) * (c.w / 2 + 9);
-  const ey = c.y - (dy / d) * (c.h / 2 + 9);
+  const x1 = p.x, y1 = p.y + p.h / 2 + 2;       // 父底部中心
+  const x2 = c.x, y2 = c.y - c.h / 2 - 9;       // 子顶部中心
+  const my = (y1 + y2) / 2;
   const cls = (e.outcome === "improved" ? " improved" : e.outcome === "declined" ? " declined" : "")
     + (e.operator_name ? " operator-edge" : "");
+  const dash = e.operator_name ? ' stroke-dasharray="5,4"' : "";
   const title = e.operator_name ? `<title>算子: ${esc(e.operator_name)}</title>` : "";
-  return `<line class="graph-edge${cls}" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}">${title}</line>`;
+  return `<path class="graph-edge${cls}" data-parent="${esc(e.parent_xname)}" data-child="${esc(e.child_xname)}" d="M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${my.toFixed(1)}, ${x2.toFixed(1)} ${my.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}"${dash}>${title}</path>`;
 }
 function lineageNodeHtml(n) {
-  const color = STATUS_COLORS[n.status] || "#64748b";
   const selected = state.selected === n.xname ? " selected" : "";
   const label = shortFactorName(n.label);
   return `<g class="graph-node${selected}" data-xname="${esc(n.xname)}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})" tabindex="0" role="button" aria-label="${esc(n.xname)}">
-    <rect x="${(-n.w / 2).toFixed(1)}" y="${(-n.h / 2).toFixed(1)}" width="${n.w}" height="${n.h}" rx="6" fill="${color}18" stroke="${selected ? "#0f766e" : color}"></rect>
+    <rect x="${(-n.w / 2).toFixed(1)}" y="${(-n.h / 2).toFixed(1)}" width="${n.w}" height="${n.h}" style="stroke:${STATUS_COLORS[n.status] || "#64748b"}"></rect>
     <text x="0" y="-2" text-anchor="middle">${esc(label)}</text>
     <text class="node-status" x="0" y="12" text-anchor="middle">${esc(STATUS_LABELS[n.status] || n.status)}</text>
   </g>`;
@@ -470,14 +432,13 @@ function renderLineage() {
     return;
   }
   applyGraphView(svg);
-  const byId = new Map(layout.nodes.map(n => [n.xname, n]));
   svg.innerHTML = `
     <defs>
       <marker id="lineageArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M0,0 L10,5 L0,10 z" fill="#8da0b3"></path>
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"></path>
       </marker>
     </defs>
-    <g>${layout.edges.map(e => lineageEdgePath(e, byId)).join("")}</g>
+    <g>${layout.edges.map(e => lineageEdgePath(e, layout.byName)).join("")}</g>
     <g>${layout.nodes.map(lineageNodeHtml).join("")}</g>`;
   svg.querySelectorAll(".graph-node").forEach(g => {
     g.addEventListener("click", event => {
@@ -493,6 +454,29 @@ function renderLineage() {
       }
     });
   });
+  // 路径追踪：hover 节点高亮祖先链，其余淡出（委托只挂一次）
+  if (!svg._lineageHoverBound) {
+    svg._lineageHoverBound = true;
+    const clearDim = () => svg.querySelectorAll(".dim").forEach(el => el.classList.remove("dim"));
+    svg.addEventListener("mouseover", event => {
+      const g = event.target.closest(".graph-node");
+      if (!g) return;
+      clearDim();
+      const chain = new Set([g.dataset.xname]);
+      const parentOf = new Map((DATA.lineage_edges || []).map(e => [e.child_xname, e.parent_xname]));
+      let cur = g.dataset.xname;
+      while (parentOf.has(cur)) { cur = parentOf.get(cur); chain.add(cur); }
+      svg.querySelectorAll(".graph-node").forEach(el => {
+        if (!chain.has(el.dataset.xname)) el.classList.add("dim");
+      });
+      svg.querySelectorAll(".graph-edge").forEach(el => {
+        if (!(chain.has(el.dataset.parent) && chain.has(el.dataset.child))) el.classList.add("dim");
+      });
+    });
+    svg.addEventListener("mouseout", event => {
+      if (event.target.closest(".graph-node")) clearDim();
+    });
+  }
   document.getElementById("lineageMeta").textContent =
     `${layout.nodes.length} 节点 · ${layout.edges.length} 边 · ${new Set(layout.nodes.map(n => n.root)).size} 分支`;
 }
