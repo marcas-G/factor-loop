@@ -694,8 +694,103 @@ function exportCsv() {
   link.download = `factor_dashboard_${DATA.meta.generatedAt.slice(0,10)}.csv`;
   link.click(); URL.revokeObjectURL(link.href);
 }
+function computeGenerations() {
+  const parent = new Map();
+  for (const e of DATA.lineage_edges || []) parent.set(e.child_xname, e.parent_xname);
+  const memo = new Map();
+  function gen(x) {
+    if (!memo.has(x)) {
+      memo.set(x, parent.has(x) ? gen(parent.get(x)) + 1 : 1);
+    }
+    return memo.get(x);
+  }
+  for (const f of DATA.factors) gen(f.xname);
+  return gen;
+}
+function aggregateByGeneration() {
+  const gen = computeGenerations();
+  const buckets = new Map();
+  for (const f of DATA.factors) {
+    const g = gen(f.xname);
+    if (!buckets.has(g)) buckets.set(g, []);
+    buckets.get(g).push(f);
+  }
+  return [...buckets.keys()].sort((a, b) => a - b).map(g => {
+    const fs = buckets.get(g);
+    const passed = fs.filter(f => f.verdict === "pass").length;
+    return {
+      gen: g, n: fs.length,
+      ic: median(fs.map(f => f.latest_ic)),
+      icir: median(fs.map(f => f.latest_icir)),
+      passRate: fs.length ? passed / fs.length : null
+    };
+  });
+}
+function renderTrend() {
+  const svg = document.getElementById("trendChart");
+  const legend = document.getElementById("trendLegend");
+  const series = aggregateByGeneration();
+  if (series.length < 2) {
+    legend.innerHTML = "";
+    svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" font-size="13" fill="var(--ink-faint)">代际数据不足（少于 2 代）</text>`;
+    return;
+  }
+  const w = 720, h = 260, left = 56, right = 56, top = 20, bottom = 40;
+  const icVals = [...series.map(s => s.ic), ...series.map(s => s.icir)].filter(Number.isFinite);
+  const yAbs = Math.max(0.2, ...icVals.map(Math.abs));
+  const yScale = v => h - bottom - ((v + yAbs) / (2 * yAbs)) * (h - top - bottom);
+  const xScale = i => left + (i / (series.length - 1)) * (w - left - right);
+  const rScale = v => v === null ? null : h - bottom - v * (h - top - bottom);
+  let grid = "";
+  for (const v of [-yAbs, -yAbs / 2, 0, yAbs / 2, yAbs]) {
+    const y = yScale(v);
+    grid += `<line x1="${left}" y1="${y.toFixed(1)}" x2="${w-right}" y2="${y.toFixed(1)}" stroke="var(--border)"${v === 0 ? ' stroke-width="1.2" stroke-dasharray="4,3"' : ""}/>` +
+      `<text x="${left-8}" y="${(y+4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="var(--ink-faint)" font-family="var(--mono)">${v.toFixed(2)}</text>`;
+  }
+  for (const r of [0, .5, 1]) {
+    const y = rScale(r);
+    if (y !== null) grid += `<text x="${w-right+8}" y="${(y+4).toFixed(1)}" font-size="10.5" fill="var(--warn)" fill-opacity=".8" font-family="var(--mono)">${(r*100).toFixed(0)}%</text>`;
+  }
+  series.forEach((s, i) => {
+    grid += `<text x="${xScale(i).toFixed(1)}" y="${h-16}" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)" font-family="var(--mono)">G${s.gen}</text>`;
+  });
+  function line(key, scale) {
+    const pts = series.map((s, i) => ({ i, v: s[key] })).filter(p => Number.isFinite(p.v));
+    if (pts.length < 2) return "";
+    return pts.map((p, k) => `${k ? "L" : "M"} ${xScale(p.i).toFixed(1)} ${scale(p.v).toFixed(1)}`).join(" ");
+  }
+  function rateLine() {
+    const pts = series.map((s, i) => ({ i, v: s.passRate })).filter(p => p.v !== null && p.v !== undefined);
+    if (pts.length < 2) return "";
+    return pts.map((p, k) => `${k ? "L" : "M"} ${xScale(p.i).toFixed(1)} ${rScale(p.v).toFixed(1)}`).join(" ");
+  }
+  function area(key, scale, color) {
+    const pts = series.map((s, i) => ({ i, v: s[key] })).filter(p => Number.isFinite(p.v));
+    if (pts.length < 2) return "";
+    const d = pts.map((p, k) => `${k ? "L" : "M"} ${xScale(p.i).toFixed(1)} ${scale(p.v).toFixed(1)}`).join(" ") +
+      ` L ${xScale(pts[pts.length-1].i).toFixed(1)} ${yScale(0).toFixed(1)} L ${xScale(pts[0].i).toFixed(1)} ${yScale(0).toFixed(1)} Z`;
+    return `<path d="${d}" fill="${color}" fill-opacity=".12" stroke="none"/>`;
+  }
+  const dots = (key, scale, color) => series.map((s, i) => Number.isFinite(s[key])
+    ? `<circle cx="${xScale(i).toFixed(1)}" cy="${scale(s[key]).toFixed(1)}" r="3" fill="${color}"><title>第 ${s.gen} 代 · ${s.n} 因子\nIC ${s.ic === null ? "—" : s.ic.toFixed(3)} / ICIR ${s.icir === null ? "—" : s.icir.toFixed(3)}\n通过率 ${s.passRate === null ? "—" : (s.passRate*100).toFixed(0)}%</title></circle>`
+    : "").join("");
+  svg.innerHTML = `${grid}
+    ${area("ic", yScale, "var(--accent)")}
+    ${area("icir", yScale, "var(--up)")}
+    <path d="${line("ic", yScale)}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="${line("icir", yScale)}" fill="none" stroke="var(--up)" stroke-width="1.8" stroke-linejoin="round"/>
+    ${series.map((s, i) => s.passRate === null ? "" :
+      `<line x1="${xScale(i).toFixed(1)}" y1="${rScale(0).toFixed(1)}" x2="${xScale(i).toFixed(1)}" y2="${rScale(s.passRate).toFixed(1)}" stroke="var(--warn)" stroke-width="1" opacity=".5"/>`).join("")}
+    <path d="${rateLine()}" fill="none" stroke="var(--warn)" stroke-width="1.2" stroke-dasharray="4,3" opacity=".8"/>
+    ${dots("ic", yScale, "var(--accent)")}
+    ${dots("icir", yScale, "var(--up)")}`;
+  legend.innerHTML =
+    `<span><i style="background:var(--accent)"></i>IC 中位数</span>` +
+    `<span><i style="background:var(--up)"></i>ICIR 中位数</span>` +
+    `<span><i style="background:var(--warn)"></i>通过率（右轴）</span>`;
+}
 function render() {
-  renderMetrics(); renderScatter(); renderStatusChart(); renderLineage(); renderTable();
+  renderMetrics(); renderScatter(); renderStatusChart(); renderTrend(); renderLineage(); renderTable();
   if (!useInlineDetails()) {
     renderDetail();
   } else {
