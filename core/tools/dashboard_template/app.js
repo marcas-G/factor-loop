@@ -232,21 +232,26 @@ function renderScatter() {
   let grid = "";
   for (let i=0; i<=4; i++) {
     const yv = niceY*i/4, y = yScale(yv);
-    grid += `<line x1="${left}" y1="${y}" x2="${w-right}" y2="${y}" stroke="#dfe5eb"/><text x="${left-8}" y="${y+4}" text-anchor="end" font-size="11" fill="#667085">${yv.toFixed(yv<10?1:0)}</text>`;
+    grid += `<line x1="${left}" y1="${y}" x2="${w-right}" y2="${y}" stroke="var(--border)"/><text x="${left-8}" y="${y+4}" text-anchor="end" font-size="11" fill="var(--ink-faint)" font-family="var(--mono)">${yv.toFixed(yv<10?1:0)}</text>`;
   }
   for (let i=0; i<=5; i++) {
     const xv = i/5, x = xScale(xv);
-    grid += `<line x1="${x}" y1="${top}" x2="${x}" y2="${h-bottom}" stroke="#eef1f5"/><text x="${x}" y="${h-bottom+20}" text-anchor="middle" font-size="11" fill="#667085">${(xv*100).toFixed(0)}%</text>`;
+    grid += `<line x1="${x}" y1="${top}" x2="${x}" y2="${h-bottom}" stroke="var(--border)" opacity=".6"/><text x="${x}" y="${h-bottom+20}" text-anchor="middle" font-size="11" fill="var(--ink-faint)" font-family="var(--mono)">${(xv*100).toFixed(0)}%</text>`;
   }
+  const medX = median(points.map(p => p.x));
+  const medY = median(points.map(p => p.y));
+  let refs = "";
+  if (medX !== null) refs += `<line x1="${xScale(medX)}" y1="${top}" x2="${xScale(medX)}" y2="${h-bottom}" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3,4" opacity=".55"/>`;
+  if (medY !== null) refs += `<line x1="${left}" y1="${yScale(medY)}" x2="${w-right}" y2="${yScale(medY)}" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3,4" opacity=".55"/>`;
   const circles = points.map(p => {
     const selected = p.f.xname === state.selected;
-    return `<circle data-xname="${esc(p.f.xname)}" class="point" cx="${xScale(p.x)}" cy="${yScale(p.y)}" r="${selected ? 7 : 5}" fill="${STATUS_COLORS[p.f.status] || "#64748b"}" fill-opacity=".82" stroke="${selected ? "#111827" : "#fff"}" stroke-width="${selected ? 2 : 1}"><title>${esc(p.f.xname)}\nR² ${fmt(p.x,3)} / |ICIR| ${fmt(p.y,2)}</title></circle>`;
+    return `<circle data-xname="${esc(p.f.xname)}" class="point" cx="${xScale(p.x)}" cy="${yScale(p.y)}" r="${selected ? 6.5 : 4.5}" fill="${STATUS_COLORS[p.f.status] || "#64748b"}" fill-opacity=".85" stroke="${selected ? "var(--accent)" : "#0a0e14"}" stroke-width="${selected ? 2 : 1}"><title>${esc(p.f.xname)}\nR² ${fmt(p.x,3)} / |ICIR| ${fmt(p.y,2)}</title></circle>`;
   }).join("");
-  svg.innerHTML = `${grid}
-    <line x1="${left}" y1="${h-bottom}" x2="${w-right}" y2="${h-bottom}" stroke="#98a2b3"/>
-    <line x1="${left}" y1="${top}" x2="${left}" y2="${h-bottom}" stroke="#98a2b3"/>
-    <text x="${(left+w-right)/2}" y="${h-9}" text-anchor="middle" font-size="12" fill="#475467">库内解释方差 R²</text>
-    <text x="15" y="${(top+h-bottom)/2}" text-anchor="middle" font-size="12" fill="#475467" transform="rotate(-90 15 ${(top+h-bottom)/2})">|ICIR|</text>
+  svg.innerHTML = `${grid}${refs}
+    <line x1="${left}" y1="${h-bottom}" x2="${w-right}" y2="${h-bottom}" stroke="var(--border-hover)"/>
+    <line x1="${left}" y1="${top}" x2="${left}" y2="${h-bottom}" stroke="var(--border-hover)"/>
+    <text x="${(left+w-right)/2}" y="${h-9}" text-anchor="middle" font-size="12" fill="var(--ink-faint)">库内解释方差 R²</text>
+    <text x="15" y="${(top+h-bottom)/2}" text-anchor="middle" font-size="12" fill="var(--ink-faint)" transform="rotate(-90 15 ${(top+h-bottom)/2})">|ICIR|</text>
     ${circles}`;
   svg.querySelectorAll("circle.point").forEach(c => c.addEventListener("click", () => {
     state.selected = c.dataset.xname; render(); }));
@@ -256,15 +261,26 @@ function renderStatusChart() {
   const counts = new Map();
   for (const f of DATA.factors) counts.set(f.status, (counts.get(f.status) || 0) + 1);
   const entries = [...counts.entries()].sort((a,b) => b[1]-a[1]);
-  const w = 320, left = 104, right = 36, rowH = 38, top = 18, h = Math.max(355, top + entries.length*rowH + 26);
-  const max = Math.max(1, ...entries.map(e => e[1]));
+  const total = entries.reduce((s, e) => s + e[1], 0) || 1;
+  const w = 320, pad = 14, barY = 22, barH = 26;
+  const legendY0 = barY + barH + 22;
+  const rowH = 24;
+  const h = Math.max(160, legendY0 + entries.length * rowH + 8);
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.innerHTML = entries.map(([status, count], i) => {
-    const y = top + i*rowH, width = Math.max(2, (count/max)*(w-left-right));
-    return `<text x="0" y="${y+14}" font-size="11" fill="#475467">${esc(STATUS_LABELS[status] || status)}</text>
-      <rect x="${left}" y="${y}" width="${width}" height="19" rx="3" fill="${STATUS_COLORS[status] || "#64748b"}" fill-opacity=".82"><title>${esc(status)}: ${count}</title></rect>
-      <text x="${left+width+7}" y="${y+14}" font-size="11" font-weight="650" fill="#344054">${count}</text>`;
+  let x = pad;
+  const segs = entries.map(([status, count]) => {
+    const segW = Math.max(0, (count / total) * (w - 2 * pad));
+    const el = `<rect x="${x.toFixed(1)}" y="${barY}" width="${segW.toFixed(1)}" height="${barH}" fill="${STATUS_COLORS[status] || "#64748b"}" fill-opacity=".88"><title>${esc(STATUS_LABELS[status] || status)}: ${count} (${(count/total*100).toFixed(0)}%)</title></rect>`;
+    x += segW;
+    return el;
   }).join("");
+  const legend = entries.map(([status, count], i) => {
+    const ly = legendY0 + i * rowH;
+    return `<circle cx="${pad+4}" cy="${ly-4}" r="4" fill="${STATUS_COLORS[status] || "#64748b"}"/>
+      <text x="${pad+14}" y="${ly}" font-size="11" fill="var(--ink-dim)">${esc(STATUS_LABELS[status] || status)}</text>
+      <text x="${w-pad}" y="${ly}" text-anchor="end" font-size="11" fill="var(--ink)" font-family="var(--mono)">${count}</text>`;
+  }).join("");
+  svg.innerHTML = `${segs}${legend}`;
 }
 const graphState = {
   branch: "all",
