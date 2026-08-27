@@ -461,9 +461,9 @@ tr.selected-row td { background: var(--accent-dim); }
 }
 .badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .badge.evaluated { color: var(--up); border-color: rgba(52, 211, 153, .4); background: var(--up-dim); }
-.badge.deprecated { color: var(--down); border-color: rgba(248, 113, 113, .4); background: var(--down-dim); }
+.badge.dead_end { color: var(--down); border-color: rgba(248, 113, 113, .4); background: var(--down-dim); }
 .badge.draft { color: var(--accent); border-color: rgba(34, 211, 238, .4); background: var(--accent-dim); }
-.badge.submitted, .badge.committed { color: var(--warn); border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .12); }
+.badge.submitted { color: var(--warn); border-color: rgba(251, 191, 36, .4); background: rgba(251, 191, 36, .12); }
 .badge.failed { color: var(--violet); border-color: rgba(192, 132, 252, .4); background: rgba(192, 132, 252, .12); }
 .verdict-pass { color: var(--up); }
 .verdict-fail { color: var(--down); }

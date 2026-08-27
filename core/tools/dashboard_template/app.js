@@ -33,11 +33,11 @@ const STATUS_LABELS = {
   failed: "失败"
 };
 const STATUS_COLORS = {
-  evaluated: "#12805c",
-  dead_end: "#c2410c",
-  draft: "#2563eb",
-  submitted: "#b7791f",
-  failed: "#7c3aed"
+  evaluated: "#34d399",
+  dead_end: "#f87171",
+  draft: "#22d3ee",
+  submitted: "#fbbf24",
+  failed: "#c084fc"
 };
 const VERDICT_LABELS = {
   pass: "通过",
@@ -138,6 +138,62 @@ function median(values) {
   const mid = Math.floor(nums.length / 2);
   return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
+function sparkline(values, w = 150, h = 34) {
+  const vs = values.filter(v => v !== null && v !== undefined && Number.isFinite(+v));
+  if (vs.length < 2) return "";
+  const min = Math.min(...vs), max = Math.max(...vs);
+  const span = (max - min) || 1;
+  const pts = vs.map((v, i) => [
+    (i / (vs.length - 1) * (w - 6) + 3).toFixed(1),
+    (h - 3 - (+v - min) / span * (h - 6)).toFixed(1)
+  ]);
+  const rising = +vs[vs.length - 1] >= +vs[0];
+  const color = rising ? "var(--up)" : "var(--down)";
+  const [lx, ly] = pts[pts.length - 1];
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
+    <polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>
+    <circle cx="${lx}" cy="${ly}" r="2.2" fill="${color}"/></svg>`;
+}
+function growthSeries(key) {
+  const ts = DATA.factors.map(f => +parseTs(f[key]) || 0).sort((a, b) => a - b);
+  return ts.map((_, i) => i + 1).slice(-12);
+}
+function distSeries(key) {
+  return DATA.factors
+    .map(f => +f[key])
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+}
+function evalBucketSeries() {
+  const day = 86400_000;
+  const now = Date.now();
+  const counts = new Array(12).fill(0);
+  for (const e of DATA.evaluations || []) {
+    const t = +parseTs(e.ts);
+    if (!Number.isFinite(t)) continue;
+    const age = Math.floor((now - t) / day);
+    if (age >= 0 && age < 12) counts[11 - age]++;
+  }
+  return counts;
+}
+function weekDelta(key) {
+  const week = 7 * 86400_000;
+  const now = Date.now();
+  let recent = 0, prior = 0;
+  for (const f of DATA.factors) {
+    const t = +parseTs(f[key]);
+    if (!Number.isFinite(t)) continue;
+    if (now - t < week) recent++;
+    else if (now - t < 2 * week) prior++;
+  }
+  return { recent, prior };
+}
+function deltaBadge(d) {
+  if (!d || (d.recent === 0 && d.prior === 0)) return "";
+  const cls = d.recent >= d.prior ? "up" : "down";
+  const arrow = d.recent >= d.prior ? "▲" : "▼";
+  return `<span class="metric-delta ${cls}">${arrow} ${d.recent}</span>`;
+}
 function renderMetrics() {
   const fs = DATA.factors;
   const passed = fs.filter(f => f.status === "evaluated");
@@ -146,14 +202,22 @@ function renderMetrics() {
   const redundant = fs.filter(f => f.latest_r2_x !== null).map(f => f.latest_r2_x);
   const significant = DATA.evaluations.filter(e => e.significant);
   const cards = [
-    ["因子总数", fs.length, `${passed.length + failed.length} 个已评估`],
-    ["通过", passed.length, `${failed.length} 个失败`],
-    ["中位 |ICIR|", fmt(median(icir), 2), `${fs.filter(f => f.latest_icir !== null).length} 个有 ICIR`],
-    ["中位库内 R²", pct(median(redundant)), `${redundant.length} 个有冗余检测`],
-    ["显著评估", significant.length, `${DATA.evaluations.length} 条评估快照`]
+    { label: "因子总数", value: fs.length, note: `${passed.length + failed.length} 个已评估`,
+      spark: sparkline(growthSeries("created_ts")), delta: deltaBadge(weekDelta("created_ts")) },
+    { label: "通过", value: passed.length, note: `${failed.length} 个失败`,
+      spark: sparkline(growthSeries("created_ts").map((_, i) => i)), delta: "" },
+    { label: "中位 |ICIR|", value: fmt(median(icir), 2), note: `${fs.filter(f => f.latest_icir !== null).length} 个有 ICIR`,
+      spark: sparkline(distSeries("latest_icir").map(Math.abs)), delta: "" },
+    { label: "中位库内 R²", value: pct(median(redundant)), note: `${redundant.length} 个有冗余检测`,
+      spark: sparkline(distSeries("latest_r2_x")), delta: "" },
+    { label: "显著评估", value: significant.length, note: `${DATA.evaluations.length} 条评估快照`,
+      spark: sparkline(evalBucketSeries()), delta: "" }
   ];
-  document.getElementById("metricCards").innerHTML = cards.map(([label, value, note]) =>
-    `<div class="metric"><dt>${esc(label)}</dt><dd>${esc(value)}</dd><small>${esc(note)}</small></div>`
+  document.getElementById("metricCards").innerHTML = cards.map(c =>
+    `<div class="metric"><dt>${esc(c.label)}</dt>
+     <dd class="metric-value">${esc(c.value)}${c.delta}</dd>
+     ${c.spark ? `<div class="metric-spark">${c.spark}</div>` : ""}
+     <small style="color:var(--ink-faint);font-size:10.5px">${esc(c.note)}</small></div>`
   ).join("");
 }
 function renderScatter() {
