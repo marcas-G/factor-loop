@@ -262,8 +262,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     payload = json.dumps(
         snapshot, ensure_ascii=False, separators=(",", ":"), allow_nan=False
     ).replace("</", "<\\/")
-    vendor_path = TEMPLATE_DIR / "vendor" / "d3-hierarchy.min.js"
-    vendor = vendor_path.read_text(encoding="utf-8") if vendor_path.is_file() else ""
+    vendor = _read_template("vendor/d3-hierarchy.min.js")
     return (_read_template("template.html")
             .replace("__VENDOR__", vendor)
             .replace("__CSS__", _read_template("style.css"))

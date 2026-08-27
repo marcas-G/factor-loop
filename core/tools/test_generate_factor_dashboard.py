@@ -149,6 +149,10 @@ def test_snapshot_and_html_render() -> None:
         assert snapshot["meta"]["generatedAt"] in html
         # 新模板结构：生成时间 DOM 节点 + 独立 vendor/JS script 块
         assert 'id="generatedMeta"' in html
+        # vendor d3-hierarchy 内联完整（版本注释 + 层次布局导出）
+        assert "d3js.org/d3-hierarchy" in html
+        for feat in ("hierarchy", "stratify", "tree"):
+            assert feat in html, f"vendor missing export: {feat}"
         assert "state.sort = {key, dir: defaultDir};" in html
         assert "state.sort.dir *= -1;" in html
         assert "state.sorts" not in html
