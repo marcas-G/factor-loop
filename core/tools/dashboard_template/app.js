@@ -72,6 +72,10 @@ function fmt(value, digits = 4) {
 }
 function pct(value) { return value === null || value === undefined ? "—" : fmt(value * 100, 2) + "%"; }
 function cls(value) { return value > 0 ? "pos" : value < 0 ? "neg" : ""; }
+function parseTs(value) {
+  const v = String(value ?? "");
+  return new Date(v.includes("T") ? v + (v.endsWith("Z") ? "" : "Z") : v.replace(" ", "T") + "Z");
+}
 function shortTime(value) {
   if (!value) return "—";
   const d = new Date(value.includes("T") ? value + (value.endsWith("Z") ? "" : "Z") : value.replace(" ", "T") + "Z");
@@ -282,8 +286,15 @@ function renderStatusChart() {
   }).join("");
   svg.innerHTML = `${segs}${legend}`;
 }
+// 默认聚焦最大分支：16 棵树并排会让 fit 视图过宽（节点 <10px 不可读），
+// "全部"视图仍可从下拉选择。
+function defaultBranch() {
+  const branches = (DATA.lineage_branches || []).slice()
+    .sort((a, b) => (b.member_count || 0) - (a.member_count || 0));
+  return branches.length ? branches[0].root_xname : "all";
+}
 const graphState = {
-  branch: "all",
+  branch: defaultBranch(),
   cache: null,
   view: null,
   dragging: false,
