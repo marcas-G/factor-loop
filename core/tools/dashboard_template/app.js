@@ -302,7 +302,7 @@ const graphState = {
   lastY: 0
 };
 function shortFactorName(name) {
-  return String(name || "").length > 20 ? String(name).slice(0, 18) + "…" : String(name || "—");
+  return String(name || "").length > 30 ? String(name).slice(0, 28) + "…" : String(name || "—");
 }
 function buildLineageModel(branch) {
   const allNodes = DATA.factors.map(f => ({
@@ -351,7 +351,10 @@ function computeLineageLayout(model) {
     if (!children.has(e.parent_xname)) children.set(e.parent_xname, []);
     children.get(e.parent_xname).push(e.child_xname);
   }
-  const NODE_W = 168, NODE_H = 34, COL_GAP = 18, ROW_GAP = 78, BRANCH_GAP = 2;
+  const NODE_H = 34, COL_GAP = 18, ROW_GAP = 78, BRANCH_GAP = 2;
+  // 节点宽度按名字长度自适应；列宽取全局最大，保证网格整齐
+  const NODE_W = Math.min(264, Math.max(150,
+    Math.ceil(Math.max(0, ...model.nodes.map(n => String(n.label || "").length)) * 7.4) + 26));
   const pos = new Map(); // xname -> {col, depth}
   function place(x, depth, colCursor) {
     const kids = children.get(x) || [];
@@ -395,16 +398,23 @@ function getLineageLayout() {
 function fitGraphView() {
   const layout = getLineageLayout();
   if (!layout.nodes.length) return;
-  const minX = Math.min(...layout.nodes.map(n => n.x - n.w / 2)) - 120;
-  const minY = Math.min(...layout.nodes.map(n => n.y - n.h / 2)) - 90;
-  const maxX = Math.max(...layout.nodes.map(n => n.x + n.w / 2)) + 120;
-  const maxY = Math.max(...layout.nodes.map(n => n.y + n.h / 2)) + 90;
+  const minX = Math.min(...layout.nodes.map(n => n.x - n.w / 2)) - 90;
+  const minY = Math.min(...layout.nodes.map(n => n.y - n.h / 2)) - 48;
+  const maxX = Math.max(...layout.nodes.map(n => n.x + n.w / 2)) + 90;
+  const maxY = Math.max(...layout.nodes.map(n => n.y + n.h / 2)) + 48;
+  // 视口宽高设上限：保证节点显示宽度不小于 ~90px（可读），
+  // 超出部分以内容中心为锚裁剪，用户拖拽查看。
+  const MAX_FIT_W = 3400, MAX_FIT_H = 1700;
+  let w = Math.max(960, maxX - minX), h = Math.max(480, maxY - minY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  w = Math.min(w, MAX_FIT_W);
+  h = Math.min(h, MAX_FIT_H);
   graphState.view = {
     branch: graphState.branch,
-    x: minX,
-    y: minY,
-    w: Math.max(960, maxX - minX),
-    h: Math.max(560, maxY - minY)
+    x: cx - w / 2,
+    y: cy - h / 2,
+    w,
+    h
   };
 }
 function applyGraphView(svg) {
@@ -428,6 +438,7 @@ function lineageNodeHtml(n) {
   const selected = state.selected === n.xname ? " selected" : "";
   const label = shortFactorName(n.label);
   return `<g class="graph-node${selected}" data-xname="${esc(n.xname)}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})" tabindex="0" role="button" aria-label="${esc(n.xname)}">
+    <title>${esc(n.label)} · ${esc(STATUS_LABELS[n.status] || n.status)}</title>
     <rect x="${(-n.w / 2).toFixed(1)}" y="${(-n.h / 2).toFixed(1)}" width="${n.w}" height="${n.h}" style="stroke:${STATUS_COLORS[n.status] || "#64748b"}"></rect>
     <text x="0" y="-2" text-anchor="middle">${esc(label)}</text>
     <text class="node-status" x="0" y="12" text-anchor="middle">${esc(STATUS_LABELS[n.status] || n.status)}</text>
