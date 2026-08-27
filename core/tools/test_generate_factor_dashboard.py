@@ -141,6 +141,14 @@ def test_snapshot_and_html_render() -> None:
         assert "血缘图谱" in html
         assert "FACTOR_DASHBOARD_DATA" in html
         assert "</script>" in html
+        # 模板拆分后：所有占位符必须被替换，不得残留
+        for marker in ("__CSS__", "__JS__", "__DATA__", "__GENERATED_AT__", "__VENDOR__"):
+            assert marker not in html, f"placeholder {marker} not substituted"
+        assert "window.FACTOR_DASHBOARD_DATA = {" in html
+        assert "<style>" in html
+        assert snapshot["meta"]["generatedAt"] in html
+        # 新模板结构：生成时间 DOM 节点 + 独立 vendor/JS script 块
+        assert 'id="generatedMeta"' in html
         assert "state.sort = {key, dir: defaultDir};" in html
         assert "state.sort.dir *= -1;" in html
         assert "state.sorts" not in html

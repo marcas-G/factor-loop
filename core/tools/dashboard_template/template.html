@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>因子库静态看板</title>
+<style>__CSS__</style>
+</head>
+<body>
+<header class="app-header">
+  <div class="header-row">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">F</div>
+      <div>
+        <h1>因子库静态看板</h1>
+        <p id="dbMeta"></p>
+        <p id="generatedMeta" title="快照生成时间">生成于 __GENERATED_AT__</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-button" id="refreshHint" type="button" title="刷新方式：重新执行生成命令" aria-label="刷新方式">↻</button>
+      <button class="icon-button" id="printButton" type="button" title="打印当前看板" aria-label="打印">⎙</button>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+  <div class="main-column">
+    <dl class="metrics" id="metricCards"></dl>
+
+    <section class="section" aria-labelledby="overviewTitle">
+      <div class="section-header">
+        <h2 id="overviewTitle">库内概览</h2>
+        <span>横轴为库内解释方差 R²，纵轴为 |ICIR|；点击圆点查看因子</span>
+      </div>
+      <div class="chart-grid">
+        <figure class="chart-box" id="scatterBox" aria-label="冗余度与预测强度散点图">
+          <p class="chart-title">冗余度 × 预测强度</p>
+          <svg id="scatterChart" viewBox="0 0 720 355" role="img"></svg>
+        </figure>
+        <figure class="chart-box" id="statusBox" aria-label="因子状态分布">
+          <p class="chart-title">状态分布</p>
+          <svg id="statusChart" viewBox="0 0 320 355" role="img"></svg>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="lineageTitle">
+      <div class="section-header">
+        <div>
+          <h2 id="lineageTitle">血缘图谱</h2>
+          <span id="lineageMeta">拖拽平移，滚轮缩放，点击节点查看因子</span>
+        </div>
+        <div class="lineage-controls">
+          <label class="sr-only" for="lineageBranchFilter">分支</label>
+          <select class="control" id="lineageBranchFilter"></select>
+          <button class="action" id="lineageFitButton" type="button">适应</button>
+          <button class="action" id="lineageResetButton" type="button">重置</button>
+        </div>
+      </div>
+      <div class="lineage-stage" id="lineageStage">
+        <svg id="lineageChart" role="img" aria-label="因子血缘关系图"></svg>
+        <div class="lineage-legend" aria-hidden="true">
+          <span><i style="background:#12805c"></i>已评估</span>
+          <span><i style="background:#c2410c"></i>放弃</span>
+          <span><i style="background:#2563eb"></i>草稿</span>
+          <span><i style="background:#b7791f"></i>已提交</span>
+          <span><i style="background:#7c3aed"></i>失败</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><i style="background:#0f766e;border-radius:2px;height:2px;width:14px;margin-right:0"></i>算子应用</span>
+        </div>
+        <div class="lineage-hint">滚轮缩放 · 拖拽平移 · 点击节点查看详情</div>
+        <div class="lineage-empty" id="lineageEmpty" hidden>暂无血缘数据</div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="factorTitle">
+      <div class="section-header">
+        <div>
+          <h2 id="factorTitle">因子列表</h2>
+          <span id="resultCount"></span>
+        </div>
+        <button class="action" id="exportButton" type="button">CSV</button>
+      </div>
+      <div class="controls">
+        <label class="sr-only" for="searchInput">搜索</label>
+        <input class="search" id="searchInput" type="search" placeholder="搜索因子、公式、标签或意图">
+        <label class="sr-only" for="statusFilter">状态</label>
+        <select class="control" id="statusFilter"></select>
+        <label class="sr-only" for="tagFilter">标签</label>
+        <select class="control" id="tagFilter"></select>
+        <button class="action" id="resetButton" type="button">重置</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><button class="sort-header" data-key="xname" data-label="因子" type="button"></button></th>
+              <th><button class="sort-header" data-key="verdict" data-label="结论" type="button"></button></th>
+              <th><button class="sort-header" data-key="latest_ic" data-label="IC" type="button"></button></th>
+              <th><button class="sort-header" data-key="latest_icir" data-label="ICIR" type="button"></button></th>
+              <th><button class="sort-header" data-key="latest_r2_x" data-label="R²" type="button"></button></th>
+              <th><button class="sort-header" data-key="latest_res_ic" data-label="残差IC" type="button"></button></th>
+              <th><button class="sort-header" data-key="resic_ic_ratio" data-label="残差IC/IC" type="button"></button></th>
+              <th><button class="sort-header" data-key="last_updated_ts" data-label="更新时间" type="button"></button></th>
+            </tr>
+          </thead>
+          <tbody id="factorRows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="emptyMessage" hidden>没有匹配的因子</div>
+    </section>
+  </div>
+
+  <aside class="detail-panel" id="detailPanel" aria-live="polite"></aside>
+</main>
+<footer class="footer" id="footerMeta"></footer>
+
+<script>
+window.FACTOR_DASHBOARD_DATA = __DATA__;
+</script>
+<script>__VENDOR__</script>
+<script>__JS__</script>
+</body>
+</html>
