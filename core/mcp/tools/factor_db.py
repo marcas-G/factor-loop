@@ -85,6 +85,17 @@ def factor_counts() -> dict:
         return {"factors": db.count_factors(conn), "lessons": db.count_lessons(conn), "evaluated": db.count_evaluated(conn)}
 
 
+def factor_leaderboard(k: int = 50, only_pass: bool = True) -> dict:
+    """聚合指标排行:四硬闸门判 pass(|ic|>0.01, |icir|>0.3, |res_ic|>0.003, r2<0.7,方向不敏感),
+    ic/icir/res_ic/r2 各除固定满分线(0.15/8/0.015/0)截断到 [0,1] 后等权聚合排序(绝对分,跨池稳定)。
+    only_pass=false 时返回全库并附 failed_gates。"""
+    with db.get_conn() as conn:
+        rows = db.factor_leaderboard(conn, k=_norm_k(k, 50), only_pass=only_pass)
+    return {"count": len(rows), "gates": {"abs_ic": 0.01, "abs_icir": 0.3, "abs_res_ic": 0.003, "r2_max": 0.7},
+            "norm_sats": {"abs_ic": 0.15, "abs_icir": 8, "abs_res_ic": 0.015, "r2_zero": 0},
+            "factors": rows}
+
+
 def factor_ic_correlate(target: str, symbol: str = None, freq: str = None, y_horizon: int = None,
                         k: int = 20, min_abs_pearson: float = 0.5) -> dict:
     """IC 行为冗余检索:找和 target 因子 IC 序列相似的库内因子(预测能力同涨同跌=真冗余,比 formula 文本语义更贴近业务)。需 target 已有 IC 向量(先 factor_ic_refresh)。只给 target 时遍历其所有 (symbol,freq,y_horizon) 场景并按 |pearson| 聚合。"""
@@ -219,6 +230,7 @@ TOOLS = [
     ("factor_similar", factor_similar),
     ("factor_semantic_search", factor_semantic_search),
     ("factor_counts", factor_counts),
+    ("factor_leaderboard", factor_leaderboard),
     ("factor_ic_correlate", factor_ic_correlate),
     ("factor_ic_refresh", factor_ic_refresh),
     ("iteration_open", iteration_open),

@@ -2311,6 +2311,61 @@ def recent_factors(conn: sqlite3.Connection, k: int = 10) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+# 聚合闸门硬编码阈值(方向不敏感,反向因子反向用同样有效)
+GATE_ABS_IC_MIN = 0.01
+GATE_ABS_ICIR_MIN = 0.3
+GATE_ABS_RES_IC_MIN = 0.003
+GATE_R2_MAX = 0.7
+
+# 聚合分满分参考线(绝对刻度,跨池稳定): |ic|→0.15, |icir|→8, |res_ic|→0.015, r2→0
+NORM_IC_SAT = 0.15
+NORM_ICIR_SAT = 8.0
+NORM_RES_IC_SAT = 0.015
+
+
+def leaderboard_gates(ic, icir, res_ic, r2_x) -> tuple[bool, list[str]]:
+    """聚合指标四闸门。任一指标缺失该闸门记 False(缺证据=不过)。返回 (passed, 未过项)。"""
+    checks = [
+        (ic is not None and abs(ic) > GATE_ABS_IC_MIN, "ic"),
+        (icir is not None and abs(icir) > GATE_ABS_ICIR_MIN, "icir"),
+        (res_ic is not None and abs(res_ic) > GATE_ABS_RES_IC_MIN, "res_ic"),
+        (r2_x is not None and r2_x < GATE_R2_MAX, "r2"),
+    ]
+    return all(ok for ok, _ in checks), [name for ok, name in checks if not ok]
+
+
+def factor_leaderboard(conn: sqlite3.Connection, k: int = 50, only_pass: bool = True) -> list[dict]:
+    """聚合指标排行:四硬闸门(|ic|>0.01, |icir|>0.3, |res_ic|>0.003, r2<0.7)判 pass,
+    ic/icir/res_ic/r2 各除固定满分线截断到 [0,1] 后等权聚合(绝对分,跨池稳定;
+    r2 用 (0.7-r2)/0.7, r2=0 满分)。only_pass=False 时全库排序并附 failed_gates。"""
+    rows = conn.execute(
+        """SELECT xname, class_name, status, verdict, latest_ic, latest_icir,
+                  latest_r2_x, latest_res_ic, last_updated_ts
+           FROM factors
+           WHERE latest_ic IS NOT NULL AND latest_icir IS NOT NULL
+             AND latest_r2_x IS NOT NULL AND latest_res_ic IS NOT NULL"""
+    ).fetchall()
+    pool = []
+    for r in rows:
+        passed, failed = leaderboard_gates(
+            r["latest_ic"], r["latest_icir"], r["latest_res_ic"], r["latest_r2_x"],
+        )
+        if only_pass and not passed:
+            continue
+        pool.append({**{c: r[c] for c in r.keys()}, "gate_pass": passed, "failed_gates": failed})
+    if not pool:
+        return []
+
+    for p in pool:
+        p["s_ic"] = min(abs(p["latest_ic"]) / NORM_IC_SAT, 1.0)
+        p["s_icir"] = min(abs(p["latest_icir"]) / NORM_ICIR_SAT, 1.0)
+        p["s_res_ic"] = min(abs(p["latest_res_ic"]) / NORM_RES_IC_SAT, 1.0)
+        p["s_r2"] = max((GATE_R2_MAX - p["latest_r2_x"]) / GATE_R2_MAX, 0.0)
+        p["agg_score"] = round(0.25 * (p["s_ic"] + p["s_icir"] + p["s_res_ic"] + p["s_r2"]), 6)
+    pool.sort(key=lambda p: p["agg_score"], reverse=True)
+    return pool[: max(1, int(k))]
+
+
 def search_factors(conn: sqlite3.Connection, query: str, k: int = 10) -> list[sqlite3.Row]:
     """FTS5 全文检索 factors(formula/class_name),trigram 分词中文友好。"""
     q = (query or "").strip()
