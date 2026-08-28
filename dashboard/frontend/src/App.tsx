@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Header } from "./components/Header";
+import { MetricCards } from "./components/MetricCards";
+import { StatusChart } from "./components/charts/StatusChart";
 import { useSnapshot } from "./hooks/useSnapshot";
 import { parseHash, writeHash, type FilterState } from "./state";
 
@@ -23,7 +25,11 @@ export default function App() {
               generatedAt={data.meta.generatedAt}
               onRefresh={refresh} onApplyStale={applyStale} />
       <main className="layout">
-        {/* Tasks 7-11 fill this in */}
+        <MetricCards factors={data.factors} evaluations={data.evaluations}
+                     onFilterGate={() => setFilters(f => ({ ...f, gates: ["pass"] }))} />
+        <div className="chart-grid">
+          <StatusChart factors={data.factors} />
+        </div>
       </main>
     </>
   );
