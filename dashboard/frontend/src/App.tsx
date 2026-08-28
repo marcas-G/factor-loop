@@ -4,6 +4,7 @@ import { MetricCards } from "./components/MetricCards";
 import { StatusChart } from "./components/charts/StatusChart";
 import { Scatter } from "./components/charts/Scatter";
 import { Trend } from "./components/charts/Trend";
+import { LineageTree } from "./components/LineageTree";
 import { useSnapshot } from "./hooks/useSnapshot";
 import { parseHash, writeHash, type FilterState } from "./state";
 
@@ -36,6 +37,13 @@ export default function App() {
         </div>
         <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
           <Trend factors={data.factors} edges={data.lineage_edges} />
+        </div>
+        <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <LineageTree factors={data.factors} edges={data.lineage_edges}
+                       branches={data.lineage_branches} branch={filters.branch}
+                       onBranchChange={b => setFilters(f => ({ ...f, branch: b }))}
+                       selected={filters.selected}
+                       onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
         </div>
       </main>
     </>
