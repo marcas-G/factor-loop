@@ -100,6 +100,8 @@
         <select class="control" id="statusFilter"></select>
         <label class="sr-only" for="tagFilter">标签</label>
         <select class="control" id="tagFilter"></select>
+        <label class="sr-only" for="gateFilter">聚合闸门</label>
+        <select class="control" id="gateFilter"></select>
         <button class="action" id="resetButton" type="button">重置</button>
       </div>
       <div class="table-wrap">
@@ -108,6 +110,7 @@
             <tr>
               <th><button class="sort-header" data-key="xname" data-label="因子" type="button"></button></th>
               <th><button class="sort-header" data-key="verdict" data-label="结论" type="button"></button></th>
+              <th title="聚合分 = |IC|/0.15 + |ICIR|/8 + |残差IC|/0.015 + (0.7-R²)/0.7 各截断到 [0,1] 后等权平均"><button class="sort-header" data-key="agg_score" data-label="聚合分" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_ic" data-label="IC" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_icir" data-label="ICIR" type="button"></button></th>
               <th><button class="sort-header" data-key="latest_r2_x" data-label="R²" type="button"></button></th>

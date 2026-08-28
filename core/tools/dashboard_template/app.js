@@ -22,6 +22,7 @@ const state = {
   query: "",
   status: "all",
   tag: "all",
+  gate: "all",
   sort: null,
   selected: null
 };
@@ -58,10 +59,13 @@ function verdictLabel(f) {
 }
 function verdictBadge(f) {
   const conclusion = conclusionOf(f);
+  const gate = f.failed_gates && f.failed_gates.length
+    ? `<span class="gate-fail" title="聚合闸门未过: ${esc(f.failed_gates.map(g => GATE_LABELS[g] || g).join(", "))}">⚠ ${esc(f.failed_gates.join(","))}</span>`
+    : (f.gate_pass ? `<span class="gate-pass" title="聚合闸门全过: |IC|>0.01, |ICIR|>0.3, |残差IC|>0.003, R²<0.7">✓闸门</span>` : "");
   if (conclusion === "pass" || conclusion === "fail") {
-    return `<span class="badge verdict-${esc(conclusion)}">${esc(VERDICT_LABELS[conclusion] || conclusion)}</span>`;
+    return `<span class="badge verdict-${esc(conclusion)}">${esc(VERDICT_LABELS[conclusion] || conclusion)}</span>${gate}`;
   }
-  return `<span class="badge ${esc(f.status)}">${esc(STATUS_LABELS[f.status] || f.status)}</span>`;
+  return `<span class="badge ${esc(f.status)}">${esc(STATUS_LABELS[f.status] || f.status)}</span>${gate}`;
 }
 function fmt(value, digits = 4) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
@@ -70,6 +74,7 @@ function fmt(value, digits = 4) {
   if (Math.abs(n) >= 10000) return n.toLocaleString("zh-CN", {maximumFractionDigits: 1});
   return n.toFixed(digits);
 }
+const GATE_LABELS = {ic: "|IC|≤0.01", icir: "|ICIR|≤0.3", res_ic: "|残差IC|≤0.003", r2: "R²≥0.7"};
 function pct(value) { return value === null || value === undefined ? "—" : fmt(value * 100, 2) + "%"; }
 function cls(value) { return value > 0 ? "pos" : value < 0 ? "neg" : ""; }
 function parseTs(value) {
@@ -99,6 +104,8 @@ function uniqueTags() {
 function searchFactor(factor) {
   if (state.status !== "all" && factor.status !== state.status) return false;
   if (state.tag !== "all" && !(factor.tags || []).some(t => t.name === state.tag)) return false;
+  if (state.gate === "pass" && !factor.gate_pass) return false;
+  if (state.gate === "fail" && (!factor.failed_gates || !factor.failed_gates.length)) return false;
   if (!state.query) return true;
   const q = state.query.toLowerCase();
   return [factor.xname, factor.class_name, factor.formula_text, factor.intuition,
@@ -202,16 +209,20 @@ function renderMetrics() {
   const fs = DATA.factors;
   const passed = fs.filter(f => f.status === "evaluated");
   const failed = fs.filter(f => f.status === "dead_end");
+  const gateOk = fs.filter(f => f.gate_pass);
   const icir = fs.map(f => f.latest_icir === null ? null : Math.abs(f.latest_icir));
   const redundant = fs.filter(f => f.latest_r2_x !== null).map(f => f.latest_r2_x);
   const significant = DATA.evaluations.filter(e => e.significant);
+  const aggSorted = fs.map(f => f.agg_score).filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
   const cards = [
     { label: "因子总数", value: fs.length, note: `${passed.length + failed.length} 个已评估`,
       spark: sparkline(growthSeries("created_ts")), delta: deltaBadge(weekDelta("created_ts")) },
-    { label: "通过", value: passed.length, note: `${failed.length} 个失败`,
-      spark: sparkline(growthSeries("created_ts").map((_, i) => i)), delta: "" },
+    { label: "聚合达标", value: gateOk.length, note: `四闸门: |IC|>0.01 · |ICIR|>0.3 · |残差IC|>0.003 · R²<0.7`,
+      spark: "", delta: "" },
     { label: "中位 |ICIR|", value: fmt(median(icir), 2), note: `${fs.filter(f => f.latest_icir !== null).length} 个有 ICIR`,
       spark: sparkline(distSeries("latest_icir").map(Math.abs)), delta: "" },
+    { label: "中位聚合分", value: fmt(median(aggSorted), 3), note: `${aggSorted.length} 个有全指标 · 达标 ${gateOk.length}`,
+      spark: sparkline(aggSorted), delta: "" },
     { label: "中位库内 R²", value: pct(median(redundant)), note: `${redundant.length} 个有冗余检测`,
       spark: sparkline(distSeries("latest_r2_x")), delta: "" },
     { label: "显著评估", value: significant.length, note: `${DATA.evaluations.length} 条评估快照`,
@@ -552,6 +563,21 @@ function onLineagePointerUp(event) {
   svg.classList.remove("dragging");
   if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
 }
+function aggCell(f) {
+  if (f.agg_score === null || f.agg_score === undefined) {
+    return `<td class="number agg-cell"><span class="agg-value">—</span></td>`;
+  }
+  const bars = [["s_ic", "IC"], ["s_icir", "ICIR"], ["s_res_ic", "残差IC"], ["s_r2", "低冗余"]]
+    .map(([key, label]) => {
+      const v = f[key];
+      const w = v === null || v === undefined ? 0 : Math.round(v * 100);
+      return `<i class="agg-bar${v ? "" : " zero"}" style="width:${w}%" title="${label} ${v === null || v === undefined ? "—" : (v * 100).toFixed(0) + "%"}"></i>`;
+    }).join("");
+  return `<td class="number agg-cell" title="聚合分 ${fmt(f.agg_score, 3)}\nIC ${fmt(f.s_ic,2)} / ICIR ${fmt(f.s_icir,2)} / 残差IC ${fmt(f.s_res_ic,2)} / 低冗余 ${fmt(f.s_r2,2)}">
+    <span class="agg-value${f.gate_pass ? " gate-ok" : ""}">${fmt(f.agg_score, 3)}</span>
+    <span class="agg-bars">${bars}</span>
+  </td>`;
+}
 function factorCell(f, open) {
   const tags = (f.tags || []).slice(0,3).map(t => `<span class="tag">${esc(t.name)}</span>`).join("");
   const chevron = open ? "▾" : "▸";
@@ -573,10 +599,11 @@ function renderTable() {
   document.getElementById("factorRows").innerHTML = rows.map(f => {
     const selected = f.xname === state.selected;
     const detailRow = inline && selected
-      ? `<tr class="expanded-row"><td colspan="9">${inlineDetailHtml(f)}</td></tr>` : "";
+      ? `<tr class="expanded-row"><td colspan="10">${inlineDetailHtml(f)}</td></tr>` : "";
     return `<tr data-xname="${esc(f.xname)}" class="${selected ? "selected" : ""}">
       <td>${factorCell(f, selected)}</td>
       <td>${verdictBadge(f)}</td>
+      ${aggCell(f)}
       <td class="number ${cls(f.latest_ic)}">${fmt(f.latest_ic)}</td>
       <td class="number ${cls(f.latest_icir)}">${fmt(f.latest_icir, 2)}</td>
       <td class="number">${pct(f.latest_r2_x)}</td>
@@ -635,6 +662,8 @@ function detailBody(f) {
     ${renderPathBreadcrumb(f.xname)}
     ${tagHtml ? `<div class="tag-row" style="margin-top:8px">${tagHtml}</div>` : ""}
     <div class="detail-grid">
+      ${detailMetric("聚合分", f.agg_score === null ? "—" : fmt(f.agg_score, 3))}
+      ${detailMetric("闸门", f.failed_gates === undefined ? "—" : (f.gate_pass ? "✓ 全过" : "⚠ " + f.failed_gates.join(",")))}
       ${detailMetric("IC", fmt(f.latest_ic))}
       ${detailMetric("ICIR", fmt(f.latest_icir,2))}
       ${detailMetric("库内 R²", pct(f.latest_r2_x))}
@@ -700,6 +729,15 @@ function fillSelects() {
   tags.innerHTML = `<option value="all">全部标签</option>` + uniqueTags().map(([name,count]) =>
     `<option value="${esc(name)}">${esc(name)} (${count})</option>`).join("");
   tags.value = state.tag;
+  const gate = document.getElementById("gateFilter");
+  if (gate) {
+    const nPass = DATA.factors.filter(f => f.gate_pass).length;
+    const nFail = DATA.factors.filter(f => f.failed_gates && f.failed_gates.length).length;
+    gate.innerHTML = `<option value="all">闸门全部</option>` +
+      `<option value="pass">聚合达标 (${nPass})</option>` +
+      `<option value="fail">闸门未过 (${nFail})</option>`;
+    gate.value = state.gate;
+  }
 }
 function renderHeader() {
   document.getElementById("dbMeta").textContent =
@@ -709,7 +747,9 @@ function renderHeader() {
 }
 function csvCell(value) { return `"${String(value ?? "").replaceAll('"','""')}"`; }
 function exportCsv() {
-  const headers = ["xname","class_name","status","verdict","latest_ic","latest_icir","latest_r2_x","latest_res_ic","resic_ic_ratio","last_updated_ts"];
+  const headers = ["xname","class_name","status","verdict","gate_pass","failed_gates","agg_score",
+    "s_ic","s_icir","s_res_ic","s_r2","latest_ic","latest_icir","latest_r2_x","latest_res_ic",
+    "resic_ic_ratio","last_updated_ts"];
   const rows = currentFactors();
   const csv = [headers.join(","), ...rows.map(f => headers.map(h => csvCell(f[h])).join(","))].join("\n");
   const blob = new Blob(["\ufeff" + csv], {type: "text/csv;charset=utf-8"});
@@ -872,11 +912,16 @@ function init() {
   document.getElementById("tagFilter").addEventListener("change", event => {
     state.tag = event.target.value; renderTable();
   });
+  const gateFilterEl = document.getElementById("gateFilter");
+  if (gateFilterEl) gateFilterEl.addEventListener("change", event => {
+    state.gate = event.target.value; renderTable();
+  });
   document.getElementById("resetButton").addEventListener("click", () => {
-    state.query = ""; state.status = "all"; state.tag = "all";
+    state.query = ""; state.status = "all"; state.tag = "all"; state.gate = "all";
     document.getElementById("searchInput").value = "";
     document.getElementById("statusFilter").value = "all";
     document.getElementById("tagFilter").value = "all";
+    if (document.getElementById("gateFilter")) document.getElementById("gateFilter").value = "all";
     renderTable();
   });
   document.querySelectorAll(".sort-header").forEach(button => button.addEventListener("click", event => {

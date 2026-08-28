@@ -130,6 +130,13 @@ def test_snapshot_and_html_render() -> None:
         assert snapshot["factors"][0]["verdict"] == "pass"
         assert snapshot["factors"][0]["tags"][0]["name"] == "order_book"
         assert abs(snapshot["factors"][0]["resic_ic_ratio"] - 0.08 / 0.12) < 1e-9
+        # 聚合闸门 + 分项分: ic=0.12, icir=2.4, res=0.08, r2=0.35 全过线
+        assert snapshot["factors"][0]["gate_pass"] is True
+        assert snapshot["factors"][0]["failed_gates"] == []
+        assert abs(snapshot["factors"][0]["agg_score"] - (
+            0.25 * (0.12 / 0.15 + 2.4 / 8 + 1.0 + (0.7 - 0.35) / 0.7)
+        )) < 1e-6
+        assert snapshot["factors"][0]["s_res_ic"] == 1.0
         assert len(snapshot["evaluations"]) == 1
         assert len(snapshot["iterations"]) == 1
         assert "lineage_edges" in snapshot
@@ -168,6 +175,11 @@ def test_snapshot_and_html_render() -> None:
         assert "function rankCurrentFactors" not in html
         assert "function rankScoresFor" not in html
         assert "data-key=\"resic_ic_ratio\"" in html
+        assert "data-key=\"agg_score\"" in html
+        assert "id=\"gateFilter\"" in html
+        for fn in ("aggCell", "verdictBadge", "renderMetrics"):
+            assert f"function {fn}" in html, f"missing function: {fn}"
+        assert "聚合达标" in html
         assert "通过" in html
         write_atomic(output_path, html)
         assert output_path.read_text(encoding="utf-8") == html

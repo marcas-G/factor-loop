@@ -458,6 +458,43 @@ tr.selected-row td { background: var(--accent-dim); }
 .badge.failed { color: var(--violet); border-color: rgba(192, 132, 252, .4); background: rgba(192, 132, 252, .12); }
 .verdict-pass { color: var(--up); }
 .verdict-fail { color: var(--down); }
+.gate-pass {
+  font: 9.5px var(--mono);
+  color: var(--up);
+  border: 1px solid rgba(52, 211, 153, .35);
+  background: var(--up-dim);
+  padding: 1px 6px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.gate-fail {
+  font: 9.5px var(--mono);
+  color: var(--warn);
+  border: 1px solid rgba(251, 191, 36, .35);
+  background: rgba(251, 191, 36, .1);
+  padding: 1px 6px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.agg-cell { min-width: 96px; }
+.agg-value { font-weight: 600; color: var(--ink); }
+.agg-value.gate-ok { color: var(--up); }
+.agg-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 3px;
+  width: 64px;
+}
+.agg-bar {
+  display: block;
+  height: 2.5px;
+  min-width: 1px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--up));
+  opacity: .85;
+}
+.agg-bar.zero { background: var(--border); opacity: .6; min-width: 0; }
 .tag-row { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
 .tag {
   font: 10px var(--mono);

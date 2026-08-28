@@ -21,6 +21,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.config import DB_PATH  # noqa: E402
+from core.db.db import (  # noqa: E402
+    GATE_R2_MAX,
+    NORM_IC_SAT,
+    NORM_ICIR_SAT,
+    NORM_RES_IC_SAT,
+    leaderboard_gates,
+)
 
 DEFAULT_OUTPUT = DB_PATH.parent / "factor_dashboard.html"
 
@@ -195,6 +202,39 @@ def _clean_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _attach_agg_scores(factors: list[dict[str, Any]]) -> None:
+    """给每个因子补聚合闸门 + 分项分(与 factor_leaderboard 同一套常量与公式)。"""
+    for factor in factors:
+        passed, failed = leaderboard_gates(
+            factor.get("latest_ic"), factor.get("latest_icir"),
+            factor.get("latest_res_ic"), factor.get("latest_r2_x"),
+        )
+        factor["gate_pass"] = passed
+        factor["failed_gates"] = failed
+        ic, icir = factor.get("latest_ic"), factor.get("latest_icir")
+        res_ic, r2 = factor.get("latest_res_ic"), factor.get("latest_r2_x")
+        factor["s_ic"] = (
+            min(abs(ic) / NORM_IC_SAT, 1.0)
+            if isinstance(ic, (int, float)) else None
+        )
+        factor["s_icir"] = (
+            min(abs(icir) / NORM_ICIR_SAT, 1.0)
+            if isinstance(icir, (int, float)) else None
+        )
+        factor["s_res_ic"] = (
+            min(abs(res_ic) / NORM_RES_IC_SAT, 1.0)
+            if isinstance(res_ic, (int, float)) else None
+        )
+        factor["s_r2"] = (
+            max((GATE_R2_MAX - r2) / GATE_R2_MAX, 0.0)
+            if isinstance(r2, (int, float)) else None
+        )
+        parts = [factor["s_ic"], factor["s_icir"], factor["s_res_ic"], factor["s_r2"]]
+        factor["agg_score"] = (
+            round(sum(parts) / 4, 6) if all(p is not None for p in parts) else None
+        )
+
+
 def collect_snapshot(db_path: Path) -> dict[str, Any]:
     with _connect(db_path) as conn:
         _require_tables(conn)
@@ -222,6 +262,7 @@ def collect_snapshot(db_path: Path) -> dict[str, Any]:
             and ic != 0
             else None
         )
+    _attach_agg_scores(factors)
 
     raw_path = str(db_path)
     db_file = (

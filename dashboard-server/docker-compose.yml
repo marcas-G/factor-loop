@@ -1,0 +1,16 @@
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: dashboard-server/Dockerfile
+    image: factor-dashboard:latest
+    container_name: factor-dashboard
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      # 只读挂载库文件所在目录,生成器以只读模式打开 db
+      - ../data:/app/data:ro
+    environment:
+      DASHBOARD_REFRESH_SECONDS: "600"   # 10 分钟重生成一次快照
+      DASHBOARD_PORT: "8765"
