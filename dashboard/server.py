@@ -118,8 +118,7 @@ def make_handler(cache: SnapshotCache, dist_dir: Path | None) -> type[BaseHTTPRe
                 return
             rel = self.path.split("?", 1)[0].lstrip("/")
             candidate = (dist / rel).resolve()
-            if (str(candidate).startswith(str(dist.resolve()))
-                    and candidate.is_file()):
+            if candidate.is_relative_to(dist.resolve()) and candidate.is_file():
                 return self._send_file(candidate)
             # SPA fallback: only for route-like paths (no file extension).
             # A missing asset (e.g. /assets/nope.js) must 404, not serve html.
