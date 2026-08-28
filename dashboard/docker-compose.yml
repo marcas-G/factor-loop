@@ -1,0 +1,15 @@
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: dashboard/Dockerfile
+    image: factor-dashboard:2
+    container_name: factor-dashboard
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ../data:/app/data:ro
+    environment:
+      DASHBOARD_PORT: "8765"
+      FACTORS_DB: /app/data/factors.db

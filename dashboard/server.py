@@ -87,7 +87,10 @@ def make_handler(cache: SnapshotCache, dist_dir: Path | None) -> type[BaseHTTPRe
                 self.send_header(k, v)
             self.end_headers()
             if self.command != "HEAD" and code != 304:
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # client went away mid-transfer; not an error
 
         def do_HEAD(self) -> None:
             self.do_GET()
