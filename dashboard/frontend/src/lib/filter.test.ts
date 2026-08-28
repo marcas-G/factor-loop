@@ -29,6 +29,14 @@ describe("operatorChainLength", () => {
     expect(operatorChainLength(F({ operator_chain: "a+b·c" }))).toBe(3);
     expect(operatorChainLength(F({ operator_chain: "a->b->c->d->e" }))).toBe(5);
   });
+  it("parses JSON array strings as the DB stores them (persist.py json.dumps)", () => {
+    expect(operatorChainLength(F({ operator_chain: "[]" }))).toBe(0);
+    expect(operatorChainLength(F({ operator_chain: "[21]" }))).toBe(1);
+    expect(operatorChainLength(F({ operator_chain: "[21, 23]" }))).toBe(2);
+  });
+  it("falls back to split on malformed JSON array", () => {
+    expect(operatorChainLength(F({ operator_chain: "[21,23" }))).toBe(1);
+  });
 });
 
 describe("applyFilters", () => {

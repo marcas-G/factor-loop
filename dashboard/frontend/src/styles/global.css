@@ -234,6 +234,7 @@ body {
   margin: 0;
 }
 .chart-grid > .chart-box:only-child { grid-column: 1 / -1; }
+.chart-grid.single { grid-template-columns: minmax(0, 1fr); }
 
 .chart-box {
   background: var(--panel);

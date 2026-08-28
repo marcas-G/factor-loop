@@ -10,11 +10,21 @@ export const GATE_OPTIONS: { value: string; label: string }[] = [
 ];
 
 /** Number of operators in the chain. null when operator_chain is absent,
- *  0 when present but empty/whitespace, else count of separators-delimited parts. */
+ *  0 when present but empty/whitespace. The DB stores the chain as a JSON
+ *  array string ("[21]", "[21, 23]" — persist.py json.dumps(operator_refs)),
+ *  so try that first; fall back to separator-split for legacy/plain text. */
 export function operatorChainLength(f: Factor): number | null {
   const c = f.operator_chain;
   if (c === null || c === undefined) return null;
-  const parts = c.trim().split(/[->+·]+/).filter(Boolean);
+  const s = c.trim();
+  if (s === "") return 0;
+  if (s.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.length;
+    } catch { /* fall through to separator split */ }
+  }
+  const parts = s.split(/[->+·]+/).filter(Boolean);
   return parts.length;
 }
 

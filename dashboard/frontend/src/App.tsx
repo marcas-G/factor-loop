@@ -54,7 +54,7 @@ export default function App() {
                          selected={filters.selected}
                          onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
           </div>
-          <div className="chart-grid">
+          <div className="chart-grid single">
             <FilterBar factors={data.factors} filters={filters}
                        onChange={patch => setFilters(f => ({ ...f, ...patch }))}
                        onReset={() => setFilters(f => ({
