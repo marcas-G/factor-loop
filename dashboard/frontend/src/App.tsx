@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Header } from "./components/Header";
 import { MetricCards } from "./components/MetricCards";
 import { StatusChart } from "./components/charts/StatusChart";
+import { Scatter } from "./components/charts/Scatter";
+import { Trend } from "./components/charts/Trend";
 import { useSnapshot } from "./hooks/useSnapshot";
 import { parseHash, writeHash, type FilterState } from "./state";
 
@@ -28,7 +30,12 @@ export default function App() {
         <MetricCards factors={data.factors} evaluations={data.evaluations}
                      onFilterGate={() => setFilters(f => ({ ...f, gates: ["pass"] }))} />
         <div className="chart-grid">
+          <Scatter factors={data.factors} selected={filters.selected}
+                   onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
           <StatusChart factors={data.factors} />
+        </div>
+        <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <Trend factors={data.factors} edges={data.lineage_edges} />
         </div>
       </main>
     </>

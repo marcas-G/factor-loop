@@ -45,3 +45,31 @@ body { margin: 0; font: 14px/1.55 -apple-system, "Segoe UI", "Noto Sans SC", san
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
             margin-right: 5px; }
 @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(3, 1fr); } }
+
+/* scatter + trend charts */
+.scatter { position: relative; }
+.scatter svg { width: 100%; height: auto; display: block; }
+.grid { stroke: #1c2532; stroke-width: 1; }
+.tick { font: 10px ui-monospace, monospace; fill: #6d7d93; }
+.median { stroke: #33425c; stroke-dasharray: 4 4; }
+.crosshair { stroke: #38bdf8; stroke-width: 1; opacity: .5; pointer-events: none; }
+.dot-wrap { cursor: pointer; transition: transform .3s ease; }
+.dot { transition: r .2s, filter .2s; }
+.dot.hot { filter: drop-shadow(0 0 6px #38bdf8); }
+.dot.glow { stroke: #2dd4a7; stroke-width: 1.5; }
+.dot-label { font: 10px ui-monospace, monospace; fill: #9fb0c4; paint-order: stroke;
+             stroke: #0b0f16; stroke-width: 3px; }
+.hover-card { position: absolute; top: 40px; right: 16px; display: flex; flex-direction: column;
+              gap: 2px; padding: 10px 12px; background: rgba(17,24,37,.92);
+              border: 1px solid #33425c; border-radius: 8px; backdrop-filter: blur(6px);
+              font: 12px ui-monospace, monospace; pointer-events: none; }
+.hover-card b { color: #38bdf8; margin-bottom: 4px; }
+.trend svg { width: 100%; height: auto; display: block; }
+.pass-bar { fill: rgba(56,189,248,.12); }
+.trend-ic { fill: none; stroke: #2dd4a7; stroke-width: 2; }
+.trend-ic-dot { fill: #2dd4a7; }
+.trend-icir { fill: none; stroke: #fbbf24; stroke-width: 2; }
+.trend-icir-dot { fill: #fbbf24; }
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 5px; }
+.sw.ic { background: #2dd4a7; } .sw.icir { background: #fbbf24; } .sw.pass { background: rgba(56,189,248,.4); }
+.chart-box .empty { color: #6d7d93; font-size: 12px; margin: 24px 0; text-align: center; }
