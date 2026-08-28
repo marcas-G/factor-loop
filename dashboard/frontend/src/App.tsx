@@ -5,8 +5,10 @@ import { StatusChart } from "./components/charts/StatusChart";
 import { Scatter } from "./components/charts/Scatter";
 import { Trend } from "./components/charts/Trend";
 import { LineageTree } from "./components/LineageTree";
+import { FilterBar } from "./components/FilterBar";
+import { FactorTable } from "./components/FactorTable";
 import { useSnapshot } from "./hooks/useSnapshot";
-import { parseHash, writeHash, type FilterState } from "./state";
+import { parseHash, writeHash, DEFAULT_FILTERS, type FilterState } from "./state";
 
 export default function App() {
   const { data, loadState, stale, updatedAt, refresh, applyStale } = useSnapshot();
@@ -44,6 +46,20 @@ export default function App() {
                        onBranchChange={b => setFilters(f => ({ ...f, branch: b }))}
                        selected={filters.selected}
                        onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
+        </div>
+        <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <FilterBar factors={data.factors} filters={filters}
+                     onChange={patch => setFilters(f => ({ ...f, ...patch }))}
+                     onReset={() => setFilters(f => ({
+                       ...DEFAULT_FILTERS, selected: f.selected, branch: f.branch,
+                     }))} />
+          <FactorTable factors={data.factors} filters={filters}
+                       onSort={key => setFilters(f => key === f.sortKey
+                         ? { ...f, sortDir: f.sortDir === "desc" ? "asc" : "desc" }
+                         : { ...f, sortKey: key, sortDir: "desc" })}
+                       onSelect={xname => setFilters(f => ({
+                         ...f, selected: f.selected === xname ? null : xname,
+                       }))} />
         </div>
       </main>
     </>
