@@ -501,7 +501,8 @@ def make_server(addr: tuple[str, int], cache: SnapshotCache,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Factor dashboard server")
-    parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite factor db (path or file: URI)")
+    parser.add_argument("--db", default=os.environ.get("FACTORS_DB", str(DEFAULT_DB)),
+                        help="SQLite factor db (path or file: URI)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("DASHBOARD_PORT", "8765")))
     parser.add_argument("--dist", type=Path, default=DIST_DIR, help="frontend build dir")
     args = parser.parse_args()
@@ -2307,20 +2308,24 @@ rmdir dashboard-server
 ```dockerfile
 FROM python:3.13-slim
 WORKDIR /app
+COPY core/__init__.py /app/core/__init__.py
 COPY core/config.py /app/core/config.py
-COPY core/db/__init__.py /app/core/db/__init__.py 2>/dev/null || true
+COPY core/db/__init__.py /app/core/db/__init__.py
 COPY core/db/db.py /app/core/db/db.py
+COPY core/tools/__init__.py /app/core/tools/__init__.py
 COPY core/tools/dashboard_snapshot.py /app/core/tools/dashboard_snapshot.py
-RUN touch /app/core/__init__.py /app/core/tools/__init__.py
+COPY dashboard/__init__.py /app/dashboard/__init__.py
 COPY dashboard/server.py /app/dashboard/server.py
-RUN touch /app/dashboard/__init__.py
 COPY dashboard/frontend/dist /app/dashboard/frontend/dist
-ENV PYTHONUNBUFFERED=1 DASHBOARD_PORT=8765
+ENV PYTHONUNBUFFERED=1 DASHBOARD_PORT=8765 FACTORS_DB=/app/data/factors.db
 EXPOSE 8765
 CMD ["python3", "/app/dashboard/server.py"]
 ```
 
-注意:先查 `core/db/__init__.py` 是否存在再定 COPY 行(上面 `|| true` 写法 Docker 不支持条件,落地时按实际情况删掉该行或保留存在的文件);`dashboard_snapshot.py` 依赖 `core.db.db` 里 leaderboard_gates——确认 db.py 无第三方 import(它是纯 sqlite3 模块才能直接 COPY;若有依赖则把 gates 常量与函数一并下沉进 dashboard_snapshot.py,改完跑 `python3 dashboard/test_server.py` 验证)。
+已核实的两个事实:
+- `core/db/__init__.py` 存在,db.py 依赖它
+- `core/config.py` 的 `DATA_DIR = PROJECT_ROOT/data`,容器内 PROJECT_ROOT=/app → `/app/data/factors.db` 恰好与挂载点一致,`DEFAULT_DB` 天然正确;但为防御 compose 改挂载路径的情况,server.py 的 `main()` 里 `--db` 默认值改为 `os.environ.get("FACTORS_DB", str(DEFAULT_DB))`(Task 3 的 main 已按此写)
+- **前置检查**:db.py 是大模块(2300+ 行),先 `grep -n "^import\|^from" core/db/db.py` 确认无第三方依赖(应为纯 sqlite3/pathlib);若有,则把 GATE/NORM 常量与 leaderboard_gates 下沉进 dashboard_snapshot.py,改完跑 `python3 dashboard/test_server.py` 验证
 
 - [ ] **Step 3: docker-compose.yml**
 
@@ -2343,7 +2348,7 @@ services:
       DASHBOARD_PORT: "8765"
 ```
 
-**db 路径注意:** 容器内 db 在 `/app/data/factors.db`,而 `DEFAULT_DB` 来自 `core/config.py` 的 `DATA_DIR`——检查 config.py 的 DATA_DIR 解析逻辑,若它不指向 `/app/data`,在 compose environment 加 `FACTORS_DB=/app/data/factors.db` 之类(以 config.py 实际支持的环境变量为准;若不支持,server.py main 里把 `--db` 默认值改为 `os.environ.get("FACTORS_DB", str(DEFAULT_DB))`)。
+**db 路径注意:** 容器内 db 在 `/app/data/factors.db`,`config.py` 的 `DATA_DIR = PROJECT_ROOT/data`,PROJECT_ROOT=/app → 默认值天然正确;compose 里显式设 `FACTORS_DB` 只是防御性兜底(实现时 db.py 依赖已核实为纯 stdlib:json/re/sqlite3/struct/contextlib/pathlib/typing + core.config)。
 
 - [ ] **Step 4: 全链路验证**
 
