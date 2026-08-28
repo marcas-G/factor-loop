@@ -195,8 +195,15 @@ export function LineageTree({
                      selected === name ? "selected" : "",
                      inPath ? "hl" : "",
                    ].filter(Boolean).join(" ")}
+                   role="button" tabIndex={0} aria-label={name}
                    transform={`translate(${n.x},${ypx})`}
                    onClick={ev => { ev.stopPropagation(); onSelect(name); }}
+                   onKeyDown={ev => {
+                     if (ev.key === "Enter" || ev.key === " ") {
+                       ev.stopPropagation();
+                       onSelect(name);
+                     }
+                   }}
                    onPointerEnter={() => setHoverPath(new Set(ancestorPath(name, parentOf)))}
                    onPointerLeave={() => setHoverPath(null)}>
                   <title>{name}</title>

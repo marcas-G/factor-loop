@@ -35,8 +35,7 @@ export default function App() {
       <Header loadState={loadState} stale={stale} updatedAt={updatedAt}
               generatedAt={data.meta.generatedAt}
               onRefresh={refresh} onApplyStale={applyStale} />
-      <main className="layout"
-            style={{ gridTemplateColumns: filters.selected ? "minmax(0,1fr) 340px" : "minmax(0,1fr)" }}>
+      <main className={`layout${filters.selected ? " with-panel" : ""}`}>
         <div className="main-column">
           <MetricCards factors={data.factors} evaluations={data.evaluations}
                        onFilterGate={() => setFilters(f => ({ ...f, gates: ["pass"] }))} />
@@ -45,17 +44,17 @@ export default function App() {
                      onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
             <StatusChart factors={data.factors} />
           </div>
-          <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <div className="chart-grid">
             <Trend factors={data.factors} edges={data.lineage_edges} />
           </div>
-          <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <div className="chart-grid">
             <LineageTree factors={data.factors} edges={data.lineage_edges}
                          branches={data.lineage_branches} branch={filters.branch}
                          onBranchChange={b => setFilters(f => ({ ...f, branch: b }))}
                          selected={filters.selected}
                          onSelect={xname => setFilters(f => ({ ...f, selected: xname }))} />
           </div>
-          <div className="chart-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+          <div className="chart-grid">
             <FilterBar factors={data.factors} filters={filters}
                        onChange={patch => setFilters(f => ({ ...f, ...patch }))}
                        onReset={() => setFilters(f => ({

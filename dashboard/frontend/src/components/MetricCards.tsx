@@ -33,8 +33,9 @@ export function MetricCards({ factors, evaluations, onFilterGate }: Props) {
     .slice(-20).map(e => e.ic_mean).filter((v): v is number => v !== null);
 
   const cards: Array<{ label: string; value: number | null;
-                       fmt?: (v: number) => string; onClick?: () => void }> = [
-    { label: "因子总数", value: factors.length },
+                       fmt?: (v: number) => string; onClick?: () => void;
+                       spark?: boolean }> = [
+    { label: "因子总数", value: factors.length, spark: true },
     { label: "已评估", value: evaluated.length },
     { label: "闸门通过", value: passed.length, onClick: onFilterGate },
     { label: "中位 |IC|", value: median(ics.map(Math.abs)), fmt: (v) => v.toFixed(3) },
@@ -44,13 +45,14 @@ export function MetricCards({ factors, evaluations, onFilterGate }: Props) {
   return (
     <div className="metrics">
       {cards.map(c => (
-        <div key={c.label} className={`metric-card${c.onClick ? " clickable" : ""}`}
+        <div key={c.label}
+             className={`metric-card${c.onClick ? " clickable" : ""}`}
              onClick={c.onClick}>
           <span className="metric-label">{c.label}</span>
           <span className="metric-value">
             {c.value === null ? "—" : c.fmt ? c.fmt(c.value) : c.value}
           </span>
-          <Sparkline values={recentIc} />
+          {c.spark && <Sparkline values={recentIc} />}
         </div>
       ))}
     </div>

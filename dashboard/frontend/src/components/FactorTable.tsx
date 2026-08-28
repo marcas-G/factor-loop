@@ -92,7 +92,14 @@ export function FactorTable({ factors, filters, onSort, onSelect }: Props) {
             {rows.map(f => (
               <tr key={f.xname}
                   className={filters.selected === f.xname ? "selected" : ""}
-                  onClick={() => onSelect(f.xname)}>
+                  tabIndex={0}
+                  onClick={() => onSelect(f.xname)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelect(f.xname);
+                    }
+                  }}>
                 {COLUMNS.map(c => (
                   <td key={c.key} className={c.numeric ? "num" : ""}
                       title={c.key === "xname" ? f.xname : undefined}>

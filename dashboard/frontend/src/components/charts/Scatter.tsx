@@ -78,9 +78,16 @@ export function Scatter({ factors, selected, onSelect }: Props) {
           <line x1={sx(hovered.x)} x2={sx(hovered.x)} y1={M.t} y2={H - M.b} className="crosshair" />
         )}
         {pts.map((p, i) => (
-          <g key={p.name} className="dot-wrap"
+          <g key={p.name} className="dot-wrap" role="button" tabIndex={0}
+             aria-label={p.name}
              style={{ transform: `translate(${sx(p.x).toFixed(1)}px, ${sy(p.y).toFixed(1)}px)` }}
-             onClick={() => onSelect(p.name)}>
+             onClick={() => onSelect(p.name)}
+             onKeyDown={e => {
+               if (e.key === "Enter" || e.key === " ") {
+                 e.preventDefault();
+                 onSelect(p.name);
+               }
+             }}>
             <circle r={p.name === selected ? 6 : 4} fill={p.color}
                     className={`dot${p.glow ? " glow" : ""}${hover === i ? " hot" : ""}`} />
             {(hover === i || p.name === selected) && (
