@@ -86,21 +86,22 @@ clone 后用 `core/db/init_db.py` 重建空库即可。
 
 ## 因子看板
 
-随时从当前因子库生成一个自包含静态 HTML(不启动服务、不开放端口、不依赖 CDN):
+实时看板(纯 stdlib API + React 前端,详见 `dashboard/README.md`)。直接启动:
 
 ```bash
-python3 core/tools/generate_factor_dashboard.py
+python3 dashboard/server.py            # 默认 8765,读 data/factors.db,托管 frontend/dist
+python3 dashboard/server.py --port 8901 --db data/factors.db
 ```
 
-默认读取 `data/factors.db`,输出 `data/factor_dashboard.html`。也可以显式指定:
+或用 docker compose 部署:
 
 ```bash
-python3 core/tools/generate_factor_dashboard.py \
-  --db data/factors.db \
-  --output data/factor_dashboard.html
+cd dashboard/frontend && npm run build   # 先构建前端
+docker compose -f dashboard/docker-compose.yml up -d --build
+# 访问 http://<host>:8765 ; data/ 以只读挂载进容器
 ```
 
-页面支持搜索、状态/标签筛选、单字段排序、冗余度×预测强度散点、因子详情、评估历史、迭代记录与当前列表 CSV 导出。点击表头按该列排序，再次点击切换升降序；想更新时重新执行同一条命令，再刷新浏览器中的 HTML 文件即可。
+页面支持搜索、状态/标签/闸门筛选、多列排序、冗余度×预测强度散点、代际趋势、血缘图谱、因子详情、迭代记录与 CSV 导出;筛选/选中状态同步到 URL hash。数据更新不整页刷新,只亮角标,点击才应用。
 
 ## 分层依赖规则
 

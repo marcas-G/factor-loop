@@ -137,6 +137,14 @@ export function LineageTree({
   const hasChildren = (xname: string) =>
     (tree.byName.get(xname)?.children.length ?? 0) > 0;
 
+  /** Ancestors of the hovered node + its direct children, so both the path
+   *  up and the edges down to immediate children light up on hover. */
+  const hoverSetFor = (xname: string): Set<string> => {
+    const s = new Set(ancestorPath(xname, parentOf));
+    for (const c of tree.byName.get(xname)?.children ?? []) s.add(c.xname);
+    return s;
+  };
+
   const edgePath = (fromX: number, fromY: number, toX: number, toY: number) => {
     const midX = (fromX + toX) / 2;
     return `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
@@ -204,7 +212,7 @@ export function LineageTree({
                        onSelect(name);
                      }
                    }}
-                   onPointerEnter={() => setHoverPath(new Set(ancestorPath(name, parentOf)))}
+                   onPointerEnter={() => setHoverPath(hoverSetFor(name))}
                    onPointerLeave={() => setHoverPath(null)}>
                   <title>{name}</title>
                   <rect x={-NODE_W / 2} y={-NODE_H / 2} width={NODE_W} height={NODE_H} rx={8}
