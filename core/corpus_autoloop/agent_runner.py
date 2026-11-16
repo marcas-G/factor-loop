@@ -23,28 +23,31 @@ def _task_path(root):
     return Path(root).resolve() / ".tmp" / "agent_task.json"
 
 
-def _task_document(state, obj):
+def _task_document(state, obj, *, phase="screening", candidate=None):
     if state.get("run_id") is None:
         raise WorkflowConflict("missing quant run id")
     factors = state.get("factors") or []
-    if len(factors) != 1 or factors[0].get("name") != obj["factor"]["name"]:
+    spec = candidate or obj["factor"]
+    if len(factors) != 1 or factors[0].get("name") != spec["name"]:
         raise WorkflowConflict("executor run does not match research object")
     return {
         "input": {
-            "factor": {key: obj["factor"][key] for key in (
+            "factor": {key: spec[key] for key in (
                 "name","formula","intuition","hypothesis","tags","categories","params")},
-            "idea": obj["hypothesis"]["hypothesis"],
+            "idea": spec["hypothesis"],
             "run_id": state["run_id"], "factor_index": 0,
         },
         "corpus_autoloop": {"object_id": obj["object_id"],
                             "source_id": obj["source_id"],
-                            "policy": "screening_only_no_persist_verdict"},
+                            "policy": "never_persist_verdict_until_independent_confirmation",
+                            "phase": phase},
     }
 
 
-def _instruction(task_file, run_id):
+def _instruction(task_file, run_id, phase):
     return f"""You are running ONE corpus-guided factor execution using the existing
 run-factor-agent flow and quant-mcp tools (not a hypothetical simulation).
+This task phase is {phase}.
 Read the task JSON at {task_file}. Read the project's
 .zcode/agents/executors/run-factor-agent.md and
 .agents/skills/write-factor/SKILL.md before writing code.
@@ -81,7 +84,7 @@ class OpenCodeRunner:
                 "run-factor-agent.md").is_file():
             raise WorkflowConflict("executor agent contract absent from workspace")
 
-    def execute(self, research_object, run_id):
+    def execute(self, research_object, run_id, *, phase="screening", candidate=None):
         # Absolutely no use of shell=True or global agent-task overrides.
         task_file = _task_path(self.root)
         if task_file.exists():
@@ -89,10 +92,10 @@ class OpenCodeRunner:
                 ".tmp/agent_task.json already exists; concurrent runner forbidden")
         state = self.backend.run_load(run_id)
         if state.get("parent_session") != (
-            f"corpus:{research_object['object_id']}:screening:{research_object['revision']}"
+            f"corpus:{research_object['object_id']}:{phase}:{research_object['revision']}"
         ):
             raise WorkflowConflict("run ownership token does not match research object")
-        task = _task_document(state, research_object)
+        task = _task_document(state, research_object, phase=phase, candidate=candidate)
         task_file.parent.mkdir(parents=True, exist_ok=True)
         try:
             with task_file.open("x", encoding="utf-8") as handle:
@@ -101,7 +104,7 @@ class OpenCodeRunner:
             log_dir.mkdir(parents=True, exist_ok=True)
             log_file = log_dir / f"{run_id}.log"
             command = [self.binary, "run", "--model", self.model, "--dir",
-                       str(self.root), _instruction(task_file, run_id)]
+                       str(self.root), _instruction(task_file, run_id, phase)]
             with log_file.open("wb") as output:
                 try:
                     finished = self.spawn(command, cwd=self.root, stdin=subprocess.DEVNULL,
