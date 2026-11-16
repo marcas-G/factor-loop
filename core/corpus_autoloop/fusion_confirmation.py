@@ -149,15 +149,19 @@ class FusionConfirmationAdapter:
                 abs(outcomes["similar"]["score"]["icir"]))
         fused_score=abs(outcomes["fused"]["score"]["icir"])
         delta=fused_score-old
+        screening_fused_icir=trial["screening_report"]["predictive"]["metric_value"]
+        fused_direction_stable=(
+            outcomes["fused"]["score"]["icir"]*screening_fused_icir>0 and
+            outcomes["fused"]["score"]["icir"]*outcomes["fused"]["score"]["rank_ic"]>0)
         source_ref=obj["evaluation"]["execution_ref"]
         evidence_ref=";".join(o["execution_ref"] for o in outcomes.values())
-        if delta<delta_icir_floor or abs(outcomes["fused"]["score"]["rank_ic"])<0.01:
+        if delta<delta_icir_floor or abs(outcomes["fused"]["score"]["rank_ic"])<0.01 or not fused_direction_stable:
             decision={
                 "base_factor_xname":obj["factor"]["name"],
                 "method":plan["method"],"success":False,
                 "evidence_ref":evidence_ref,
                 "failure_reason":f"独立确认同一 Y 目标上融合增益 {delta:.4f} 未过预定阈值 "
-                                 f"{delta_icir_floor:.4f} 或 |rank_ic|<0.01",
+                                 f"{delta_icir_floor:.4f}、|rank_ic|<0.01 或方向不一致",
             }
             result=self.store.record_fusion(objid,decision,revision=expected_revision)
             production=None
@@ -204,7 +208,8 @@ class FusionConfirmationAdapter:
                      "stability_ref":review["stability_ref"],
                      "multiplicity_controlled":True,
                  },
-                 "result_status":result["status"],"decision":decision}
+                 "result_status":result["status"],"decision":decision,
+                 "fused_direction_stable":fused_direction_stable}
         with self.store._connection() as db:
             db.execute("UPDATE corpus_fusion_holdout SET status='done',receipt_json=?,updated_at=? "
                        "WHERE object_id=?",(_json(receipt),_stamp(),objid))

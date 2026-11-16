@@ -178,7 +178,10 @@ class IndependentHoldoutAdapter:
         fixed=fixed_target_score(checked,source,target=target,exact_pair=original_pair)
         zero,icir,rank=fixed["zero_ratio"],fixed["icir"],fixed["rank_ic"]
         score_kind="fixed_pair"
-        passed=(abs(icir)>=0.3 and abs(rank)>=0.01)
+        # A holdout sign reversal is not replication, even if |ICIR| is large.
+        screened_icir=screening["predictive"]["metric_value"]
+        same_direction=(icir*screened_icir>0 and icir*rank>0)
+        passed=(abs(icir)>=0.3 and abs(rank)>=0.01 and same_direction)
         taskid=str(task["run_id"])
         # Pull the frozen X/Y row from raw heldout CSV, never check output's
         # independently selected "best" summary.
@@ -196,7 +199,7 @@ class IndependentHoldoutAdapter:
             "independence":screening["independence"],
             "audit":{"rank_ic":rank,"zero_rate":zero,"source_sha256":digest,
                      "gpu_independence_reused_from_screening":True,
-                     "holdout_cpu_only":True,
+                     "holdout_cpu_only":True,"same_direction":same_direction,
                      "holdout_pair":fixed["pair"],"raw_csv_ref":fixed["csv_path"],
                      "date_range":{"start":start,"end":end}},
         }
