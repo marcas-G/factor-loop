@@ -1,5 +1,8 @@
 # factor-autoloop
 
+> **Corpus Research Console 前端工作台**：React 19 + TypeScript + Vite + Tailwind、Python/SQLite 只读 API。可浏览《道德经》81 章、研究对象队列、原文、假设谱系、因子证据与事件。见 [前端部署与启动说明](docs/corpus-web-console.md)。前端不开放回测或入库写接口。
+
+
 > **真实执行、逐章调度与独立验证适配器**：[平台运行、CPU 保留期和融合入库手册](docs/corpus-execution-adapter.md)。所有写生产库/提交平台的命令都需要明确授权，CI 不包含真实行情。
 
 > **新增：语料驱动研究入口**：[《道德经》81 章 Corpus Autoloop 说明](docs/corpus-autoloop.md)（跨域假设 → 因子交接 → 实测独立性 → 融合或最多两层拆分）。这是独立可运行调度原型，未自动完成量化平台端到端执行。

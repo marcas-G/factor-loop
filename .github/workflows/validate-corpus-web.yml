@@ -1,0 +1,51 @@
+name: Validate Corpus Research Console
+
+on:
+  push:
+    paths:
+      - 'web/**'
+      - 'core/corpus_autoloop/web_api.py'
+      - 'tests/test_corpus_web_api.py'
+      - '.github/workflows/validate-corpus-web.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'core/corpus_autoloop/web_api.py'
+      - 'tests/test_corpus_web_api.py'
+      - '.github/workflows/validate-corpus-web.yml'
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.20.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck and build
+        working-directory: web
+        run: pnpm run build
+      - name: Unit tests
+        working-directory: web
+        run: pnpm run test
+      - name: ESLint
+        working-directory: web
+        run: pnpm run lint
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Read-only API tests
+        run: python -m unittest discover -s tests -p 'test_corpus_web_api.py' -v
+      - name: Verify Python syntax
+        run: python -m compileall -q core/corpus_autoloop/web_api.py
