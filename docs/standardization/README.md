@@ -1,6 +1,6 @@
 # Factor Autoloop 标准化总览（Architecture RFC 0.1）
 
-状态：**架构规范 + 独立 TreEvo 最小树原型**。基于仓库 main 分支 `ccd54a59a9f5dc6b2298fa84242114f60ab6cc13` 的静态代码审阅（2026-11-16）；未连接市场数据和实际运行环境，未证明 TreEvo 有效果。
+状态：**架构规范 + 独立 TreEvo 研究树 + 受控假设细化 Agent**。基于仓库 main 分支 `ccd54a59a9f5dc6b2298fa84242114f60ab6cc13` 的静态代码审阅（2026-11-16）；未连接市场数据和实际运行环境，未证明 TreEvo 有效果。
 
 目的：把已有因子研究闭环标准化为清晰的职责、契约、状态机和可验证边界，并为 TreEvo **从高层逻辑逐步分析、分解和细化假设**增加一条独立入口。**不**把 TreEvo 误写成遗传算法或纯表达式树搜索。
 
@@ -13,7 +13,9 @@
 5. [05-migration-plan.md](05-migration-plan.md)：渐进迁移、验收与非目标
 6. [schemas/](schemas/)：拟议 JSON Schema，不是现网数据库迁移
 7. [examples/](examples/)：**纯教学**样例，不是真实市场发现
-8. `python3 docs/standardization/validate.py`：静态契约校验，需 `jsonschema>=4`
+8. [06-tree-mvp.md](06-tree-mvp.md)：独立可运行的研究树
+9. [07-refinement-agent.md](07-refinement-agent.md)：逐层假设细化 Agent 与人工审核队列
+10. `python3 docs/standardization/validate.py`：静态契约校验，需 `jsonschema>=4`
 
 ## 统一术语
 
@@ -37,7 +39,7 @@
 - **双路径并存**：现有 factor-driven 路径继续工作；新 theme-driven / TreEvo 路径仅在版本化契约成熟后接入。
 - **单一执行权威**：run state 由工具/存储层持久化；Agent 只提交结构化意图和引用，不负责猜测任务是否完成。
 - **评估数据隔离**：探索、筛选和独立确认具有不同权限；不可在用过的确认数据上继续适应式提出假设后声称独立验证。
-- **不破坏现网**：不修改 `.agents/skills`、`core/`、`auto-loops.sh`、现有 SQLite schema 或评估阈值；本 RFC 只新增文档、示例、静态校验。
+- **不破坏现网**：允许隔离新增 `core/tre_evo` 和新的项目级 Skill，但不修改既有 `research-loop`、`auto-loops.sh`、生产 SQLite schema、评估阈值或其他现有 Skill；架构 RFC 与独立原型均不等于生产执行集成。
 
 ## 相关现有资料
 

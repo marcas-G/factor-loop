@@ -1,0 +1,20 @@
+{
+  "assessments": [
+    {
+      "index": 0,
+      "decision": "pass",
+      "checks": {
+        "parent_fidelity": true,
+        "information_gain": true,
+        "mechanism_clarity": true,
+        "discriminating_prediction": true,
+        "evidence_discipline": true
+      },
+      "reason": "子节点保留父主题，新增了事前补充代理、匹配条件和一个可区分的未来速度预测；仅作为探索性假设，不能视为因果结论。"
+    }
+  ],
+  "global_risks": [
+    "盘口补充代理的定义仍需核验时序合法性",
+    "现象来源为教学样例，不是真实观察"
+  ]
+}

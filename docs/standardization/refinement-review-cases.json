@@ -1,0 +1,177 @@
+{
+  "version": "0.1",
+  "dataset_status": "illustrative_seed_not_expert_labeled",
+  "purpose": "Human reviewer calibration; not a validated benchmark or market evidence",
+  "cases": [
+    {
+      "case_id": "MECH-01",
+      "refinement_kind": "机制分解",
+      "parent_claim": "交易压力对价格的作用可能受市场承接影响。",
+      "candidate_claim": "将承接分成即时可见深度与随后补充过程；两种活动可能对应不同响应路径。",
+      "proposed_refinement_warrant": "把宽泛承接过程划分为两个作用不同的机制角色。",
+      "reference_review_label": "potentially_useful",
+      "reference_reason": "新增可讨论机制；尚需观测验证",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "COND-02",
+      "refinement_kind": "条件细化",
+      "parent_claim": "相同失衡信号可能对应不同未来价格响应。",
+      "candidate_claim": "在前序波动状态高低不同时，相同失衡可能对应不同的后续变化速度。",
+      "proposed_refinement_warrant": "限定了前序状态，明确了可比较结果。",
+      "reference_review_label": "potentially_useful",
+      "reference_reason": "引入了条件及可区分的预测",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "COMP-03",
+      "refinement_kind": "竞争解释",
+      "parent_claim": "强卖压发生后价格可能继续下跌。",
+      "candidate_claim": "价格续跌也可能由当时已存在的下跌趋势驱动，而非卖压本身的作用。",
+      "proposed_refinement_warrant": "新增竞争性的解释来源及匹配需求。",
+      "reference_review_label": "potentially_useful",
+      "reference_reason": "需要用条件对照尝试区分解释",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "PROCESS-04",
+      "refinement_kind": "过程细化",
+      "parent_claim": "市场承接机制可能影响价格冲击。",
+      "candidate_claim": "把事件前深度、随后订单流和价格路径的先后顺序作为待检验的过程模型。",
+      "proposed_refinement_warrant": "指出可观察时序与未知中间过程。",
+      "reference_review_label": "potentially_useful",
+      "reference_reason": "时间过程是假设，不是已证明因果顺序",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "OP-05",
+      "refinement_kind": "可观测化",
+      "parent_claim": "流动性恢复可能影响价格反应。",
+      "candidate_claim": "使用事件前确定窗口内的补单活动构造恢复能力代理，检验后续价格路径差异。",
+      "proposed_refinement_warrant": "将抽象概念映射到事前可用代理。",
+      "reference_review_label": "potentially_useful",
+      "reference_reason": "必须声明代理偏差与特征截止时间",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "PARAPHRASE-06",
+      "refinement_kind": "同义改写",
+      "parent_claim": "订单压力可能影响价格。",
+      "candidate_claim": "成交压力也许能够影响未来价格走势。",
+      "proposed_refinement_warrant": "压力和影响的同义转换，没有新条件与机制。",
+      "reference_review_label": "reject",
+      "reference_reason": "未提供认知增量",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "DRIFT-07",
+      "refinement_kind": "问题漂移",
+      "parent_claim": "流动性恢复可能影响冲击。",
+      "candidate_claim": "隔夜宏观政策消息与大宗商品中长期价格趋势有关。",
+      "proposed_refinement_warrant": "跳出原有研究问题。",
+      "reference_review_label": "reject",
+      "reference_reason": "相关金融现象不等于父问题的细化",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "CAUSAL-08",
+      "refinement_kind": "无依据归因",
+      "parent_claim": "买卖压力与价格响应相关。",
+      "candidate_claim": "已证明某一补单算法必然导致未来价格上涨。",
+      "proposed_refinement_warrant": "声称未运行的实验和确定因果结论。",
+      "reference_review_label": "reject",
+      "reference_reason": "未给出证据或识别条件",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "NO-DISTINCTION-09",
+      "refinement_kind": "不可区分",
+      "parent_claim": "量价关系可能依赖市场状态。",
+      "candidate_claim": "高低波动环境可能表现不同，具体是什么不同暂时无法描述。",
+      "proposed_refinement_warrant": "没有任何独有观测预测。",
+      "reference_review_label": "needs_revision",
+      "reference_reason": "需要补充竞争解释可区分的结果",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    },
+    {
+      "case_id": "LEAKAGE-10",
+      "refinement_kind": "未来信息泄漏",
+      "parent_claim": "事件前深度可能预测未来价格。",
+      "candidate_claim": "在 t+5 秒测量的补单速度可用于 t 时刻预测 t+1 秒的收益。",
+      "proposed_refinement_warrant": "用预测时点之后的信息当作当前特征。",
+      "reference_review_label": "reject",
+      "reference_reason": "必须重定义决策时点和目标窗口",
+      "annotation_status": "illustrative_seed_not_expert_labeled",
+      "evaluation_dimensions": [
+        "parent_fidelity",
+        "information_gain",
+        "mechanism_specificity",
+        "observability",
+        "evidence_discipline"
+      ]
+    }
+  ]
+}

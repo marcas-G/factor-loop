@@ -151,7 +151,11 @@ class TreEvoStore:
                     "record and review a full Phenomenon first"
                 )
 
-    def add_refinement(self, edge: dict, child: dict, *, expected_revision: int) -> dict:
+    def _add_refinement_tx(self, db, edge: dict, child: dict, expected_revision: int) -> dict:
+        """Internal: call only inside an already-open BEGIN IMMEDIATE transaction.
+
+        Enables review-queue status and tree insertion to commit atomically.
+        """
         validate("edge", edge)
         validate("node", child)
         tree_id = edge["tree_id"]
@@ -161,45 +165,49 @@ class TreEvoStore:
             raise TreeInvariantError("child.parent_id must match edge.parent_node_id")
         if child["node_type"] == "research_theme":
             raise TreeInvariantError("only root nodes may be research_theme")
-        if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 1:
+        if type(expected_revision) is not int or expected_revision < 1:
             raise TreeInvariantError("expected_revision must be a positive integer")
         edge_json, child_json = _canonical(edge), _canonical(child)
+        row = db.execute("SELECT revision FROM trees WHERE tree_id=?", (tree_id,)).fetchone()
+        if row is None:
+            raise TreeInvariantError(f"unknown tree {tree_id}")
+        old_edge = db.execute("SELECT payload FROM edges WHERE tree_id=? AND edge_id=?",
+                              (tree_id, edge["edge_id"])).fetchone()
+        old_child = db.execute("SELECT payload FROM nodes WHERE tree_id=? AND node_id=?",
+                               (tree_id, child["node_id"])).fetchone()
+        if old_edge is not None and old_child is not None:
+            if old_edge[0] == edge_json and old_child[0] == child_json:
+                return {"tree_id": tree_id, "node_id": child["node_id"],
+                        "revision": row[0], "created": False}
+        if old_edge is not None or old_child is not None:
+            raise TreeConflict("edge_id or node_id already used for different content")
+        if expected_revision != row[0]:
+            raise TreeConflict(f"tree {tree_id} expected revision {expected_revision}, actual {row[0]}")
+        parent = db.execute("SELECT payload FROM nodes WHERE tree_id=? AND node_id=?",
+                            (tree_id, edge["parent_node_id"])).fetchone()
+        if parent is None:
+            raise TreeInvariantError("missing parent node")
+        parent_doc = json.loads(parent[0])
+        if parent_doc["node_status"] == "archived":
+            raise TreeInvariantError("cannot refine archived parent")
+        if " ".join(parent_doc["statement"].split()) == " ".join(child["statement"].split()):
+            raise TreeInvariantError("child statement is a verbatim restatement of parent")
+        self._ensure_phenomena(db, child["source_phenomena"])
+        now = _now()
+        # New children only attach to an existing parent: no cycles or reparenting.
+        db.execute("INSERT INTO nodes VALUES (?,?,?,?,?)",
+                   (tree_id, child["node_id"], child["parent_id"], child_json, now))
+        db.execute("INSERT INTO edges VALUES (?,?,?,?,?,?)",
+                   (tree_id, edge["edge_id"], edge["parent_node_id"],
+                    edge["child_node_id"], edge_json, now))
+        db.execute("UPDATE trees SET revision=revision+1 WHERE tree_id=?", (tree_id,))
+        return {"tree_id": tree_id, "node_id": child["node_id"],
+                "revision": row[0] + 1, "created": True}
+
+    def add_refinement(self, edge: dict, child: dict, *, expected_revision: int) -> dict:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            root = db.execute("SELECT revision FROM trees WHERE tree_id=?", (tree_id,)).fetchone()
-            if root is None:
-                raise TreeInvariantError(f"unknown tree {tree_id}")
-            old_edge = db.execute("SELECT payload FROM edges WHERE tree_id=? AND edge_id=?",
-                                  (tree_id, edge["edge_id"])).fetchone()
-            old_child = db.execute("SELECT payload FROM nodes WHERE tree_id=? AND node_id=?",
-                                   (tree_id, child["node_id"])).fetchone()
-            if old_edge is not None and old_child is not None:
-                if old_edge[0] == edge_json and old_child[0] == child_json:
-                    return {"tree_id": tree_id, "node_id": child["node_id"],
-                            "revision": root[0], "created": False}
-            if old_edge is not None or old_child is not None:
-                raise TreeConflict("edge_id or node_id already used for different content")
-            if expected_revision != root[0]:
-                raise TreeConflict(f"tree {tree_id} expected revision {expected_revision}, actual {root[0]}")
-            parent = db.execute("SELECT payload FROM nodes WHERE tree_id=? AND node_id=?",
-                                (tree_id, edge["parent_node_id"])).fetchone()
-            if parent is None:
-                raise TreeInvariantError("missing parent node")
-            parent_doc = json.loads(parent[0])
-            if parent_doc["node_status"] == "archived":
-                raise TreeInvariantError("cannot refine archived parent")
-            if " ".join(parent_doc["statement"].split()) == " ".join(child["statement"].split()):
-                raise TreeInvariantError("child statement is a verbatim restatement of parent")
-            self._ensure_phenomena(db, child["source_phenomena"])
-            now = _now()
-            # A new child with one existing parent guarantees acyclicity and single-parent ownership.
-            db.execute("INSERT INTO nodes VALUES (?,?,?,?,?)",
-                       (tree_id, child["node_id"], child["parent_id"], child_json, now))
-            db.execute("INSERT INTO edges VALUES (?,?,?,?,?,?)",
-                       (tree_id, edge["edge_id"], edge["parent_node_id"], edge["child_node_id"], edge_json, now))
-            db.execute("UPDATE trees SET revision=revision+1 WHERE tree_id=?", (tree_id,))
-            return {"tree_id": tree_id, "node_id": child["node_id"],
-                    "revision": root[0] + 1, "created": True}
+            return self._add_refinement_tx(db, edge, child, expected_revision)
 
     def tree(self, tree_id: str) -> dict:
         with self._connect() as db:

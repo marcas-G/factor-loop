@@ -2,7 +2,7 @@
 
 状态：**独立可运行原型**（非现有 \`research-loop\` 的执行入口）。
 
-代码：\`core/tre_evo/\`。此模块只操作单独的 SQLite 文件，**不修改 \`data/factors.db\`、\`core/db/schema.sql\`、\`auto-loops.sh\`、\`research-loop\` 或 \`assess\`**。它不驱动 LLM，也不自动生成科学假设：模型或人工先提供结构化节点和分解理由，再由程序进行确定性结构验证与存储。
+代码：\`core/tre_evo/\`。此模块只操作单独的 SQLite 文件，**不修改 \`data/factors.db\`、\`core/db/schema.sql\`、\`auto-loops.sh\`、\`research-loop\` 或 \`assess\`**。其中的树存储模块不直接驱动 LLM：原始 CLI 由模型或人工提供节点/细化边后进行确定性验证；**另外新增的模型候选生成与人工审核层见 [07-refinement-agent.md](07-refinement-agent.md)**。它仍未连接现有因子执行。
 
 ## 依赖和隔离
 
@@ -83,7 +83,7 @@ python3 -m unittest discover -s tests -p 'test_tre_evo_tree.py' -v
 
 ## 下一步（未实现）
 
-1. 设计人工标注的“父子细化有效性”小样本评测集（语义新信息、机制合理性、错误关联）。
+1. 已有 10 个仅供人工校准的审查种子；接下来需要独立人工盲审的正式小样本评测集（语义新信息、机制合理性、错误关联）。
 2. 引入独立的节点状态更新事件及证据审计；谨慎定义研究状态与执行状态的界限。
 3. 评估 Phenomenon 候选的统计有效性（时间窗、样本选择、稳定性），再将其转为可靠的研究线索。
 4. 建立实验设计适配层，**通过明确的 contract adapter** 进入现有 \`investigation\`，不要直接将 \`ExperimentDesign\` 当成现有 \`Test Contract\`。
