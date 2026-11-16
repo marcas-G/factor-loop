@@ -42,7 +42,7 @@ def factor_spec(hyp=None,name="CorpusTestFactor"):
     }
 
 
-def report(name="CorpusTestFactor",novelty="independent",split="holdout_confirmation",
+def report(name="CorpusTestFactor",novelty="independent",split="screening",
            predictive=True,fidelity=True):
     return {
         "factor_xname":name,"executor_run_id":"synthetic-run-1",
@@ -75,7 +75,7 @@ def good_fusion(name="CorpusTestFactor"):
             "method":"conditional_weighting","evidence_ref":"fixture://fusion-holdout",
             "data_split":"holdout_confirmation","incremental_value":0.02,
             "fused_factor_xname":"FusedCorpusFactor","persist_ref":"fixture://persisted",
-            "source_evaluation_ref":"fixture://holdout-execution",
+            "source_evaluation_ref":"fixture://screening-execution",
             "confirmed_dataset_ref":"fixture://fusion-holdout-new-period"}
 
 
@@ -159,7 +159,7 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.assertNotIn("run_id",handoff)
         screening=self.w.record_evaluation(self.id,report(split="screening"),revision=obj["revision"])
         self.assertEqual(screening["status"],"awaiting_confirmation")
-        confirmed=self.w.record_evaluation(self.id,report(),revision=screening["revision"])
+        confirmed=self.w.record_evaluation(self.id,report(split="holdout_confirmation"),revision=screening["revision"])
         self.assertEqual(confirmed["status"],"awaiting_admission")
         with self.assertRaises(contracts.ContractError):
             self.w.record_admission(self.id,{"factor_xname":"CorpusTestFactor",
