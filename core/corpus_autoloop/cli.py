@@ -20,6 +20,7 @@ from .holdout_adapter import IndependentHoldoutAdapter
 from .admission_adapter import AdmissionAdapter
 from .fusion_adapter import FusionAdapter, generate_plan
 from .fusion_confirmation import FusionConfirmationAdapter
+from .automation import CorpusSupervisor
 
 
 def _read(path):
@@ -177,6 +178,23 @@ def parse(argv=None):
     p = commands.add_parser("execution-status", help="show authoritative quant run binding")
     p.add_argument("--object-id", required=True)
 
+    p=commands.add_parser(
+        "auto-run",
+        help="FOREGROUND bounded chapter-by-chapter dispatcher; stops at missing evidence"
+    )
+    p.add_argument("--object-id",help="optional one-object mode; defaults to next pending chapter")
+    p.add_argument("--max-steps",type=int,default=12)
+    p.add_argument("--base-url",help="OpenAI-compatible base URL")
+    p.add_argument("--model",help="LLM for hypothesis/factor/fusion/split generation")
+    p.add_argument("--json-mode",action="store_true")
+    p.add_argument("--capabilities-file",help="actual platform-supported observation classes")
+    p.add_argument("--reviews-dir",help="review artifacts stored under <directory>/<object-id>/")
+    p.add_argument("--executor-model",help="configured OpenCode model for real C++ execution")
+    p.add_argument("--executor-binary",default="opencode")
+    p.add_argument("--dataset-ref",help="actual screening time/data version")
+    p.add_argument("--library-snapshot-ref",help="actual frozen factor library snapshot")
+    p.add_argument("--enable-platform-writes",action="store_true")
+
     return parser.parse_args(argv)
 
 
@@ -239,6 +257,22 @@ def main(argv=None):
             result=AdmissionAdapter(store).commit(
                 args.object_id,expected_revision=args.expected_revision,
                 review=_read(args.assessment_file))
+        elif cmd == "auto-run":
+            client=(ChatCompletionsClient(base_url=args.base_url,model=args.model,
+                     json_mode=args.json_mode)
+                    if args.model or args.base_url else None)
+            capabilities=_read(args.capabilities_file) if args.capabilities_file else None
+            if capabilities is not None and not (
+                isinstance(capabilities,list) and bool(capabilities) and
+                all(isinstance(x,str) and x for x in capabilities)):
+                raise ValueError("--capabilities-file must be nonempty JSON list")
+            supervisor=CorpusSupervisor(
+                store,client=client,capabilities=capabilities,
+                reviews_dir=args.reviews_dir,executor_model=args.executor_model,
+                executor_binary=args.executor_binary,dataset_ref=args.dataset_ref,
+                library_snapshot_ref=args.library_snapshot_ref,
+                enable_platform_writes=args.enable_platform_writes)
+            result=supervisor.run(max_steps=args.max_steps,object_id=args.object_id)
         elif cmd == "fusion-plan":
             obj=store.get(args.object_id)
             capabilities=_read(args.capabilities_file) if args.capabilities_file else None
