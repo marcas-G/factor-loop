@@ -51,6 +51,13 @@ def parse(argv=None):
     p = commands.add_parser("handoff", help="emit exact persist_candidates payload; DOES NOT execute")
     p.add_argument("--object-id", required=True)
 
+    p=commands.add_parser("fail", help="explicitly close infeasible task, with failed-attempt audit")
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--stage", choices=("hypothesis","factor","evaluation","confirmation","fusion","split"),required=True)
+    p.add_argument("--attempt-ref", required=True)
+    p.add_argument("--reason", required=True)
+
     for name in ("evaluation", "fusion", "admission"):
         p = commands.add_parser(name, help=f"import externally verified {name} evidence")
         p.add_argument("--object-id", required=True)
@@ -75,6 +82,9 @@ def main(argv=None):
             result = store.get(args.object_id)
         elif cmd == "events":
             result = store.events(args.object_id)
+        elif cmd == "fail":
+            result=store.record_infeasible(args.object_id,revision=args.expected_revision,
+                 stage=args.stage,attempt_ref=args.attempt_ref,reason=args.reason)
         elif cmd == "handoff":
             result = factor_handoff(store.get(args.object_id))
         elif cmd in ("hypothesis", "factor", "split"):

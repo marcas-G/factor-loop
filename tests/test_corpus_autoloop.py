@@ -226,6 +226,19 @@ class CorpusAutoloopTest(unittest.TestCase):
             self.w.record_hypothesis(self.id,research_hypothesis(),revision=1)
         self.assertEqual(self.w.get(self.id)["status"],"awaiting_factor")
 
+    def test_infeasible_chapter_is_audited_not_silently_skipped(self):
+        with self.assertRaises(ValueError):
+            self.w.record_infeasible(self.id, revision=1,stage="hypothesis",
+                                     attempt_ref="",reason="unrelated")
+        self.assertEqual(self.w.next_object()["object_id"],self.id)
+        result=self.w.record_infeasible(
+            self.id,revision=1,stage="hypothesis",
+            attempt_ref="local://llm-attempt/RO-DDJ-001",
+            reason="模型尝试了本章的来源锚定类比，但未能构造可实测的独有预测")
+        self.assertEqual(result["status"],"terminal_exhausted")
+        self.assertEqual(self.w.next_object()["object_id"],"RO-DDJ-002")
+        self.assertEqual(self.w.events(self.id)[-1]["kind"],"infeasible")
+
     def test_cli_source_to_research_hypothesis(self):
         fixture=Path(self.tmp.name)/"hypothesis.json"
         fixture.write_text(json.dumps(research_hypothesis(),ensure_ascii=False),encoding="utf-8")

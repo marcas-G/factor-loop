@@ -306,6 +306,25 @@ class CorpusAutoloop:
             return self._change(db,objid,obj["revision"],"terminal_split",
                                 "split",proposal,split_json=proposal)
 
+    def record_infeasible(self, objid, *, revision, stage, attempt_ref, reason):
+        """Fail explicitly, without fabricating a financially meaningful hypothesis.
+
+        A chapter is never skipped based on relevance; caller must first attempt
+        the requested step and attach the concrete failed attempt reference.
+        """
+        if stage not in ("hypothesis","factor","evaluation","confirmation","fusion","split"):
+            raise ValueError("unsupported failed step")
+        if not isinstance(attempt_ref,str) or len(attempt_ref.strip()) < 8:
+            raise ValueError("failed step requires a traceable attempt_ref")
+        if not isinstance(reason,str) or len(reason.strip()) < 15:
+            raise ValueError("failed step requires a concrete diagnostic reason")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            obj=self._check(db,objid,revision,ACTIVE)
+            return self._change(db,objid,obj["revision"],"terminal_exhausted",
+                                "infeasible",{"stage":stage,"attempt_ref":attempt_ref,
+                                               "reason":reason})
+
     def events(self, objid):
         with self._connection() as db:
             return [{"kind":r[0],"payload":json.loads(r[1]),"recorded_at":r[2]}
