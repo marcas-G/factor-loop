@@ -141,9 +141,12 @@ class FusionConfirmationAdapter:
             db.execute("INSERT INTO corpus_fusion_holdout VALUES (?,?,?,'reserved',NULL,?,?)",
                        (objid,str(start),str(end),_stamp(),_stamp()))
         outcomes={}
+        from core.stages.write_factor import extract_class_name_from_h, is_template_class
         for role,(name,source) in sources.items():
+            class_name=extract_class_name_from_h(source) or name
+            features=f"{class_name}<>" if is_template_class(source) else class_name
             submission=self.platform.submit(
-                factor_file=str(source),features=name,
+                factor_file=str(source),features=features,
                 feeds=",".join(f"SHFE-{c}" for c in obj["factor"]["categories"]),
                 start_date=str(start),end_date=str(end))
             task=(submission.get("tasks") or {}).get("csv_ic") or {}

@@ -143,7 +143,9 @@ class IndependentHoldoutAdapter:
                 submission=json.loads(row["task_json"])
         # A submitted task is recoverable by check-only. A crash between the
         # external POST and its receipt remains reserved, never auto-resubmitted.
-        features=factors[0].get("name") or obj["factor"]["name"]
+        from core.stages.write_factor import extract_class_name_from_h, is_template_class
+        class_name=extract_class_name_from_h(source) or factors[0].get("name") or obj["factor"]["name"]
+        features=f"{class_name}<>" if is_template_class(source) else class_name
         feeds=",".join(f"SHFE-{c}" for c in obj["factor"]["categories"])
         if submission is None:
             submission=self.platform.submit(
