@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PhenomenonObservationV0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "example_status": {
+      "enum": [
+        "illustrative_only",
+        "measured"
+      ]
+    },
+    "phenomenon_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "theme": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "market": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_definition": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "market",
+        "event_definition"
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "matched_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "contrasted_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "response_dimension": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "matched_on",
+        "contrasted_on",
+        "response_dimension"
+      ]
+    },
+    "data_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "feature_end_offset_ms": {
+          "type": "integer"
+        },
+        "label_start_offset_ms": {
+          "type": "integer"
+        },
+        "label_end_offset_ms": {
+          "type": "integer"
+        },
+        "data_usage": {
+          "enum": [
+            "discovery",
+            "screening",
+            "holdout_confirmation"
+          ]
+        }
+      },
+      "required": [
+        "feature_end_offset_ms",
+        "label_start_offset_ms",
+        "label_end_offset_ms",
+        "data_usage"
+      ]
+    },
+    "dataset_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "interpretation_status": {
+      "const": "observation_only"
+    },
+    "provenance_note": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "example_status",
+    "phenomenon_id",
+    "theme",
+    "observation",
+    "subject",
+    "comparison",
+    "data_window",
+    "dataset_ref",
+    "evidence_refs",
+    "interpretation_status",
+    "provenance_note"
+  ]
+}

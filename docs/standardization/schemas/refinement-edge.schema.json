@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HypothesisRefinementEdgeV0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "example_status": {
+      "enum": [
+        "illustrative_only",
+        "measured"
+      ]
+    },
+    "edge_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tree_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "child_node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "refinement_type": {
+      "enum": [
+        "mechanism_decomposition",
+        "condition_specification",
+        "competing_explanation",
+        "process_elaboration",
+        "operationalization"
+      ]
+    },
+    "refinement_warrant": {
+      "type": "string",
+      "minLength": 1
+    },
+    "new_information": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "parent_claim_preserved": {
+      "type": "boolean"
+    },
+    "unresolved_limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "source_evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schema_version",
+    "example_status",
+    "edge_id",
+    "tree_id",
+    "parent_node_id",
+    "child_node_id",
+    "refinement_type",
+    "refinement_warrant",
+    "new_information",
+    "parent_claim_preserved",
+    "unresolved_limits",
+    "source_evidence_refs"
+  ]
+}
