@@ -1,0 +1,201 @@
+"""Holdout comparison of original, nearest library factor and fused factor.
+
+One *predeclared* paired date window; compare the same Y target, not whichever
+best-looking x/y pair each run selects. Success requires actual production
+persist receipt. A mismatch or missing platform artifact fails closed.
+"""
+from __future__ import annotations
+
+import hashlib
+from datetime import date
+from pathlib import Path
+
+from .admission_adapter import NativePersistBackend
+from .execution_adapter import EvidenceError, _metric_value, _float
+from .fusion_adapter import FusionAdapter
+from .holdout_adapter import NativeCPUHoldout, DEFAULT_HOLDOUT_START, DEFAULT_HOLDOUT_END, DEFAULT_SCREENING_END
+from .workflow import CorpusAutoloop, WorkflowConflict, _json, _stamp
+
+
+def _score(evidence):
+    metrics=(evidence or {}).get("eval_metrics") or {}
+    core=((metrics.get("core_metrics") or {}).get("screening") or {})
+    zero=metrics.get("zero_rate",core.get("zero_ratio"))
+    if zero is None:
+        raise EvidenceError("cannot compare holdout without observed zero_ratio")
+    zero=_float(zero,"zero_ratio")
+    if not 0<=zero<=1:
+        raise EvidenceError("zero_ratio outside 0..1")
+    if zero>=0.5:
+        deep=metrics.get("deep_best") or {}
+        icir=_float(deep.get("daily_icir"),"daily_icir")
+        rank=_float(deep.get("daily_rank_ic"),"daily_rank_ic")
+    else:
+        icir=_metric_value(evidence,"icir")
+        rank=_metric_value(evidence,"spearman")
+    pair=core.get("pair")
+    if not isinstance(pair,str) or " vs " not in pair:
+        raise EvidenceError("holdout pair name required to prevent mismatched Y comparisons")
+    # X factor name differs by construction; compare exact Y label and horizon.
+    target=pair.split(" vs ",1)[1].strip()
+    if not target:
+        raise EvidenceError("empty holdout target")
+    return {"icir":icir,"rank_ic":rank,"target":target,"pair":pair}
+
+
+class FusionConfirmationAdapter:
+    def __init__(self,store:CorpusAutoloop,*,backend=None,platform=None):
+        self.store=store
+        self.backend=backend or NativePersistBackend()
+        self.platform=platform or NativeCPUHoldout()
+        self.trials=FusionAdapter(store,backend=self.backend)
+        with store._connection() as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS corpus_fusion_holdout(
+                    object_id TEXT PRIMARY KEY REFERENCES research_objects(object_id),
+                    date_start TEXT NOT NULL,
+                    date_end TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('reserved','done')),
+                    receipt_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+    def confirm(self,objid,*,expected_revision,nearest_source_file,
+                review, start_date=DEFAULT_HOLDOUT_START,
+                end_date=DEFAULT_HOLDOUT_END,delta_icir_floor=0.05):
+        obj=self.store.get(objid)
+        if obj["revision"]!=expected_revision or obj["status"]!="awaiting_fusion":
+            raise WorkflowConflict("object is not awaiting fusion at given revision")
+        trial=self.trials.get(objid)
+        if trial["status"]!="screening_passed" or not trial["run_id"]:
+            raise WorkflowConflict("actual fusion screening must pass first")
+        if not isinstance(review,dict) or review.get("reviewer") in (None,""):
+            raise EvidenceError("identified confirmation reviewer required")
+        if not isinstance(review.get("evaluation_ref"),str) or len(review["evaluation_ref"])<8:
+            raise EvidenceError("predeclared same-horizon comparison protocol required")
+        if review.get("allow_single_holdout_comparison") is not True:
+            raise EvidenceError("explicit one-shot holdout authorization required")
+        try:
+            start,end=date.fromisoformat(start_date),date.fromisoformat(end_date)
+        except (ValueError,TypeError) as exc:
+            raise WorkflowConflict("invalid holdout dates") from exc
+        if not DEFAULT_SCREENING_END<start<=end:
+            raise WorkflowConflict("fusion holdout overlaps screening period")
+        if type(delta_icir_floor) not in (int,float) or not 0<delta_icir_floor<1:
+            raise WorkflowConflict("invalid predeclared fusion improvement threshold")
+        plan=trial["plan"]
+        original_run=self.backend.run_load(obj["evaluation"]["executor_run_id"])
+        fused_run=self.backend.run_load(trial["run_id"])
+        if (fused_run.get("parent_session")!=trial["token"] or
+            (original_run.get("corpus_autoloop") or {}).get("object_id")!=objid):
+            raise EvidenceError("fusion/original run provenance mismatch")
+        original=(original_run.get("factors") or [None])[0]
+        fused=(fused_run.get("factors") or [None])[0]
+        if not original or not fused:
+            raise EvidenceError("missing original or fused factor")
+        sources={
+            "original":(original["name"],Path(original["factor_file"]).resolve()),
+            "similar":(plan["similar_factor_name"],Path(nearest_source_file).expanduser().resolve()),
+            "fused":(fused["name"],Path(fused["factor_file"]).resolve()),
+        }
+        expected_fused_sha=trial["screening_report"].get("audit",{}).get("factor_file_sha256")
+        if not expected_fused_sha:
+            raise EvidenceError("fusion screening has no frozen source hash")
+        if hashlib.sha256(sources["fused"][1].read_bytes()).hexdigest()!=expected_fused_sha:
+            raise EvidenceError("fused .h changed after screening")
+        for role,(name,path) in sources.items():
+            if path.suffix!=".h" or not path.is_file():
+                raise EvidenceError(f"{role} C++ source not found")
+        # All labels, dates and comparison baselines are locked before the
+        # first CPU submission. Never automatically retry partial POSTs.
+        with self.store._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior=db.execute("SELECT 1 FROM corpus_fusion_holdout WHERE object_id=?",
+                             (objid,)).fetchone()
+            if prior:
+                raise WorkflowConflict("fusion holdout already reserved; investigate before rerun")
+            db.execute("INSERT INTO corpus_fusion_holdout VALUES (?,?,?,'reserved',NULL,?,?)",
+                       (objid,str(start),str(end),_stamp(),_stamp()))
+        outcomes={}
+        for role,(name,source) in sources.items():
+            submission=self.platform.submit(
+                factor_file=str(source),features=name,
+                feeds=",".join(f"SHFE-{c}" for c in obj["factor"]["categories"]),
+                start_date=str(start),end_date=str(end))
+            task=(submission.get("tasks") or {}).get("csv_ic") or {}
+            if not submission.get("ok") or not task.get("run_id") or not task.get("feature"):
+                raise EvidenceError(f"{role} actual holdout submission failed")
+            check_root=self.store.path.parent / "fusion_holdout_checks"
+            check_root.mkdir(parents=True,exist_ok=True)
+            checked=self.platform.check(
+                factor_file=str(source),factor_name=name,submission=submission,
+                check_output=str(check_root/f"{objid}_{role}_{task['run_id']}"))
+            if checked.get("failureLayer")!="check_done":
+                raise EvidenceError(f"{role} holdout check not complete")
+            outcomes[role]={
+                "task_id":task["run_id"],
+                "execution_ref":f"quant-cpu-holdout://{task['run_id']}/{task['feature']}",
+                "score":_score(checked.get("evidence")),
+            }
+        targets={o["score"]["target"] for o in outcomes.values()}
+        if len(targets)!=1:
+            raise EvidenceError(
+                "fused/original/nearest evaluated different Y targets; aligned comparison required")
+        old=max(abs(outcomes["original"]["score"]["icir"]),
+                abs(outcomes["similar"]["score"]["icir"]))
+        fused_score=abs(outcomes["fused"]["score"]["icir"])
+        delta=fused_score-old
+        source_ref=obj["evaluation"]["execution_ref"]
+        evidence_ref=";".join(o["execution_ref"] for o in outcomes.values())
+        if delta<delta_icir_floor or abs(outcomes["fused"]["score"]["rank_ic"])<0.01:
+            decision={
+                "base_factor_xname":obj["factor"]["name"],
+                "method":plan["method"],"success":False,
+                "evidence_ref":evidence_ref,
+                "failure_reason":f"独立确认同一 Y 目标上融合增益 {delta:.4f} 未过预定阈值 "
+                                 f"{delta_icir_floor:.4f} 或 |rank_ic|<0.01",
+            }
+            result=self.store.record_fusion(objid,decision,revision=expected_revision)
+            production=None
+        else:
+            f=fused
+            persisted=f.get("persisted")
+            if not isinstance(persisted,dict) or persisted.get("status")!="evaluated":
+                verdict={"xname":f["name"],"verdict":"pass",
+                         "key_strengths":[f"fusion holdout delta |ICIR|={delta:.4f}"],
+                         "key_weaknesses":["one-shot holdout; GPU redundancy from screening"],
+                         "suggested_iteration":"","iterable":False}
+                persisted=self.backend.persist_factor(
+                    run_id=trial["run_id"],factor_index=0,mode="commit",verdict=verdict)
+                if not isinstance(persisted,dict) or persisted.get("status")!="evaluated":
+                    raise EvidenceError(f"fusion persist failed: {persisted}")
+                saved=self.backend.run_save(trial["run_id"],{
+                    "factors.0.verdict":verdict,
+                    "factors.0.persisted":persisted,
+                })
+                if isinstance(saved,dict) and saved.get("ok") is False:
+                    raise EvidenceError("fusion factor persisted but receipt could not be saved")
+            if persisted.get("xname")!=plan["factor_spec"]["name"]:
+                raise EvidenceError("fused factor persistence identity mismatch")
+            decision={
+                "base_factor_xname":obj["factor"]["name"],
+                "method":plan["method"],"success":True,
+                "evidence_ref":evidence_ref,
+                "source_evaluation_ref":source_ref,
+                "confirmed_dataset_ref":f"cpu-fusion-holdout:{start}:{end}",
+                "fused_factor_xname":persisted["xname"],
+                "persist_ref":f"quant-run://{trial['run_id']}/factor/0/persisted",
+                "data_split":"holdout_confirmation","incremental_value":delta,
+            }
+            result=self.store.record_fusion(objid,decision,revision=expected_revision)
+            production=persisted
+        receipt={"objects":outcomes,"delta_abs_icir":delta,
+                 "holdout_window":{"start":str(start),"end":str(end)},
+                 "evaluation_protocol":review["evaluation_ref"],
+                 "result_status":result["status"],"decision":decision}
+        with self.store._connection() as db:
+            db.execute("UPDATE corpus_fusion_holdout SET status='done',receipt_json=?,updated_at=? "
+                       "WHERE object_id=?",(_json(receipt),_stamp(),objid))
+        return {"research_object":result,"holdout":receipt,"production_receipt":production}
