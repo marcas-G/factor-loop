@@ -14,6 +14,8 @@ from core.tre_evo.model_client import ChatCompletionsClient, ModelError
 from .contracts import ContractError
 from .generator import generate_hypothesis, generate_factor, generate_split, factor_handoff
 from .workflow import CorpusAutoloop, WorkflowConflict
+from .execution_adapter import CorpusExecutionAdapter, EvidenceError
+from .agent_runner import OpenCodeRunner
 
 
 def _read(path):
@@ -64,6 +66,44 @@ def parse(argv=None):
         p.add_argument("--expected-revision", type=int, required=True)
         p.add_argument("--file", required=True, help="actual platform evidence/receipt JSON file")
 
+    p = commands.add_parser(
+        "execution-start",
+        help="REAL SIDE EFFECT: create quant-mcp run and persist one candidate into existing factor ideas DB"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--dataset-ref", required=True, help="actual platform screening dataset identity")
+    p.add_argument("--library-snapshot-ref", required=True, help="factor library baseline snapshot identity")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicit acknowledgement of quant-mcp persist_candidates side effects")
+
+    p = commands.add_parser(
+        "execution-run",
+        help="REAL SIDE EFFECT: launch OpenCode to write C++, submit and check actual platform tasks"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--executor-model", required=True, help="registered OpenCode model")
+    p.add_argument("--executor-binary", default="opencode")
+    p.add_argument("--timeout-sec", type=int, default=1800)
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize real code generation and platform execution")
+
+    p = commands.add_parser(
+        "execution-collect",
+        help="read actual quant-mcp state; derive screening metrics; require source-bound fidelity review"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--fidelity-file", required=True, help="review + actual .h SHA-256 attestation")
+    p.add_argument("--nearest-file", help="verified JSON array of already-existing similar factor names")
+    p.add_argument("--zero-rate", type=float,
+                   help="only if measured zero-rate is absent from platform eval_metrics")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="allow writing result to isolated corpus ledger (not production factor DB)")
+
+    p = commands.add_parser("execution-status", help="show authoritative quant run binding")
+    p.add_argument("--object-id", required=True)
+
     return parser.parse_args(argv)
 
 
@@ -85,6 +125,47 @@ def main(argv=None):
         elif cmd == "fail":
             result=store.record_infeasible(args.object_id,revision=args.expected_revision,
                  stage=args.stage,attempt_ref=args.attempt_ref,reason=args.reason)
+        elif cmd == "execution-start":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=CorpusExecutionAdapter(store).begin(
+                args.object_id, expected_revision=args.expected_revision,
+                dataset_ref=args.dataset_ref, library_snapshot_ref=args.library_snapshot_ref)
+        elif cmd == "execution-run":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            adapter=CorpusExecutionAdapter(store)
+            link=adapter._link(args.object_id)
+            if not link or not link.get("run_id") or link["status"]!="prepared":
+                raise WorkflowConflict("no prepared quant run; call execution-start first")
+            obj=store.get(args.object_id)
+            if obj["status"]!="awaiting_evaluation":
+                raise WorkflowConflict("research object no longer awaiting evaluation")
+            result=OpenCodeRunner(
+                binary=args.executor_binary, model=args.executor_model,
+                timeout=args.timeout_sec
+            ).execute(obj,link["run_id"])
+        elif cmd == "execution-collect":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=CorpusExecutionAdapter(store).collect(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),
+                nearest_factors=_read(args.nearest_file) if args.nearest_file else None,
+                zero_rate=args.zero_rate)
+        elif cmd == "execution-status":
+            adapter=CorpusExecutionAdapter(store)
+            link=adapter._link(args.object_id)
+            result={"binding":link}
+            if link and link.get("run_id"):
+                state=adapter.backend.run_load(link["run_id"])
+                fac=(state.get("factors") or [{}])[0]
+                result["run"]={"run_id":state.get("run_id"),
+                               "factor_status":fac.get("status"),
+                               "failure_layer":fac.get("failure_layer"),
+                               "has_eval_metrics":bool((fac.get("evidence") or {}).get("eval_metrics")),
+                               "has_ridge_svd":bool((fac.get("evidence") or {}).get("ridge_svd_agg")),
+                               "premature_persistence":bool(fac.get("persisted") or fac.get("verdict"))}
         elif cmd == "handoff":
             result = factor_handoff(store.get(args.object_id))
         elif cmd in ("hypothesis", "factor", "split"):
@@ -115,7 +196,7 @@ def main(argv=None):
             result = store.record_admission(args.object_id,_read(args.file),revision=args.expected_revision)
         else:
             raise ValueError(f"unknown command {cmd}")
-    except (WorkflowConflict,ContractError,ModelError,KeyError,ValueError,
+    except (WorkflowConflict,ContractError,ModelError,EvidenceError,KeyError,ValueError,
             ImportError,FileNotFoundError,OSError) as exc:
         print("ERROR:",exc,file=sys.stderr)
         return 2
