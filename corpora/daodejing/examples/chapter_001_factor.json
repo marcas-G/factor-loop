@@ -1,0 +1,25 @@
+{
+  "name": "DaoDeJing_Ch01_ImbalanceDisagreement",
+  "formula": "At t, let TI = (buy_traded_volume - sell_traded_volume)/(buy_traded_volume+sell_traded_volume+eps) over a past-only window; BI = (best_bid_size-best_ask_size)/(best_bid_size+best_ask_size+eps) using the latest pre-t order book; signal = (TI*BI < 0 ? TI*abs(TI-BI) : 0). This is a high-level specification, NOT runnable C++ code.",
+  "intuition": "比较主动成交流与静态盘口失衡的方向冲突；区别于两个指标的简单线性加权，使用冲突门控、交互与强度构成待检验的非线性候选。",
+  "hypothesis": "事件前主动成交失衡和盘口深度失衡出现方向冲突时，其冲突幅度是否能在控制两种原始失衡后，提供未来短时价格响应的增量预测信息？",
+  "tags": [
+    "daodejing",
+    "ch01",
+    "cross_domain",
+    "orderflow",
+    "book_imbalance"
+  ],
+  "params": {
+    "lookback_ms": 10000,
+    "epsilon": 0.000001
+  },
+  "categories": [
+    "AG"
+  ],
+  "required_data": [
+    "trade",
+    "orderbook"
+  ],
+  "feature_uses_future": false
+}
