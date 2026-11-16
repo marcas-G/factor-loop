@@ -18,6 +18,7 @@ from .execution_adapter import CorpusExecutionAdapter, EvidenceError
 from .agent_runner import OpenCodeRunner
 from .holdout_adapter import IndependentHoldoutAdapter
 from .admission_adapter import AdmissionAdapter
+from .fusion_adapter import FusionAdapter, generate_plan
 
 
 def _read(path):
@@ -126,6 +127,37 @@ def parse(argv=None):
     p.add_argument("--enable-platform-writes", action="store_true",
                    help="explicitly authorize production factor library commit")
 
+    p=commands.add_parser("fusion-plan", help="propose ONE mechanism-based fusion candidate")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--response-file")
+    p.add_argument("--capabilities-file")
+    p.add_argument("--base-url")
+    p.add_argument("--model")
+    p.add_argument("--json-mode",action="store_true")
+
+    p=commands.add_parser("fusion-start", help="REAL SIDE EFFECT: create fusion quant-mcp run")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-run", help="REAL SIDE EFFECT: execute fused factor in OpenCode")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--executor-model",required=True)
+    p.add_argument("--executor-binary",default="opencode")
+    p.add_argument("--timeout-sec",type=int,default=1800)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-collect", help="classify actual fusion screening; poor fusion triggers split")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--fidelity-file",required=True)
+    p.add_argument("--zero-rate",type=float)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-status", help="show persisted single fusion trial")
+    p.add_argument("--object-id",required=True)
+
     p = commands.add_parser("execution-status", help="show authoritative quant run binding")
     p.add_argument("--object-id", required=True)
 
@@ -191,6 +223,48 @@ def main(argv=None):
             result=AdmissionAdapter(store).commit(
                 args.object_id,expected_revision=args.expected_revision,
                 review=_read(args.assessment_file))
+        elif cmd == "fusion-plan":
+            obj=store.get(args.object_id)
+            capabilities=_read(args.capabilities_file) if args.capabilities_file else None
+            response=_read(args.response_file) if args.response_file else None
+            client=(ChatCompletionsClient(base_url=args.base_url,model=args.model,
+                    json_mode=args.json_mode) if response is None else None)
+            near=None
+            if client is not None:
+                from core.mcp.tools.factor_db import factor_detail
+                options=obj["evaluation"]["independence"]["nearest_factors"]
+                if not options:
+                    raise WorkflowConflict("no evidenced nearest factor for fusion")
+                near=factor_detail(options[0])
+            plan=generate_plan(obj,client=client,response=response,library_neighbor=near,
+                               capabilities=capabilities)
+            result=FusionAdapter(store).plan(args.object_id,plan,
+                                            expected_revision=args.expected_revision,
+                                            capabilities=capabilities)
+        elif cmd == "fusion-start":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionAdapter(store).begin(args.object_id,
+                                               expected_revision=args.expected_revision)
+        elif cmd == "fusion-run":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            adapter=FusionAdapter(store)
+            trial=adapter.get(args.object_id)
+            if trial["status"]!="prepared" or not trial["run_id"]:
+                raise WorkflowConflict("fusion-start required")
+            result=OpenCodeRunner(binary=args.executor_binary,
+                                  model=args.executor_model,timeout=args.timeout_sec).execute(
+                store.get(args.object_id),trial["run_id"],
+                phase="fusion",candidate=trial["plan"]["factor_spec"])
+        elif cmd == "fusion-collect":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionAdapter(store).collect(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),zero_rate=args.zero_rate)
+        elif cmd == "fusion-status":
+            result=FusionAdapter(store).get(args.object_id)
         elif cmd == "execution-status":
             adapter=CorpusExecutionAdapter(store)
             link=adapter._link(args.object_id)
