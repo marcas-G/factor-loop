@@ -163,7 +163,7 @@ class CorpusAutoloopTest(unittest.TestCase):
                          "persist_ref":"fixture://persisted-library-row"},revision=confirmed["revision"])
         self.assertEqual(saved["status"],"terminal_admitted")
         self.assertEqual(self.w.next_object()["object_id"],"RO-DDJ-002")
-        self.assertEqual(len(self.w.events(self.id)),5)
+        self.assertEqual(len(self.w.events(self.id)),6)
 
     def test_redundant_fusion_success_only_with_holdout_and_persist(self):
         obj=self.step_hypothesis_factor()
@@ -175,7 +175,7 @@ class CorpusAutoloopTest(unittest.TestCase):
             self.w.record_fusion(self.id,poor,revision=r["revision"])
         result=self.w.record_fusion(self.id,good_fusion(),revision=r["revision"])
         self.assertEqual(result["status"],"terminal_fused")
-        self.assertEqual(len(self.w.events(self.id)),4)
+        self.assertEqual(len(self.w.events(self.id)),5)
 
     def test_redundant_failure_splits_into_two_and_depth_is_bounded(self):
         obj=self.step_hypothesis_factor()
