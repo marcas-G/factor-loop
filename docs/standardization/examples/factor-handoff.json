@@ -1,0 +1,22 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "source_node_id": "H-DEMO-CHILD",
+  "experiment_id": "EXP-DEMO-001",
+  "derivation_reason": "仅作为可执行字段映射的教学示例，不是合规或已编译的真实 FeedIndicator 因子。",
+  "factor_spec": {
+    "name": "IllustrativePressureRecovery",
+    "formula": "pre_t_imbalance * pre_t_replenishment_proxy",
+    "intuition": "探索事件前盘口压力与补充活动的条件性关联；公式仅示例。",
+    "hypothesis": "事件前补单活动可能调节失衡与未来响应的条件关系",
+    "tags": [
+      "demo",
+      "tre-evo"
+    ],
+    "params": {},
+    "categories": [
+      "AG"
+    ]
+  },
+  "status": "draft"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "tree_id": "TREE-DEMO-001",
+  "node_id": "H-DEMO-ROOT",
+  "parent_id": null,
+  "node_type": "research_theme",
+  "statement": "交易压力与价格变化之间的关系可能依赖市场承接过程。",
+  "mechanism_roles": [
+    "交易压力",
+    "市场承接",
+    "价格响应"
+  ],
+  "assumptions": [],
+  "unknowns": [
+    "承接过程具体由哪些可观察活动构成"
+  ],
+  "next_refinement_questions": [
+    "什么条件会使相同压力产生不同响应？"
+  ],
+  "source_phenomena": [],
+  "node_status": "open",
+  "evidence_status": "untested"
+}

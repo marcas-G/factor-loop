@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "edge_id": "E-DEMO-001",
+  "tree_id": "TREE-DEMO-001",
+  "parent_node_id": "H-DEMO-ROOT",
+  "child_node_id": "H-DEMO-CHILD",
+  "refinement_type": "condition_specification",
+  "refinement_warrant": "把父节点尚不明确的承接机制限定为事件前可观测的补单活动，并明确成交压力相似的对照条件。",
+  "new_information": [
+    "加入事件前补单代理这一候选解释条件",
+    "规定初始失衡与成交强度应尽量匹配",
+    "把未来价格路径作为待解释响应"
+  ],
+  "parent_claim_preserved": true,
+  "unresolved_limits": [
+    "仅是观察性设计，不能推出补单是因果机制"
+  ],
+  "source_evidence_refs": []
+}

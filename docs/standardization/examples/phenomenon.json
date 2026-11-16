@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "phenomenon_id": "P-DEMO-001",
+  "theme": "量价结合",
+  "observation": "教学假设：在事件前失衡与成交强度相似时，事件后的价格响应轨迹可能存在差异；尚未测量。",
+  "subject": {
+    "market": "SHFE-AG (illustrative only)",
+    "event_definition": "在 t 时刻截断订单簿和成交特征"
+  },
+  "comparison": {
+    "matched_on": [
+      "pre_t_order_imbalance",
+      "pre_t_traded_volume"
+    ],
+    "contrasted_on": [
+      "pre_t_replenishment_proxy"
+    ],
+    "response_dimension": "future_midprice_response_1_to_10s"
+  },
+  "data_window": {
+    "feature_end_offset_ms": 0,
+    "label_start_offset_ms": 1,
+    "label_end_offset_ms": 10000,
+    "data_usage": "discovery"
+  },
+  "dataset_ref": "synthetic-example/no-market-data",
+  "evidence_refs": [],
+  "interpretation_status": "observation_only",
+  "provenance_note": "仅为说明假设细化接口，不表示已经观察到该现象"
+}
