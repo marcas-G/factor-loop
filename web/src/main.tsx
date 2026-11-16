@@ -5,15 +5,15 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import './styles.css'
 
-const queryClient = new QueryClient({
+const client = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 10_000 },
+    queries: { retry: 1, staleTime: 8_000, refetchInterval: 20_000, refetchOnWindowFocus: false },
   },
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={client}>
       <BrowserRouter>
         <App />
       </BrowserRouter>
