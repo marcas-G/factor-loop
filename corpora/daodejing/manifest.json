@@ -1,0 +1,30 @@
+{
+  "corpus_id": "daodejing-wangbi-81-v1",
+  "work": "道德经",
+  "edition": "王弼本（现代标点，来源仓库分章）",
+  "chapter_count": 81,
+  "unit_type": "chapter",
+  "text_is_public_domain": true,
+  "source_wikisource_url": "https://zh.wikisource.org/wiki/道德經_(王弼本)",
+  "extraction_repository": "https://github.com/joechiboo/laozi-reader",
+  "extraction_commit": "31a3bdeba2c610ee878b3266ad642c9fe4877e91",
+  "source_path_pattern": "data/chapters/{NNN}.json",
+  "selected_field": "text",
+  "exclusions": [
+    "plain",
+    "gist",
+    "notes",
+    "segments",
+    "keywords",
+    "quiz"
+  ],
+  "part_files": [
+    "parts/001-012.json",
+    "parts/013-024.json",
+    "parts/025-036.json",
+    "parts/037-048.json",
+    "parts/049-060.json",
+    "parts/061-072.json",
+    "parts/073-081.json"
+  ]
+}
