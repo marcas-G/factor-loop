@@ -78,8 +78,9 @@ describe('Research console', () => {
     await screen.findByText('章节研究目录')
     fireEvent.change(screen.getByRole('textbox', { name: '搜索章节、原文或研究假设' }),
       { target: { value: '第38章原文' } })
-    expect(screen.getByText('第38章')).toBeInTheDocument()
-    expect(screen.queryByText('第1章')).not.toBeInTheDocument()
+    const chapterList = within(document.querySelector('.chapter-table') as HTMLElement)
+    expect(chapterList.getByText('第38章')).toBeInTheDocument()
+    expect(chapterList.queryByText('第1章')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '清空搜索' }))
     expect(chapterList.getByText('第1章')).toBeInTheDocument()
     await waitFor(() => expect(chapterList.getAllByText('道可道，非常道。此兩者，同出而異名。').length).toBeGreaterThan(0))
