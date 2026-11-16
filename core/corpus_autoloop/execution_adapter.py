@@ -175,9 +175,10 @@ def evaluate_state(run_id, state, *, dataset_ref, library_snapshot_ref, fidelity
 
 
 class CorpusExecutionAdapter:
-    def __init__(self, store: CorpusAutoloop, backend=None):
+    def __init__(self, store: CorpusAutoloop, backend=None, library_lookup=None):
         self.store = store
         self.backend = backend if backend is not None else NativeQuantBackend()
+        self.library_lookup = library_lookup
         with store._connection() as db:
             db.execute("""
             CREATE TABLE IF NOT EXISTS corpus_execution_links(
@@ -289,6 +290,11 @@ class CorpusExecutionAdapter:
         link = self._link(objid)
         if not link or not link["run_id"]:
             raise WorkflowConflict("start actual executor first (begin)")
+        if (obj.get("evaluation") and
+            obj["evaluation"].get("executor_run_id")==link["run_id"]):
+            raise WorkflowConflict(
+                "this quant run already supplied an evaluation; same evidence cannot "
+                "be repeatedly imported as a new test")
         state = self.backend.run_load(link["run_id"])
         if state.get("parent_session") != link["token"]:
             raise EvidenceError("run ownership mismatch")
@@ -301,6 +307,26 @@ class CorpusExecutionAdapter:
             sparse_ratio=zero_rate)
         if report["factor_xname"] != obj["factor"]["name"]:
             raise EvidenceError("renamed factor requires explicit alias audit before ingestion")
+        if report["independence"]["decision"] == "redundant":
+            # A nearest factor from a JSON file is only a proposal; its
+            # existence and stored source must be verified in the real library.
+            if self.library_lookup is None:
+                from core.mcp.tools.factor_db import factor_detail
+                lookup = factor_detail
+            else:
+                lookup = self.library_lookup
+            for name in report["independence"]["nearest_factors"]:
+                if name == report["factor_xname"]:
+                    raise EvidenceError("new candidate cannot be its own nearest existing factor")
+                try:
+                    item = lookup(name)
+                except Exception as exc:
+                    raise EvidenceError(
+                        f"nearest factor {name} not present in current library snapshot") from exc
+                row = (item or {}).get("factor") if isinstance(item,dict) else None
+                if (not isinstance(row,dict) or row.get("xname")!=name
+                    or not row.get("file_path")):
+                    raise EvidenceError(f"nearest factor {name} lacks verified DB identity and source")
         result = self.store.record_evaluation(objid, report, revision=expected_revision)
         with self.store._connection() as db:
             db.execute("UPDATE corpus_execution_links SET status='observed',updated_at=? "
