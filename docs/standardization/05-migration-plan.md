@@ -23,6 +23,8 @@
 
 ## 阶段 P2 — TreEvo 最小研究树（先不回测）
 
+**实施状态（2026-11-16）**：P2-a 独立 SQLite 树与现象候选适配已实现；P2-b 模型假设细化、第二轮批评、pending 审核队列与人工接受/拒绝已实现。均未接入现有自动因子循环，也未开展正式 LLM/市场实证对照。下列原始目标中，独立标注基准、语义质量验证、自动研究调度仍待完成。
+
 1. 将一个宽泛 `ResearchTheme` 与 `Phenomenon` 输入构造成 `HypothesisNode`。
 2. 使用五种 `refinement_type` 逐步细化，必须提交 `refinement_warrant` + `new_information`；保持无限深度**可选**，不强迫每层固定数目。
 3. 对两条 competing hypotheses 生成能区分的预期观测；不可观测时设置 `blocked`，保留未解决节点。

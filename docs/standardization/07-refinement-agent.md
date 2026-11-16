@@ -32,14 +32,14 @@ python3 -m core.tre_evo.cli propose-refinements \
   --response-file "$EX/refinement-generation.json" \
   --critique-file "$EX/refinement-critique.json"
 python3 -m core.tre_evo.cli list-refinement-proposals --tree-id TREE-DEMO-001
-python3 -m core.tre_evo.cli show-refinement-proposal --proposal-id RP-<实际输出ID>
+python3 -m core.tre_evo.cli show-refinement-proposal --proposal-id "RP-REPLACE-WITH-ACTUAL-ID"
 ~~~
 
 提案自动入 **pending** 队列；到这里树尚未发生变化。阅读完整提案和批评，确认确实形成有依据的细化以后再明确运行：
 
 ~~~bash
 python3 -m core.tre_evo.cli accept-refinement \
-  --proposal-id RP-<实际输出ID> --reviewer "your-review-id" \
+  --proposal-id "RP-REPLACE-WITH-ACTUAL-ID" --reviewer "your-review-id" \
   --reason "新增了明确机制条件及与竞争解释不同的观测预测"
 ~~~
 
