@@ -117,6 +117,8 @@ def evaluate_state(run_id, state, *, dataset_ref, library_snapshot_ref, fidelity
     sparse = sparse_ratio
     if sparse is None:
         sparse = metrics.get("zero_rate")
+    if sparse is None:
+        sparse = ((metrics.get("core_metrics") or {}).get("screening") or {}).get("zero_ratio")
     if sparse is not None:
         sparse = _float(sparse, "zero_rate")
         if not 0 <= sparse <= 1:
@@ -167,6 +169,7 @@ def evaluate_state(run_id, state, *, dataset_ref, library_snapshot_ref, fidelity
                          "evidence_ref": f"quant-run://{run_id}/factor/0/ridge_svd_agg"},
         "audit": {"rank_ic": rank_ic, "zero_rate": sparse, "metric_kind": metric_kind,
                   "factor_file_sha256": sha, "fidelity_reviewer": fidelity["reviewer"],
+                  "screening_pair": ((metrics.get("core_metrics") or {}).get("screening") or {}).get("pair"),
                   "note": "screening only; full assess, costs and independent holdout remain required"},
     }
 

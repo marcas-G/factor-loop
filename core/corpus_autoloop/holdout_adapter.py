@@ -161,7 +161,9 @@ class IndependentHoldoutAdapter:
         metrics=ev["eval_metrics"]
         zero=metrics.get("zero_rate")
         if zero is None:
-            raise EvidenceError("holdout requires reported zero_rate to select pooled/daily metric")
+            zero=((metrics.get("core_metrics") or {}).get("screening") or {}).get("zero_ratio")
+        if zero is None:
+            raise EvidenceError("holdout requires recorded zero_ratio or zero_rate")
         zero=_float(zero,"holdout zero_rate")
         if zero>=0.5:
             deep=metrics.get("deep_best") or {}
@@ -192,7 +194,9 @@ class IndependentHoldoutAdapter:
             "independence":screening["independence"],
             "audit":{"rank_ic":rank,"zero_rate":zero,"source_sha256":digest,
                      "gpu_independence_reused_from_screening":True,
-                     "holdout_cpu_only":True,"date_range":{"start":start,"end":end}},
+                     "holdout_cpu_only":True,
+                     "holdout_pair":((metrics.get("core_metrics") or {}).get("screening") or {}).get("pair"),
+                     "date_range":{"start":start,"end":end}},
         }
         result=self.store.record_evaluation(objid,report,revision=expected_revision)
         with self.store._connection() as db:
