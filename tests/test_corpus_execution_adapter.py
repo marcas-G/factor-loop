@@ -16,6 +16,7 @@ from core.corpus_autoloop.holdout_adapter import IndependentHoldoutAdapter
 from core.corpus_autoloop.admission_adapter import AdmissionAdapter
 from core.corpus_autoloop.fusion_adapter import FusionAdapter, generate_plan
 from core.corpus_autoloop.fusion_confirmation import FusionConfirmationAdapter
+from core.corpus_autoloop.fixed_target import fixed_target_score
 from core.corpus_autoloop.workflow import CorpusAutoloop, WorkflowConflict
 from core.corpus_autoloop import contracts
 
@@ -298,6 +299,53 @@ class AdapterIntegrationTest(unittest.TestCase):
         with self.assertRaises(WorkflowConflict):
             AdmissionAdapter(self.store,backend=self.backend).commit(
                 self.id,expected_revision=5,review={"verdict":"pass"})
+
+    def test_holdout_direction_reversal_does_not_admit(self):
+        _,review=self.complete()
+        self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
+        class ReversedCPU:
+            def submit(self,**kwargs):
+                return {"ok":True,"tasks":{"csv_ic":{
+                    "run_id":"reverse-task-77","feature":"reverse_test_77"}}}
+            def check(self,**kwargs):
+                _write_screening_csv(kwargs["check_output"],kwargs["factor_file"],[
+                    ("X.signal","Y.target_5s",-0.67,-0.025,0.1)])
+                return {"failureLayer":"check_done","checkOutput":kwargs["check_output"],
+                        "evidence":{"eval_metrics":{"core_metrics":{"screening":{
+                            "icir":-0.67,"spearman":-0.025,"zero_ratio":0.1,
+                            "pair":"X.signal vs Y.target_5s"}}}}}
+        result=IndependentHoldoutAdapter(
+            self.store,backend=self.backend,platform=ReversedCPU()).confirm(
+            self.id,expected_revision=4,fidelity_review=review)
+        self.assertFalse(result["report"]["predictive"]["passed"])
+        self.assertFalse(result["report"]["audit"]["same_direction"])
+        self.assertEqual(result["research_object"]["status"],"terminal_exhausted")
+        self.assertEqual(self.store.status()["states"]["terminal_exhausted"],1)
+
+    def test_frozen_raw_holdout_pair_cannot_be_replaced_by_best_pair(self):
+        output=self.path/"fixed-target"
+        _write_screening_csv(output,self.factor_file,[
+            ("X.signal","Y.other_h",5.8,0.6,0.1)])
+        good={"failureLayer":"check_done","checkOutput":str(output),
+              "evidence":{"eval_metrics":{"core_metrics":{"screening":{
+                 "pair":"X.signal vs Y.target_5s","icir":9.9}}}}}
+        with self.assertRaises(EvidenceError):
+            fixed_target_score(good,self.factor_file,
+                               target="Y.target_5s",
+                               exact_pair="X.signal vs Y.target_5s")
+        _write_screening_csv(output,self.factor_file,[
+            ("X.signal","Y.target_5s",0.4,0.02,0.1),
+            ("X.signal","Y.target_5s",0.6,0.04,0.1)])
+        with self.assertRaises(EvidenceError):
+            fixed_target_score(good,self.factor_file,
+                               target="Y.target_5s",
+                               exact_pair="X.signal vs Y.target_5s")
+        _write_screening_csv(output,self.factor_file,[
+            ("X.signal","Y.target_5s",0.48,0.02,0.75)])
+        with self.assertRaises(EvidenceError):
+            fixed_target_score(good,self.factor_file,
+                               target="Y.target_5s",
+                               exact_pair="X.signal vs Y.target_5s")
 
     def test_cpu_holdout_prevents_reuse_of_screening_dates(self):
         _,review=self.complete()
