@@ -46,13 +46,17 @@ def report(name="CorpusTestFactor",novelty="independent",split="holdout_confirma
            predictive=True,fidelity=True):
     return {
         "factor_xname":name,"executor_run_id":"synthetic-run-1",
-        "execution_ref":"fixture://not-a-real-platform-run",
+        "execution_ref":("fixture://holdout-execution" if split=="holdout_confirmation"
+                         else "fixture://screening-execution"),
         "library_snapshot_ref":"fixture://factor-library-v1",
+        "dataset_ref":("fixture://holdout-period-2025" if split=="holdout_confirmation"
+                       else "fixture://screening-period-2024"),
         "data_split":split,
         "fidelity":{"passed":fidelity,"evidence_ref":"fixture://fidelity"},
         "predictive":{"passed":predictive,"metric_name":"ICIR",
                       "metric_value":0.2 if predictive else 0.01,
-                      "evidence_ref":"fixture://screening"},
+                      "evidence_ref":("fixture://holdout-score" if split=="holdout_confirmation"
+                                      else "fixture://screening-score")},
         "independence":{"decision":novelty,"r2_x":0.82 if novelty=="redundant" else 0.1,
                         "res_ic":0.001 if novelty=="redundant" else 0.06,
                         "nearest_factors":["ExistingFactor"] if novelty=="redundant" else [],
@@ -70,7 +74,9 @@ def good_fusion(name="CorpusTestFactor"):
     return {"base_factor_xname":name,"success":True,
             "method":"conditional_weighting","evidence_ref":"fixture://fusion-holdout",
             "data_split":"holdout_confirmation","incremental_value":0.02,
-            "fused_factor_xname":"FusedCorpusFactor","persist_ref":"fixture://persisted"}
+            "fused_factor_xname":"FusedCorpusFactor","persist_ref":"fixture://persisted",
+            "source_evaluation_ref":"fixture://holdout-execution",
+            "confirmed_dataset_ref":"fixture://fusion-holdout-new-period"}
 
 
 def split_proposal():
@@ -94,7 +100,7 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.db=Path(self.tmp.name)/"research.sqlite3"
-        self.w=CorpusAutoloop(self.db)
+        self.w=CorpusAutoloop(self.db, allow_fixture_receipts=True)
         self.w.seed()
         self.id="RO-DDJ-001"
 
@@ -123,7 +129,7 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.assertEqual(self.w.seed()["new_research_objects"],0)
         self.assertEqual(self.w.get(self.id)["depth"],0)
         self.assertEqual(self.w.next_object()["object_id"],self.id)
-        other=CorpusAutoloop(self.db)
+        other=CorpusAutoloop(self.db, allow_fixture_receipts=True)
         self.assertEqual(other.status()["total_objects"],81)
         self.assertIn("道可道",other.get(self.id)["source"]["text"])
 
@@ -159,7 +165,7 @@ class CorpusAutoloopTest(unittest.TestCase):
             self.w.record_admission(self.id,{"factor_xname":"CorpusTestFactor",
                          "confirmation_ref":"fixture://independent-test"},revision=confirmed["revision"])
         saved=self.w.record_admission(self.id,{"factor_xname":"CorpusTestFactor",
-                         "confirmation_ref":"fixture://independent-test",
+                         "confirmation_ref":"fixture://holdout-execution",
                          "persist_ref":"fixture://persisted-library-row"},revision=confirmed["revision"])
         self.assertEqual(saved["status"],"terminal_admitted")
         self.assertEqual(self.w.next_object()["object_id"],"RO-DDJ-002")
@@ -225,6 +231,33 @@ class CorpusAutoloopTest(unittest.TestCase):
         with self.assertRaises(WorkflowConflict):
             self.w.record_hypothesis(self.id,research_hypothesis(),revision=1)
         self.assertEqual(self.w.get(self.id)["status"],"awaiting_factor")
+
+    def test_failed_nonpredictive_candidate_does_not_split_without_fusion(self):
+        obj=self.step_hypothesis_factor()
+        result=self.w.record_evaluation(self.id, report(predictive=False, split="screening"),
+                                        revision=obj["revision"])
+        self.assertEqual(result["status"],"terminal_exhausted")
+        self.assertEqual(self.w.next_object()["object_id"],"RO-DDJ-002")
+
+    def test_holdout_must_differ_from_screening_evidence(self):
+        obj=self.step_hypothesis_factor()
+        prior=self.w.record_evaluation(self.id,report(split="screening"),revision=obj["revision"])
+        repeated=report(split="holdout_confirmation")
+        repeated["dataset_ref"]="fixture://screening-period-2024"
+        with self.assertRaises(WorkflowConflict):
+            self.w.record_evaluation(self.id,repeated,revision=prior["revision"])
+        self.assertEqual(self.w.get(self.id)["status"],"awaiting_confirmation")
+        with self.assertRaises(WorkflowConflict):
+            self.w.record_evaluation(self.id,report(split="holdout_confirmation"),
+                                     revision=prior["revision"]-1)
+
+    def test_fixture_receipts_rejected_in_strict_default(self):
+        obj=self.step_hypothesis_factor()
+        strict=CorpusAutoloop(self.db)
+        with self.assertRaises(WorkflowConflict):
+            strict.record_evaluation(self.id,report(split="screening"),
+                                     revision=obj["revision"])
+        self.assertEqual(strict.get(self.id)["status"],"awaiting_evaluation")
 
     def test_infeasible_chapter_is_audited_not_silently_skipped(self):
         with self.assertRaises(ValueError):

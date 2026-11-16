@@ -58,7 +58,7 @@ def factor_spec(doc: dict, expected_hypothesis: str) -> dict:
 
 def evaluation(report: dict, expected_factor: str) -> dict:
     require(isinstance(report, dict), "evaluation must be object")
-    for key in ("executor_run_id", "execution_ref", "factor_xname", "library_snapshot_ref"):
+    for key in ("executor_run_id", "execution_ref", "factor_xname", "library_snapshot_ref", "dataset_ref"):
         require(nonempty(report.get(key)), f"evaluation.{key} required")
     require(report["factor_xname"] == expected_factor, "factor name differs from compiled candidate")
     require(report.get("data_split") in ("screening", "holdout_confirmation"), "evaluation data_split required")
