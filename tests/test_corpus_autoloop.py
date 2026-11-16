@@ -111,7 +111,9 @@ class CorpusAutoloopTest(unittest.TestCase):
             h=research_hypothesis()
             self.w.record_hypothesis(objid,h,revision=obj["revision"])
             obj=self.w.get(objid)
-        fac=factor_spec(obj["hypothesis"])
+        name=("CorpusTestFactor" if objid==self.id
+              else "CorpusTestFactor_"+objid[len(self.id)+1:].replace("-","_"))
+        fac=factor_spec(obj["hypothesis"],name=name)
         self.w.record_factor(objid,fac,revision=obj["revision"])
         return self.w.get(objid)
 
@@ -197,8 +199,8 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.assertEqual(self.w.next_object()["object_id"],children[0])
 
         obj=self.step_hypothesis_factor(children[0])
-        r=self.w.record_evaluation(children[0],report(novelty="redundant"),revision=obj["revision"])
-        f=self.w.record_fusion(children[0],bad_fusion(),revision=r["revision"])
+        r=self.w.record_evaluation(children[0],report(name=obj["factor"]["name"],novelty="redundant"),revision=obj["revision"])
+        f=self.w.record_fusion(children[0],bad_fusion(name=obj["factor"]["name"]),revision=r["revision"])
         self.assertEqual(f["status"],"awaiting_split")
         sub=split_proposal()
         sub["children"][0]["hypothesis"]="只检验事件前1秒快速补单状态"
@@ -207,7 +209,7 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.assertEqual(self.w.get(children[0]+"-1")["depth"],2)
         leaf=children[0]+"-1"
         obj=self.step_hypothesis_factor(leaf)
-        result=self.w.record_evaluation(leaf,report(predictive=False),revision=obj["revision"])
+        result=self.w.record_evaluation(leaf,report(name=obj["factor"]["name"],predictive=False),revision=obj["revision"])
         self.assertEqual(result["status"],"terminal_exhausted")
         with self.assertRaises(ValueError):
             generate_split(self.w.get(leaf),response=sub)
@@ -225,6 +227,18 @@ class CorpusAutoloopTest(unittest.TestCase):
         invalid["independence"]["nearest_factors"]=[]
         with self.assertRaises(contracts.ContractError):
             self.w.record_evaluation(self.id,invalid,revision=obj["revision"])
+
+    def test_factor_class_name_cannot_be_reused_by_another_object(self):
+        self.step_hypothesis_factor()
+        second=self.w.get("RO-DDJ-002")
+        hypothesis=research_hypothesis()
+        hypothesis["source_quote"]=second["source"]["text"][:3]
+        self.w.record_hypothesis("RO-DDJ-002",hypothesis,revision=1)
+        other=self.w.get("RO-DDJ-002")
+        with self.assertRaises(WorkflowConflict):
+            self.w.record_factor("RO-DDJ-002",factor_spec(hypothesis,name="CorpusTestFactor"),
+                                 revision=other["revision"])
+        self.assertEqual(self.w.get("RO-DDJ-002")["status"],"awaiting_factor")
 
     def test_conflicting_revisions_and_no_silent_mutation(self):
         self.w.record_hypothesis(self.id,research_hypothesis(),revision=1)
