@@ -391,10 +391,17 @@ class AdapterIntegrationTest(unittest.TestCase):
                     }}}
                 }}
         platform=ThreeWayCPU()
-        result=FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform).confirm(
+        result=FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform,
+            library_lookup=lambda name: {"factor":{"xname":name,"file_path":str(similar)}}).confirm(
             self.id,expected_revision=4,nearest_source_file=str(similar),
             review={"reviewer":"independent-researcher",
                     "evaluation_ref":"protocol://same-target-Y.target_5s",
+                    "statistical_protocol_ref":"protocol://multiple-testing-control",
+                    "target":"Y.target_5s",
+                    "tradability_passed":True,"stability_passed":True,
+                    "multiplicity_controlled":True,
+                    "tradability_ref":"review://costs-reviewed",
+                    "stability_ref":"review://daily-stability",
                     "allow_single_holdout_comparison":True})
         self.assertEqual(len(platform.submits),3)
         self.assertEqual(result["research_object"]["status"],"terminal_fused")
@@ -402,7 +409,8 @@ class AdapterIntegrationTest(unittest.TestCase):
         self.assertEqual(self.backend.persist_calls,1)
         self.assertEqual(self.store.next_object()["object_id"],"RO-DDJ-002")
         with self.assertRaises(WorkflowConflict):
-            FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform).confirm(
+            FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform,
+                library_lookup=lambda name: {"factor":{"xname":name,"file_path":str(similar)}}).confirm(
                 self.id,expected_revision=4,nearest_source_file=str(similar),
                 review={"reviewer":"independent-researcher",
                         "evaluation_ref":"protocol://same-target-Y.target_5s",
