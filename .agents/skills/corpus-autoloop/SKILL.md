@@ -5,7 +5,7 @@ description: 按《道德经》章节驱动的跨领域因子研究循环。逐�
 
 # Corpus-Guided Factor Autoloop
 
-入口：python3 -m core.corpus_autoloop.cli。完整操作详见 docs/corpus-autoloop.md。
+入口：python3 -m core.corpus_autoloop.cli。基础队列详见 docs/corpus-autoloop.md；**真实执行与融合/确认顺序**详见 docs/corpus-execution-adapter.md。
 
 ## 不变量
 
@@ -18,15 +18,21 @@ description: 按《道德经》章节驱动的跨领域因子研究循环。逐�
 - **完整的事件历史和数据隔离。** 每次实验必须记录 executor run_id、结果引用、已使用数据、图谱/因子库版本。模型对自述的“实验成功”没有事实认定权。
 - **只能由执行器真实调用工具**：现有 quant-mcp 的 run_init、persist_candidates、写因子、submit/check/assess。不可通过虚构报告将研究对象标记为 terminal_admitted 或 terminal_fused。
 
+## 前台调度入口
+
+\`python -m core.corpus_autoloop.cli auto-run --max-steps 12\` 可逐章推进；真实执行需配置模型、审核目录、可信数据字段和 \`--enable-platform-writes\`。它会在缺失审核文件、真实平台任务未结束、保留期无锁定目标、因子库内近邻无法核实时停住，**不应被描述成已在真实行情平台完成自动发现**。
+
+在模型生成、融合、实验和入库之间，人工审查不能由 Agent 自己伪装成“已验证”。确认期严格读取原始 \`screening.csv\` 内预先锁定的 X/Y 配对，拒绝根据独立数据重新挑最大值；稀疏目标缺少对应日级指标时暂不允许确认。
+
 ## 操作协议
 
 1. 在隔离 SQLite 路径执行 CLI seed（一次即可），再执行 next 返回当前需要处理的 ResearchObject。
 2. 若状态为 pending/awaiting_hypothesis，读取原章原文。执行 hypothesis 命令（允许 --response-file 离线测试；真实运行需配置模型端点），生成唯一章节锚定假设。
 3. 若状态为 awaiting_factor，确保可观测数据字段确实可从平台取得，执行 factor --capabilities-file /path/to/verified-fields.json；转换为 handoff。
-4. 将 handoff 的 idea_text、factors[] 交给已连接的 quant-mcp（先 run_init 后 persist_candidates），再调用既有 write-factor/run-factor-agent/assess，读取原始结果而非只引用模型的总结。
-5. 根据忠实度、预测有效性和独立性评估记录 actual Evaluation，CLI evaluation --file /actual/eval.json --expected-revision N。遇到 awaiting_confirmation 必须用未使用的保留数据重新确认。
-6. 状态 awaiting_admission：真正完成现有因子库入库后，CLI admission 导入真实 persist_ref 和 confirmation_ref。
-7. 状态 awaiting_fusion：从 independence.nearest_factors 选最相关现有因子，提出一个有明确机制的融合候选，由量化执行器评估；成功需报告正的独立增量、holdout_confirmation、入库回执；失败需 failure_reason。然后 CLI fusion 导入实际报告。
+4. 使用 CLI `execution-start` 创建真实 quant-mcp run、`execution-run` 运行已有 write-factor/run-factor-agent，再用 `execution-collect` 读取**原始** state/eval_metrics/ridge_svd；不要用 Agent 文本报告替代实际平台证据。**不要在独立确认前调用旧 `assess` Skill 中的 persist_factor(commit)；该步骤会提早改写生产因子库。**
+5. `execution-collect` 必须有当前 .h 的哈希绑定忠实度审核。进入 `awaiting_confirmation` 时用 `execution-confirm` 提交**非重叠 CPU 日期区间**的真实任务；通过并获得完整稳定性/成本审核后 `execution-admit` 才能调用原 persist_factor(commit) 入库。
+6. 状态 awaiting_admission：仅使用已确认的 execution-ref 和原始生产工具回执，禁止人工拼接假的 persist_ref。
+7. 状态 awaiting_fusion：执行 `fusion-plan → fusion-start → fusion-run → fusion-collect`，只允许一次机制融合；筛选合格还需 `fusion-confirm` 对原候选、近邻及融合因子在同一独立 CPU 期间、相同 Y 目标做对照，并要求真实库内近邻源码、稳定性/交易性与统计审核。通过才入库；失败才产生拆分。
 8. 状态 awaiting_split：把当前原文/假设/因子评价/融合失败完整作为拆解依据，执行 CLI split；产生两个子对象。新子对象已有假设，直接从 await_factor 开始。达到 depth=2 禁止再拆。
 9. 当前研究对象进入 terminal_ 时，重新执行 next，推进该章节剩余子对象或下一个章节。任何停在等待外部证据的状态都不得通过杜撰结果推进。
 

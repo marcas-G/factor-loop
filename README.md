@@ -1,5 +1,7 @@
 # factor-autoloop
 
+> **真实执行、逐章调度与独立验证适配器**：[平台运行、CPU 保留期和融合入库手册](docs/corpus-execution-adapter.md)。所有写生产库/提交平台的命令都需要明确授权，CI 不包含真实行情。
+
 > **新增：语料驱动研究入口**：[《道德经》81 章 Corpus Autoloop 说明](docs/corpus-autoloop.md)（跨域假设 → 因子交接 → 实测独立性 → 融合或最多两层拆分）。这是独立可运行调度原型，未自动完成量化平台端到端执行。
 
 > **新增独立研究入口（语料驱动）**：以《道德经》81 章为章节级语料，执行“章节→假设→因子实验→独立性→融合→失败拆分（最多两层）”。见 [Corpus-Guided Autoloop](docs/corpus-autoloop.md) 与 [项目级 Skill](.agents/skills/corpus-autoloop/SKILL.md)。旧研究循环保持不变；执行器接入仍需真实平台证据。

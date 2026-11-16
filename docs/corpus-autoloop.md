@@ -147,6 +147,17 @@ python3 -m core.corpus_autoloop.cli --db "$DB" handoff \
 - 子对象无需再从书中重新生成源假设，而是直接进入 `awaiting_factor`；最多两次向下拆分（depth=0→1→2）。父节点保留完整的来源和决策链，不会反复加入队列。
 - 成功入库、融合入库后不再拆分；若失败且达到 depth=2，分支终止。
 
+## 真实执行及完整产物对接（新增）
+
+原 v0.1 只有隔离队列、研究对象和可交接的 FactorSpec；现在另外提供可运行的 [Execution Adapter 与 auto-run 操作手册](corpus-execution-adapter.md)。前台调度器遇到缺少真实证据或审核产物时会停住，不会后台持续执行或自动认定实验成功：
+
+- `execution-start / execution-run / execution-collect`：调用真实 quant-mcp 创建 run、执行原 Agent 的 write/submit/check/restest、把原 state 实测指标转成筛选报告。
+- `execution-confirm / execution-admit`：CPU 2025H2 等独立日期确认后，再真正用原 `persist_factor(commit)` 入库。
+- `fusion-plan / fusion-start / fusion-run / fusion-collect / fusion-confirm`：一次实测机制融合、近邻三路同目标 holdout 比较、失败触发双层拆分、成功真实持久化。
+- 完整保留筛选/确认 CPU 时段、GPU 2025H1 固定日期、代码 SHA、审核人及运行 ID。真实平台未连通时不生成伪造终态。
+
+**重要**：原 `/assess` Skill 会在同轮提前 `persist_factor(commit)`；新 Corpus Loop 不允许这样做。必须先获得单因子筛选证据、独立保留期及成本/稳定性审查，再显式入库。
+
 ## 限制与下一阶段
 
 - **证据审计增强（v0.1）**：

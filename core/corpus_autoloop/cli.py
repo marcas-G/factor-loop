@@ -14,6 +14,13 @@ from core.tre_evo.model_client import ChatCompletionsClient, ModelError
 from .contracts import ContractError
 from .generator import generate_hypothesis, generate_factor, generate_split, factor_handoff
 from .workflow import CorpusAutoloop, WorkflowConflict
+from .execution_adapter import CorpusExecutionAdapter, EvidenceError
+from .agent_runner import OpenCodeRunner
+from .holdout_adapter import IndependentHoldoutAdapter
+from .admission_adapter import AdmissionAdapter
+from .fusion_adapter import FusionAdapter, generate_plan
+from .fusion_confirmation import FusionConfirmationAdapter
+from .automation import CorpusSupervisor
 
 
 def _read(path):
@@ -64,6 +71,130 @@ def parse(argv=None):
         p.add_argument("--expected-revision", type=int, required=True)
         p.add_argument("--file", required=True, help="actual platform evidence/receipt JSON file")
 
+    p = commands.add_parser(
+        "execution-start",
+        help="REAL SIDE EFFECT: create quant-mcp run and persist one candidate into existing factor ideas DB"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--dataset-ref", required=True, help="actual platform screening dataset identity")
+    p.add_argument("--library-snapshot-ref", required=True, help="factor library baseline snapshot identity")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicit acknowledgement of quant-mcp persist_candidates side effects")
+
+    p = commands.add_parser(
+        "execution-run",
+        help="REAL SIDE EFFECT: launch OpenCode to write C++, submit and check actual platform tasks"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--executor-model", required=True, help="registered OpenCode model")
+    p.add_argument("--executor-binary", default="opencode")
+    p.add_argument("--timeout-sec", type=int, default=1800)
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize real code generation and platform execution")
+
+    p = commands.add_parser(
+        "execution-collect",
+        help="read actual quant-mcp state; derive screening metrics; require source-bound fidelity review"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--fidelity-file", required=True, help="review + actual .h SHA-256 attestation")
+    p.add_argument("--nearest-file", help="verified JSON array of already-existing similar factor names")
+    p.add_argument("--zero-rate", type=float,
+                   help="only if measured zero-rate is absent from platform eval_metrics")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="allow writing result to isolated corpus ledger (not production factor DB)")
+
+    p = commands.add_parser(
+        "execution-confirm",
+        help="REAL SIDE EFFECT: run dated CPU-only holdout; source SHA-256 frozen"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--fidelity-file", required=True)
+    p.add_argument("--start-date", default="2025-07-01")
+    p.add_argument("--end-date", default="2025-12-31")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize real independent CPU platform task")
+
+    p = commands.add_parser(
+        "execution-admit",
+        help="REAL SIDE EFFECT: call existing persist_factor(commit) only after independent holdout"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--assessment-file", required=True,
+                   help="full trading/stability/fidelity assessment (not model summary)")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize production factor library commit")
+
+    p=commands.add_parser("fusion-plan", help="propose ONE mechanism-based fusion candidate")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--response-file")
+    p.add_argument("--capabilities-file")
+    p.add_argument("--base-url")
+    p.add_argument("--model")
+    p.add_argument("--json-mode",action="store_true")
+
+    p=commands.add_parser("fusion-start", help="REAL SIDE EFFECT: create fusion quant-mcp run")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-run", help="REAL SIDE EFFECT: execute fused factor in OpenCode")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--executor-model",required=True)
+    p.add_argument("--executor-binary",default="opencode")
+    p.add_argument("--timeout-sec",type=int,default=1800)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-collect", help="classify actual fusion screening; poor fusion triggers split")
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--fidelity-file",required=True)
+    p.add_argument("--zero-rate",type=float)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser(
+        "fusion-confirm",
+        help="REAL SIDE EFFECT: compare original, nearest and fused CPU holdout results; persist winner"
+    )
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--nearest-source-file",required=True,
+                   help="verified original .h path of nearest already-existing factor")
+    p.add_argument("--review-file",required=True,
+                   help="predeclared same-target protocol and explicit approval")
+    p.add_argument("--start-date",default="2025-07-01")
+    p.add_argument("--end-date",default="2025-12-31")
+    p.add_argument("--delta-icir-floor",type=float,default=0.05)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
+    p=commands.add_parser("fusion-status", help="show persisted single fusion trial")
+    p.add_argument("--object-id",required=True)
+
+    p = commands.add_parser("execution-status", help="show authoritative quant run binding")
+    p.add_argument("--object-id", required=True)
+
+    p=commands.add_parser(
+        "auto-run",
+        help="FOREGROUND bounded chapter-by-chapter dispatcher; stops at missing evidence"
+    )
+    p.add_argument("--object-id",help="optional one-object mode; defaults to next pending chapter")
+    p.add_argument("--max-steps",type=int,default=12)
+    p.add_argument("--base-url",help="OpenAI-compatible base URL")
+    p.add_argument("--model",help="LLM for hypothesis/factor/fusion/split generation")
+    p.add_argument("--json-mode",action="store_true")
+    p.add_argument("--capabilities-file",help="actual platform-supported observation classes")
+    p.add_argument("--reviews-dir",help="review artifacts stored under <directory>/<object-id>/")
+    p.add_argument("--executor-model",help="configured OpenCode model for real C++ execution")
+    p.add_argument("--executor-binary",default="opencode")
+    p.add_argument("--dataset-ref",help="actual screening time/data version")
+    p.add_argument("--library-snapshot-ref",help="actual frozen factor library snapshot")
+    p.add_argument("--enable-platform-writes",action="store_true")
+
     return parser.parse_args(argv)
 
 
@@ -85,6 +216,127 @@ def main(argv=None):
         elif cmd == "fail":
             result=store.record_infeasible(args.object_id,revision=args.expected_revision,
                  stage=args.stage,attempt_ref=args.attempt_ref,reason=args.reason)
+        elif cmd == "execution-start":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=CorpusExecutionAdapter(store).begin(
+                args.object_id, expected_revision=args.expected_revision,
+                dataset_ref=args.dataset_ref, library_snapshot_ref=args.library_snapshot_ref)
+        elif cmd == "execution-run":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            adapter=CorpusExecutionAdapter(store)
+            link=adapter._link(args.object_id)
+            if not link or not link.get("run_id") or link["status"]!="prepared":
+                raise WorkflowConflict("no prepared quant run; call execution-start first")
+            obj=store.get(args.object_id)
+            if obj["status"]!="awaiting_evaluation":
+                raise WorkflowConflict("research object no longer awaiting evaluation")
+            result=OpenCodeRunner(
+                binary=args.executor_binary, model=args.executor_model,
+                timeout=args.timeout_sec
+            ).execute(obj,link["run_id"])
+        elif cmd == "execution-collect":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=CorpusExecutionAdapter(store).collect(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),
+                nearest_factors=_read(args.nearest_file) if args.nearest_file else None,
+                zero_rate=args.zero_rate)
+        elif cmd == "execution-confirm":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=IndependentHoldoutAdapter(store).confirm(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),
+                start_date=args.start_date,end_date=args.end_date)
+        elif cmd == "execution-admit":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=AdmissionAdapter(store).commit(
+                args.object_id,expected_revision=args.expected_revision,
+                review=_read(args.assessment_file))
+        elif cmd == "auto-run":
+            client=(ChatCompletionsClient(base_url=args.base_url,model=args.model,
+                     json_mode=args.json_mode)
+                    if args.model or args.base_url else None)
+            capabilities=_read(args.capabilities_file) if args.capabilities_file else None
+            if capabilities is not None and not (
+                isinstance(capabilities,list) and bool(capabilities) and
+                all(isinstance(x,str) and x for x in capabilities)):
+                raise ValueError("--capabilities-file must be nonempty JSON list")
+            supervisor=CorpusSupervisor(
+                store,client=client,capabilities=capabilities,
+                reviews_dir=args.reviews_dir,executor_model=args.executor_model,
+                executor_binary=args.executor_binary,dataset_ref=args.dataset_ref,
+                library_snapshot_ref=args.library_snapshot_ref,
+                enable_platform_writes=args.enable_platform_writes)
+            result=supervisor.run(max_steps=args.max_steps,object_id=args.object_id)
+        elif cmd == "fusion-plan":
+            obj=store.get(args.object_id)
+            capabilities=_read(args.capabilities_file) if args.capabilities_file else None
+            response=_read(args.response_file) if args.response_file else None
+            client=(ChatCompletionsClient(base_url=args.base_url,model=args.model,
+                    json_mode=args.json_mode) if response is None else None)
+            near=None
+            if client is not None:
+                from core.mcp.tools.factor_db import factor_detail
+                options=obj["evaluation"]["independence"]["nearest_factors"]
+                if not options:
+                    raise WorkflowConflict("no evidenced nearest factor for fusion")
+                near=factor_detail(options[0])
+            plan=generate_plan(obj,client=client,response=response,library_neighbor=near,
+                               capabilities=capabilities)
+            result=FusionAdapter(store).plan(args.object_id,plan,
+                                            expected_revision=args.expected_revision,
+                                            capabilities=capabilities)
+        elif cmd == "fusion-start":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionAdapter(store).begin(args.object_id,
+                                               expected_revision=args.expected_revision)
+        elif cmd == "fusion-run":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            adapter=FusionAdapter(store)
+            trial=adapter.get(args.object_id)
+            if trial["status"]!="prepared" or not trial["run_id"]:
+                raise WorkflowConflict("fusion-start required")
+            result=OpenCodeRunner(binary=args.executor_binary,
+                                  model=args.executor_model,timeout=args.timeout_sec).execute(
+                store.get(args.object_id),trial["run_id"],
+                phase="fusion",candidate=trial["plan"]["factor_spec"])
+        elif cmd == "fusion-collect":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionAdapter(store).collect(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),zero_rate=args.zero_rate)
+        elif cmd == "fusion-confirm":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionConfirmationAdapter(store).confirm(
+                args.object_id,expected_revision=args.expected_revision,
+                nearest_source_file=args.nearest_source_file,
+                review=_read(args.review_file),
+                start_date=args.start_date,end_date=args.end_date,
+                delta_icir_floor=args.delta_icir_floor)
+        elif cmd == "fusion-status":
+            result=FusionAdapter(store).get(args.object_id)
+        elif cmd == "execution-status":
+            adapter=CorpusExecutionAdapter(store)
+            link=adapter._link(args.object_id)
+            result={"binding":link}
+            if link and link.get("run_id"):
+                state=adapter.backend.run_load(link["run_id"])
+                fac=(state.get("factors") or [{}])[0]
+                result["run"]={"run_id":state.get("run_id"),
+                               "factor_status":fac.get("status"),
+                               "failure_layer":fac.get("failure_layer"),
+                               "has_eval_metrics":bool((fac.get("evidence") or {}).get("eval_metrics")),
+                               "has_ridge_svd":bool((fac.get("evidence") or {}).get("ridge_svd_agg")),
+                               "premature_persistence":bool(fac.get("persisted") or fac.get("verdict"))}
         elif cmd == "handoff":
             result = factor_handoff(store.get(args.object_id))
         elif cmd in ("hypothesis", "factor", "split"):
@@ -115,7 +367,7 @@ def main(argv=None):
             result = store.record_admission(args.object_id,_read(args.file),revision=args.expected_revision)
         else:
             raise ValueError(f"unknown command {cmd}")
-    except (WorkflowConflict,ContractError,ModelError,KeyError,ValueError,
+    except (WorkflowConflict,ContractError,ModelError,EvidenceError,KeyError,ValueError,
             ImportError,FileNotFoundError,OSError) as exc:
         print("ERROR:",exc,file=sys.stderr)
         return 2
