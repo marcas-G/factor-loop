@@ -13,7 +13,9 @@
 5. [05-migration-plan.md](05-migration-plan.md)：渐进迁移、验收与非目标
 6. [schemas/](schemas/)：拟议 JSON Schema，不是现网数据库迁移
 7. [examples/](examples/)：**纯教学**样例，不是真实市场发现
-8. `python3 docs/standardization/validate.py`：静态契约校验，需 `jsonschema>=4`
+8. [06-tree-mvp.md](06-tree-mvp.md)：独立可运行的研究树
+9. [07-refinement-agent.md](07-refinement-agent.md)：逐层假设细化 Agent 与人工审核队列
+10. `python3 docs/standardization/validate.py`：静态契约校验，需 `jsonschema>=4`
 
 ## 统一术语
 
