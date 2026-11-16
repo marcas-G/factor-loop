@@ -7,6 +7,7 @@ an explicitly separate CPU date range before allowing admission.
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date
 from pathlib import Path
 
@@ -125,27 +126,39 @@ class IndependentHoldoutAdapter:
         with self.store._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row=db.execute("SELECT * FROM corpus_holdout_attempts WHERE object_id=?",(objid,)).fetchone()
-            if row is not None:
-                raise WorkflowConflict(
-                    "holdout already reserved/submitted; reconcile original platform task, do not resubmit")
-            db.execute("INSERT INTO corpus_holdout_attempts "
-                       "(object_id,screening_run_id,feature_file_sha256,date_start,date_end,"
-                       "status,created_at,updated_at) VALUES (?,?,?,?,?,'reserved',?,?)",
-                       (objid,run_id,digest,start,end,_stamp(),_stamp()))
-        # Upstream submission errors deliberately leave a reserved receipt
-        # instead of risking duplicate platform tasks on automatic retry.
+            if row is None:
+                db.execute("INSERT INTO corpus_holdout_attempts "
+                           "(object_id,screening_run_id,feature_file_sha256,date_start,date_end,"
+                           "status,created_at,updated_at) VALUES (?,?,?,?,?,'reserved',?,?)",
+                           (objid,run_id,digest,start,end,_stamp(),_stamp()))
+                submission=None
+            else:
+                if (row["screening_run_id"]!=run_id or
+                    row["feature_file_sha256"]!=digest or
+                    row["date_start"]!=start or row["date_end"]!=end):
+                    raise WorkflowConflict("existing holdout task uses different inputs")
+                if row["status"]!="submitted" or not row["task_json"]:
+                    raise WorkflowConflict(
+                        "holdout task has no submitted receipt; reconcile before retrying")
+                submission=json.loads(row["task_json"])
+        # A submitted task is recoverable by check-only. A crash between the
+        # external POST and its receipt remains reserved, never auto-resubmitted.
         features=factors[0].get("name") or obj["factor"]["name"]
         feeds=",".join(f"SHFE-{c}" for c in obj["factor"]["categories"])
-        submission=self.platform.submit(
-            factor_file=str(source),features=features,feeds=feeds,
-            start_date=start,end_date=end)
+        if submission is None:
+            submission=self.platform.submit(
+                factor_file=str(source),features=features,feeds=feeds,
+                start_date=start,end_date=end)
+            task=(submission.get("tasks") or {}).get("csv_ic") or {}
+            if not submission.get("ok") or not task.get("run_id") or not task.get("feature"):
+                raise EvidenceError("actual CPU platform holdout task ID required")
+            with self.store._connection() as db:
+                db.execute("UPDATE corpus_holdout_attempts "
+                           "SET status='submitted',task_json=?,updated_at=? WHERE object_id=?",
+                           (_json(submission),_stamp(),objid))
         task=(submission.get("tasks") or {}).get("csv_ic") or {}
-        if not submission.get("ok") or not task.get("run_id") or not task.get("feature"):
-            raise EvidenceError("actual CPU platform holdout task ID required")
-        with self.store._connection() as db:
-            db.execute("UPDATE corpus_holdout_attempts "
-                       "SET status='submitted',task_json=?,updated_at=? WHERE object_id=?",
-                       (_json(submission),_stamp(),objid))
+        if not task.get("run_id") or not task.get("feature"):
+            raise EvidenceError("stored CPU holdout submission missing task identity")
         check_path=str(Path(output_dir or (self.store.path.parent/"holdout_checks"))/
                        f"{objid}_{task['run_id']}")
         Path(check_path).parent.mkdir(parents=True,exist_ok=True)
