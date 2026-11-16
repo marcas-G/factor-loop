@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
@@ -66,10 +66,11 @@ describe('Research console', () => {
     await screen.findByText('章节研究目录')
     const all = screen.getByRole('combobox', { name: '道经或德经筛选' })
     fireEvent.change(all, { target: { value: '德经' } })
-    expect(screen.getByText('第38章')).toBeInTheDocument()
-    expect(screen.queryByText('第1章')).not.toBeInTheDocument()
+    const chapterList = within(document.querySelector('.chapter-table') as HTMLElement)
+    expect(chapterList.getByText('第38章')).toBeInTheDocument()
+    expect(chapterList.queryByText('第1章')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '下一页' }))
-    expect(screen.getByText('第45章')).toBeInTheDocument()
+    expect(chapterList.getByText('第45章')).toBeInTheDocument()
   })
 
   it('performs text search and selects actual source chapter', async () => {
@@ -80,7 +81,7 @@ describe('Research console', () => {
     expect(screen.getByText('第38章')).toBeInTheDocument()
     expect(screen.queryByText('第1章')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '清空搜索' }))
-    expect(screen.getByText('第1章')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('道可道，非常道。此兩者，同出而異名。')).toBeInTheDocument())
+    expect(chapterList.getByText('第1章')).toBeInTheDocument()
+    await waitFor(() => expect(chapterList.getAllByText('道可道，非常道。此兩者，同出而異名。').length).toBeGreaterThan(0))
   })
 })
