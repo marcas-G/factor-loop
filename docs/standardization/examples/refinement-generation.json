@@ -1,0 +1,44 @@
+{
+  "diagnosis": {
+    "focus_gap": "市场承接过程由哪些事前可测的活动构成？",
+    "why_this_gap": "父节点只提出承接过程可能重要，尚未明确可观测的角色以及应当区分的路径。",
+    "other_open_gaps": [
+      "市场状态混杂",
+      "同强度交易压力下的响应过程"
+    ]
+  },
+  "candidates": [
+    {
+      "refinement_type": "mechanism_decomposition",
+      "statement": "在交易压力相近时，事件前可观测的盘口补充状态可能与后续价格响应速度的差异相关。",
+      "refinement_warrant": "把父节点抽象的市场承接过程细化为事先可观测的盘口补充活动，并明确将未来响应速度作为待解释对象。",
+      "new_information": [
+        "引入事件前盘口补充状态这一候选机制角色",
+        "区分交易压力相同但补充状态不同的事件",
+        "明确研究的是未来价格响应速度而非泛泛收益"
+      ],
+      "mechanism_roles": [
+        "事件前订单簿补充",
+        "成交压力",
+        "未来价格响应速度"
+      ],
+      "assumptions": [
+        "补充代理只使用决策时刻之前的数据",
+        "存在能够匹配初始压力的对照事件"
+      ],
+      "unknowns": [
+        "事件前波动状态是否可以解释这一相关性"
+      ],
+      "next_refinement_questions": [
+        "在控制前序波动后，事前补充状态还能否区分响应速度？"
+      ],
+      "unique_observable_prediction": "控制交易压力和前序波动后，事前补充状态不同的事件组仍出现稳定的未来响应速度差异。",
+      "alternative_explanation": "差异可能由事件前的波动和流动性状态共同决定，补充代理没有独立信息。",
+      "evidence_limitation": "目前没有实测结果；历史条件对照最多支持关联，不能证明因果。",
+      "phenomenon_refs": [
+        "P-DEMO-001"
+      ]
+    }
+  ],
+  "abstain_reason": ""
+}
