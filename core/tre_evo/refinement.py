@@ -218,7 +218,7 @@ def materialize(ctx: Context, candidate: dict):
 
 
 def propose(store: TreEvoStore, tree_id: str, parent_id: str, *, client=None,
-            generation=None, critique=None, max_candidates=3, phenomenon_ids=None,
+            generation=None, critique=None, critic_client=None, max_candidates=3, phenomenon_ids=None,
             include_unverified=False, focus=None, model_label="fixture"):
     if type(max_candidates) is not int or not 1 <= max_candidates <= 3:
         raise ValueError("max_candidates must be 1..3")
@@ -235,9 +235,9 @@ def propose(store: TreEvoStore, tree_id: str, parent_id: str, *, client=None,
         return {"diagnosis": generation["diagnosis"], "abstain_reason": generation["abstain_reason"],
                 "proposals": [], "revision": ctx.revision}
     if critique is None:
-        if client is None:
+        if critic_client is None and client is None:
             raise ValueError("critic fixture or configured model is required")
-        critique = client.complete(SYSTEM_CRITIC,
+        critique = (critic_client or client).complete(SYSTEM_CRITIC,
                                   "父节点与上下文：" + _json(ctx.as_dict()) +
                                   "\n待批评的候选：" + _json(generation))
     reviews = validate_critique(critique, len(generation["candidates"]))
