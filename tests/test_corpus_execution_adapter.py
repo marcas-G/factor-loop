@@ -14,7 +14,10 @@ from core.corpus_autoloop.execution_adapter import (
 )
 from core.corpus_autoloop.holdout_adapter import IndependentHoldoutAdapter
 from core.corpus_autoloop.admission_adapter import AdmissionAdapter
+from core.corpus_autoloop.fusion_adapter import FusionAdapter, generate_plan
+from core.corpus_autoloop.fusion_confirmation import FusionConfirmationAdapter
 from core.corpus_autoloop.workflow import CorpusAutoloop, WorkflowConflict
+from core.corpus_autoloop import contracts
 
 ROOT = Path(__file__).resolve().parents[1]
 EX = ROOT / "corpora" / "daodejing" / "examples"
@@ -300,6 +303,125 @@ class AdapterIntegrationTest(unittest.TestCase):
         with self.assertRaises(WorkflowConflict):
             holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
         self.assertEqual(backend.calls,1)
+
+    def fusion_plan(self):
+        return {
+            "base_factor_name":self.fac["name"],
+            "similar_factor_name":"ExistingLiquidityFactor",
+            "method":"条件化压力差异与既有流动性状态",
+            "fusion_hypothesis":"成交失衡冲突在不同流动性条件下可能更有增量预测能力",
+            "falsifiable_increment":"在同一独立保留期、同一价格目标上，融合信号的绝对 ICIR 高于两条原信号",
+            "alternative_explanation":"融合结果只是对已有流动性状态的重复加权",
+            "factor_spec":{
+                "name":"DDJCh01FusionFactor",
+                "formula":"state_gated_imbalance_conflict",
+                "intuition":"在流动性状态门控下测量失衡冲突",
+                "hypothesis":"成交失衡冲突在不同流动性条件下可能更有增量预测能力",
+                "tags":["daodejing","fusion"],
+                "params":{},"categories":["AG"],
+                "required_data":["trade","orderbook"],
+                "feature_uses_future":False,
+            }
+        }
+
+    def start_fusion(self):
+        _,review=self.complete(r2=0.91,residual=0.001)
+        screening=self.adapter.collect(self.id,expected_revision=3,fidelity_review=review,
+                                        nearest_factors=["ExistingLiquidityFactor"])
+        self.assertEqual(screening["research_object"]["status"],"awaiting_fusion")
+        fusion=FusionAdapter(self.store,backend=self.backend)
+        plan=self.fusion_plan()
+        created=fusion.plan(self.id,plan,expected_revision=4,
+                            capabilities=["orderbook","trade"])
+        self.assertEqual(created["status"],"planned")
+        self.assertEqual(fusion.plan(self.id,plan,expected_revision=4)["status"],"planned")
+        begin=fusion.begin(self.id,expected_revision=4)
+        self.assertEqual(begin["status"],"prepared")
+        rid=begin["run_id"]
+        fused_file=self.path / "DDJCh01FusionFactor.h"
+        fused_file.write_text("#pragma once\n// artificial fused factor test\n",encoding="utf-8")
+        f=self.backend.runs[rid]["factors"][0]
+        f.update({
+            "status":"done","failure_layer":"check_done",
+            "factor_file":str(fused_file),
+            "evidence":{
+                "eval_metrics":{
+                    "core_metrics":{"screening":{
+                        "icir":0.62,"spearman":0.032,"zero_ratio":0.05,
+                        "pair":"X.fused vs Y.target_5s",
+                    }},
+                },
+                "ridge_svd_agg":{"R2_X":0.45,"res_IC":0.02,"engine":"gpu"},
+            },
+        })
+        fidelity={
+            "passed":True,"reviewer":"factor-reviewer",
+            "evidence_ref":"review://actual-source-fusion",
+            "sha256":hashlib.sha256(fused_file.read_bytes()).hexdigest(),
+        }
+        passed=fusion.collect(self.id,expected_revision=4,fidelity_review=fidelity)
+        self.assertEqual(passed["fusion"],"screening_passed_not_yet_confirmed")
+        self.assertEqual(self.store.get(self.id)["status"],"awaiting_fusion")
+        return fusion,fused_file
+
+    def test_fusion_plan_real_screen_and_paired_holdout_success(self):
+        fusion,fused_file=self.start_fusion()
+        similar=self.path/"ExistingLiquidityFactor.h"
+        similar.write_text("#pragma once\n// real-nearest fixture\n",encoding="utf-8")
+        class ThreeWayCPU:
+            def __init__(self):
+                self.submits=[]
+            def submit(self,**kwargs):
+                self.submits.append(kwargs)
+                index=len(self.submits)
+                return {"ok":True,"tasks":{"csv_ic":{
+                    "feature":f"factor_test_{index}","run_id":f"cpu-real-{index}"
+                }}}
+            def check(self,**kwargs):
+                stem=Path(kwargs["factor_file"]).stem
+                icir={
+                    "DaoDeJing_Ch01_ImbalanceDisagreement":0.44,
+                    "ExistingLiquidityFactor":0.43,
+                    "DDJCh01FusionFactor":0.63,
+                }[stem]
+                return {"failureLayer":"check_done","evidence":{
+                    "eval_metrics":{"core_metrics":{"screening":{
+                        "icir":icir,"spearman":0.022,
+                        "zero_ratio":0.1,"pair":f"X.{stem} vs Y.target_5s"
+                    }}}
+                }}
+        platform=ThreeWayCPU()
+        result=FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform).confirm(
+            self.id,expected_revision=4,nearest_source_file=str(similar),
+            review={"reviewer":"independent-researcher",
+                    "evaluation_ref":"protocol://same-target-Y.target_5s",
+                    "allow_single_holdout_comparison":True})
+        self.assertEqual(len(platform.submits),3)
+        self.assertEqual(result["research_object"]["status"],"terminal_fused")
+        self.assertGreater(result["holdout"]["delta_abs_icir"],0.05)
+        self.assertEqual(self.backend.persist_calls,1)
+        self.assertEqual(self.store.next_object()["object_id"],"RO-DDJ-002")
+        with self.assertRaises(WorkflowConflict):
+            FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform).confirm(
+                self.id,expected_revision=4,nearest_source_file=str(similar),
+                review={"reviewer":"independent-researcher",
+                        "evaluation_ref":"protocol://same-target-Y.target_5s",
+                        "allow_single_holdout_comparison":True})
+        self.assertEqual(len(platform.submits),3)
+
+    def test_fusion_can_only_use_evidenced_nearest_and_full_review(self):
+        _,review=self.complete(r2=0.93,residual=0.001)
+        self.adapter.collect(self.id,expected_revision=3,fidelity_review=review,
+                             nearest_factors=["ExistingLiquidityFactor"])
+        bad=self.fusion_plan()
+        bad["similar_factor_name"]="ModelInventedFactor"
+        with self.assertRaises(contracts.ContractError):
+            generate_plan(self.store.get(self.id),response=bad)
+        correct=self.fusion_plan()
+        self.assertEqual(
+            generate_plan(self.store.get(self.id),response=correct,
+                          capabilities=["orderbook","trade"])["factor_spec"]["name"],
+            "DDJCh01FusionFactor")
 
     def test_begin_requires_unmodified_dataset_identity_and_correct_revision(self):
         self.begin()
