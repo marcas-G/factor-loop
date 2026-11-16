@@ -149,7 +149,7 @@ python3 -m core.corpus_autoloop.cli --db "$DB" handoff \
 
 ## 真实执行及完整产物对接（新增）
 
-原 v0.1 只有隔离队列、研究对象和可交接的 FactorSpec；现在另外提供可运行的 [Execution Adapter 操作手册](corpus-execution-adapter.md)：
+原 v0.1 只有隔离队列、研究对象和可交接的 FactorSpec；现在另外提供可运行的 [Execution Adapter 与 auto-run 操作手册](corpus-execution-adapter.md)。前台调度器遇到缺少真实证据或审核产物时会停住，不会后台持续执行或自动认定实验成功：
 
 - `execution-start / execution-run / execution-collect`：调用真实 quant-mcp 创建 run、执行原 Agent 的 write/submit/check/restest、把原 state 实测指标转成筛选报告。
 - `execution-confirm / execution-admit`：CPU 2025H2 等独立日期确认后，再真正用原 `persist_factor(commit)` 入库。

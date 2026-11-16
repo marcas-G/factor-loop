@@ -18,6 +18,12 @@ description: 按《道德经》章节驱动的跨领域因子研究循环。逐�
 - **完整的事件历史和数据隔离。** 每次实验必须记录 executor run_id、结果引用、已使用数据、图谱/因子库版本。模型对自述的“实验成功”没有事实认定权。
 - **只能由执行器真实调用工具**：现有 quant-mcp 的 run_init、persist_candidates、写因子、submit/check/assess。不可通过虚构报告将研究对象标记为 terminal_admitted 或 terminal_fused。
 
+## 前台调度入口
+
+\`python -m core.corpus_autoloop.cli auto-run --max-steps 12\` 可逐章推进；真实执行需配置模型、审核目录、可信数据字段和 \`--enable-platform-writes\`。它会在缺失审核文件、真实平台任务未结束、保留期无锁定目标、因子库内近邻无法核实时停住，**不应被描述成已在真实行情平台完成自动发现**。
+
+在模型生成、融合、实验和入库之间，人工审查不能由 Agent 自己伪装成“已验证”。确认期严格读取原始 \`screening.csv\` 内预先锁定的 X/Y 配对，拒绝根据独立数据重新挑最大值；稀疏目标缺少对应日级指标时暂不允许确认。
+
 ## 操作协议
 
 1. 在隔离 SQLite 路径执行 CLI seed（一次即可），再执行 next 返回当前需要处理的 ResearchObject。

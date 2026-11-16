@@ -2,6 +2,51 @@
 
 状态：**生产工具对接代码已实现，线上平台尚未实际运行验证**。该模块会在显式授权后写入真实 \`quant-mcp\` 研究状态/ideas 表、运行 OpenCode 因子代理、向真实平台提交任务。当前 GitHub CI 完全由受控 FakeBackend 测试驱动，不含真实行情、模型或平台凭据。
 
+## 统一前台自动调度（auto-run）
+
+Corpus Supervisor 已将章节队列、跨域假设、因子规范、真实执行、独立确认、冗余融合和最多两次拆分整合为**可反复调用的前台状态机**。它不是系统后台 daemon，不启动持续监控、不执行静默平台重复 POST。运行 81 章前，需使用真实的模型和交易平台、配置量化数据及人工审阅产物。
+
+~~~bash
+DB=~/.quant-corpus-autoloop/research.sqlite3
+python -m core.corpus_autoloop.cli --db "$DB" seed
+
+# 不写任何生产数据：展示当前对象和缺少的能力。
+python -m core.corpus_autoloop.cli --db "$DB" auto-run --max-steps 5
+
+# 在平台环境确认可用后，按最大步数受控执行。
+export TREEVO_LLM_API_KEY="<your-provider-key>"
+python -m core.corpus_autoloop.cli --db "$DB" auto-run \
+  --max-steps 12 \
+  --model "<configured-proposer-model>" \
+  --base-url "https://your-provider/v1" \
+  --capabilities-file /path/to/VERIFIED-platform-fields.json \
+  --reviews-dir /path/to/audited-research-reviews \
+  --executor-model "<registered-opencode-executor-model>" \
+  --dataset-ref "platform/screening/2025H1" \
+  --library-snapshot-ref "/path/to/immutable-library-snapshot" \
+  --enable-platform-writes
+~~~
+
+它每次最多进行 \`--max-steps\` 次具体研究状态迁移，默认章节顺序处理 81 个根研究对象；每章衍生子对象最多 2 层。**遇到缺失的 review、未知数据字段、未完成的平台任务、无法确认的原始结果，立即停住并输出缺失条件；不会伪造通过、自动绕开或无限循环。** 失败研究对象可以如实终止并记录事件。使用同一 \`--db\` 再运行会从已持久化状态继续。
+
+审查目录按照 \`<reviews-dir>/<ResearchObjectID>/<name>.json\` 组织。例如：
+- \`RO-DDJ-001/fidelity.json\`：原始 .h SHA-256 和人工确认的实现忠实度
+- \`RO-DDJ-001/nearest.json\`：候选相近因子名称（程序还会向正式 DB 查询核实）
+- \`RO-DDJ-001/assessment.json\`：完整交易成本、稳定性、人工审核
+- \`RO-DDJ-001/fusion_fidelity.json\`、\`fusion_review.json\`：融合因子源码与独立比较审核
+
+**重要限制**：这是“受控前台自动化”，不是免审查的全自动收益发现系统。缺少实测行情、OpenCode 模型、量化平台连接或者独立审查产物时，不会继续进入已确认或已入库状态。
+
+## 独立确认的锁定目标政策
+
+现有平台 \`extract_metrics_from_check_output\` 会为当前数据**选出绝对 IC 最大的 X–Y 配对**；直接使用它在保留期给出的 best pair，会导致测试集信息再次参与模型选择。新适配器因此改为从该次 \`checkOutput\` 的原始 \`<factor-stem>/dailyX/<factor-stem>_feval/screening.csv\` 中读取：
+
+- 独立因子必须与筛选期**完全同一个 X–Y 目标配对、时域**；对照比较只允许读这一条，而不是重新排序后的最佳配对。
+- 融合因子、原候选、库内近邻必须在**相同的预先声明 Y 目标**、同一 CPU 保留期进行比较；目标行缺失或重复即终止。
+- 独立确认 ICIR 方向与筛选期相反，不能视为成功；融合后的方向也需与其筛选期方向一致。
+- \`zero_ratio>=0.5\` 时，当前通用 \`deep_best\` 是平台在不同配对中二次选择的汇总，并不能证明锁定 Y 的日级表现。**此时直接停止并要求平台提供“每个预设目标的日级指标”，不能用全局 best 凑数。**
+- 各环节仍需真实平台执行结果与完整人工审核，不能因同一目标出现高绝对 ICIR 就跳过交易成本、置信区间和多重试验分析。
+
 ## 组件
 
 | 组件 | 使用的真实能力 | 边界 |
