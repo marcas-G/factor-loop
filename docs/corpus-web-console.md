@@ -18,7 +18,7 @@
 
 ## 运行
 
-前置条件：在已有的 `factor-loop` 仓库根目录下执行。确保有 Node.js 22.12+ 与 Python 3.11+。
+前置条件：在已有的 `factor-loop` 仓库根目录下执行。确保有 Node.js 22.12+、pnpm 10+ 与 Python 3.11+。`corepack enable` 后可启用 pnpm；如使用 npm，版本问题需自行确认。
 
 ### 开发模式（两个终端）
 
@@ -28,8 +28,8 @@ python -m core.corpus_autoloop.web_api --api-only --port 8765
 
 # 终端二：React HMR 服务器；/api 代理到上方的 API
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 浏览器打开 http://127.0.0.1:5173。
@@ -37,7 +37,7 @@ npm run dev
 ### 构建并使用同一端口部署
 
 ```bash
-cd web && npm install && npm run build && cd ..
+cd web && pnpm install && pnpm build && cd ..
 python -m core.corpus_autoloop.web_api --port 8765
 ```
 
@@ -78,10 +78,10 @@ python -m core.corpus_autoloop.web_api --port 8765 \
 
 ```bash
 cd web
-npm run typecheck
-npm run lint
-npm run test
-npm run build
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
 cd ..
 python -m unittest discover -s tests -p test_corpus_web_api.py -v
 ```
