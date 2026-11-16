@@ -19,6 +19,7 @@ from .agent_runner import OpenCodeRunner
 from .holdout_adapter import IndependentHoldoutAdapter
 from .admission_adapter import AdmissionAdapter
 from .fusion_adapter import FusionAdapter, generate_plan
+from .fusion_confirmation import FusionConfirmationAdapter
 
 
 def _read(path):
@@ -155,6 +156,21 @@ def parse(argv=None):
     p.add_argument("--zero-rate",type=float)
     p.add_argument("--enable-platform-writes",action="store_true")
 
+    p=commands.add_parser(
+        "fusion-confirm",
+        help="REAL SIDE EFFECT: compare original, nearest and fused CPU holdout results; persist winner"
+    )
+    p.add_argument("--object-id",required=True)
+    p.add_argument("--expected-revision",type=int,required=True)
+    p.add_argument("--nearest-source-file",required=True,
+                   help="verified original .h path of nearest already-existing factor")
+    p.add_argument("--review-file",required=True,
+                   help="predeclared same-target protocol and explicit approval")
+    p.add_argument("--start-date",default="2025-07-01")
+    p.add_argument("--end-date",default="2025-12-31")
+    p.add_argument("--delta-icir-floor",type=float,default=0.05)
+    p.add_argument("--enable-platform-writes",action="store_true")
+
     p=commands.add_parser("fusion-status", help="show persisted single fusion trial")
     p.add_argument("--object-id",required=True)
 
@@ -263,6 +279,15 @@ def main(argv=None):
             result=FusionAdapter(store).collect(
                 args.object_id,expected_revision=args.expected_revision,
                 fidelity_review=_read(args.fidelity_file),zero_rate=args.zero_rate)
+        elif cmd == "fusion-confirm":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=FusionConfirmationAdapter(store).confirm(
+                args.object_id,expected_revision=args.expected_revision,
+                nearest_source_file=args.nearest_source_file,
+                review=_read(args.review_file),
+                start_date=args.start_date,end_date=args.end_date,
+                delta_icir_floor=args.delta_icir_floor)
         elif cmd == "fusion-status":
             result=FusionAdapter(store).get(args.object_id)
         elif cmd == "execution-status":
