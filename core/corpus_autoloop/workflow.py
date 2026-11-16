@@ -230,6 +230,17 @@ class CorpusAutoloop:
             if hyp is None:
                 raise WorkflowConflict("no source-grounded hypothesis")
             contracts.factor_spec(doc, hyp["hypothesis"])
+            # Same C++ class name across independently scheduled research
+            # objects would silently overwrite/alias factor library rows.
+            for row in db.execute(
+                "SELECT object_id, factor_json FROM research_objects "
+                "WHERE factor_json IS NOT NULL AND object_id <> ?", (objid,)
+            ):
+                other = json.loads(row["factor_json"])
+                if other.get("name") == doc["name"]:
+                    raise WorkflowConflict(
+                        f"factor class name {doc['name']} already belongs to {row['object_id']}"
+                    )
             return self._change(db,objid,obj["revision"],"awaiting_evaluation",
                                 "factor_compiled",{"factor":doc},factor_json=doc)
 
