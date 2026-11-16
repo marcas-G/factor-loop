@@ -7,6 +7,7 @@ on:
       - "corpora/daodejing/**"
       - "tests/test_corpus_*.py"
       - "docs/corpus-autoloop.md"
+      - "docs/corpus-execution-adapter.md"
       - ".agents/skills/corpus-autoloop/**"
       - ".github/workflows/validate-corpus-autoloop.yml"
   pull_request:
