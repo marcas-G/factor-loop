@@ -1,0 +1,110 @@
+[
+  {
+    "unit_id": "daodejing-wangbi-037",
+    "chapter": 37,
+    "part": "道经",
+    "title": "第37章",
+    "text": "道常無為而無不為。侯王若能守之，萬物將自化。化而欲作，吾將鎮之以無名之樸。無名之樸，夫亦將無欲。不欲以靜，天下將自定。",
+    "source_file": "data/chapters/037.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-038",
+    "chapter": 38,
+    "part": "德经",
+    "title": "第38章",
+    "text": "上德不德，是以有德；下德不失德，是以無德。上德無為而無以為；下德為之而有以為。上仁為之而無以為；上義為之而有以為。上禮為之而莫之應，則攘臂而扔之。故失道而後德，失德而後仁，失仁而後義，失義而後禮。夫禮者，忠信之薄，而亂之首。前識者，道之華，而愚之始。是以大丈夫處其厚，不居其薄；處其實，不居其華。故去彼取此。",
+    "source_file": "data/chapters/038.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-039",
+    "chapter": 39,
+    "part": "德经",
+    "title": "第39章",
+    "text": "昔之得一者：天得一以清，地得一以寧，神得一以靈，谷得一以盈，萬物得一以生，侯王得一以為天下貞。其致之。天無以清將恐裂，地無以寧將恐發，神無以靈將恐歇，谷無以盈將恐竭，萬物無以生將恐滅，侯王無以貴高將恐蹶。故貴以賤為本，高以下為基。是以侯王自謂孤、寡、不穀。此非以賤為本邪？非乎？故致數輿無輿。不欲琭琭如玉，珞珞如石。",
+    "source_file": "data/chapters/039.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-040",
+    "chapter": 40,
+    "part": "德经",
+    "title": "第40章",
+    "text": "反者道之動，弱者道之用。天下萬物生於有，有生於無。",
+    "source_file": "data/chapters/040.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-041",
+    "chapter": 41,
+    "part": "德经",
+    "title": "第41章",
+    "text": "上士聞道，勤而行之；中士聞道，若存若亡；下士聞道，大笑之。不笑不足以為道。故建言有之：明道若昧，進道若退，夷道若纇。上德若谷，大白若辱，廣德若不足，建德若偷，質真若渝。大方無隅，大器晚成，大音希聲，大象無形。道隱無名。夫唯道，善貸且成。",
+    "source_file": "data/chapters/041.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-042",
+    "chapter": 42,
+    "part": "德经",
+    "title": "第42章",
+    "text": "道生一，一生二，二生三，三生萬物。萬物負陰而抱陽，沖氣以為和。人之所惡，唯孤、寡、不穀，而王公以為稱。故物或損之而益，或益之而損。人之所教，我亦教之。強梁者不得其死，吾將以為教父。",
+    "source_file": "data/chapters/042.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-043",
+    "chapter": 43,
+    "part": "德经",
+    "title": "第43章",
+    "text": "天下之至柔，馳騁天下之至堅。無有入無間，吾是以知無為之有益。不言之教，無為之益，天下希及之。",
+    "source_file": "data/chapters/043.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-044",
+    "chapter": 44,
+    "part": "德经",
+    "title": "第44章",
+    "text": "名與身孰親？身與貨孰多？得與亡孰病？是故甚愛必大費，多藏必厚亡。知足不辱，知止不殆，可以長久。",
+    "source_file": "data/chapters/044.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-045",
+    "chapter": 45,
+    "part": "德经",
+    "title": "第45章",
+    "text": "大成若缺，其用不弊。大盈若沖，其用不窮。大直若屈，大巧若拙，大辯若訥。躁勝寒，靜勝熱，清靜為天下正。",
+    "source_file": "data/chapters/045.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-046",
+    "chapter": 46,
+    "part": "德经",
+    "title": "第46章",
+    "text": "天下有道，卻走馬以糞；天下無道，戎馬生於郊。禍莫大於不知足，咎莫大於欲得。故知足之足，常足矣。",
+    "source_file": "data/chapters/046.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-047",
+    "chapter": 47,
+    "part": "德经",
+    "title": "第47章",
+    "text": "不出戶，知天下；不闚牖，見天道。其出彌遠，其知彌少。是以聖人不行而知，不見而名，不為而成。",
+    "source_file": "data/chapters/047.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-048",
+    "chapter": 48,
+    "part": "德经",
+    "title": "第48章",
+    "text": "為學日益，為道日損。損之又損，以至於無為。無為而無不為。取天下常以無事，及其有事，不足以取天下。",
+    "source_file": "data/chapters/048.json",
+    "source_status": "draft"
+  }
+]
