@@ -11,7 +11,8 @@ import json
 from datetime import date
 from pathlib import Path
 
-from .execution_adapter import EvidenceError, NativeQuantBackend, _metric_value, _float
+from .execution_adapter import EvidenceError, NativeQuantBackend
+from .fixed_target import fixed_target_score
 from .workflow import CorpusAutoloop, WorkflowConflict, _json, _stamp
 
 
@@ -170,39 +171,17 @@ class IndependentHoldoutAdapter:
         if checked.get("failureLayer")!="check_done":
             raise EvidenceError(
                 f"holdout check failed: {checked.get('failureLayer')}; original task remains submitted")
-        ev=checked.get("evidence") or {}
-        if not ev.get("eval_metrics"):
-            raise EvidenceError("CPU holdout result lacks eval_metrics")
-        metrics=ev["eval_metrics"]
-        zero=metrics.get("zero_rate")
-        if zero is None:
-            zero=((metrics.get("core_metrics") or {}).get("screening") or {}).get("zero_ratio")
-        if zero is None:
-            raise EvidenceError("holdout requires recorded zero_ratio or zero_rate")
-        zero=_float(zero,"holdout zero_rate")
-        if zero>=0.5:
-            deep=metrics.get("deep_best") or {}
-            icir=_float(deep.get("daily_icir"),"holdout daily_icir")
-            rank=_float(deep.get("daily_rank_ic"),"holdout daily_rank_ic")
-            score_kind="daily"
-        else:
-            icir=_metric_value(ev,"icir")
-            rank=_metric_value(ev,"spearman")
-            score_kind="pooled"
-        if not 0<=zero<=1:
-            raise EvidenceError("invalid holdout zero_rate")
+        original_pair=screening.get("audit",{}).get("screening_pair")
+        if not isinstance(original_pair,str) or " vs " not in original_pair:
+            raise EvidenceError("screening must lock an exact X/Y pair before holdout")
+        target=original_pair.split(" vs ",1)[1].strip()
+        fixed=fixed_target_score(checked,source,target=target,exact_pair=original_pair)
+        zero,icir,rank=fixed["zero_ratio"],fixed["icir"],fixed["rank_ic"]
+        score_kind="fixed_pair"
         passed=(abs(icir)>=0.3 and abs(rank)>=0.01)
         taskid=str(task["run_id"])
-        # The CPU holdout is genuinely new execution evidence, unlike the
-        # screening GPU ridge test; keep this distinction in the audit.
-        original_pair=screening.get("audit",{}).get("screening_pair")
-        holdout_pair=((metrics.get("core_metrics") or {}).get("screening") or {}).get("pair")
-        if (not isinstance(original_pair,str) or not original_pair.strip() or
-            not isinstance(holdout_pair,str) or
-            holdout_pair.strip()!=original_pair.strip()):
-            raise EvidenceError(
-                "holdout must validate the exact preselected X-Y pair and horizon; "
-                "independently choosing the best holdout pair is prohibited")
+        # Pull the frozen X/Y row from raw heldout CSV, never check output's
+        # independently selected "best" summary.
         report={
             "factor_xname":obj["factor"]["name"],
             "executor_run_id":f"cpu-holdout-{taskid}",
@@ -218,7 +197,7 @@ class IndependentHoldoutAdapter:
             "audit":{"rank_ic":rank,"zero_rate":zero,"source_sha256":digest,
                      "gpu_independence_reused_from_screening":True,
                      "holdout_cpu_only":True,
-                     "holdout_pair":((metrics.get("core_metrics") or {}).get("screening") or {}).get("pair"),
+                     "holdout_pair":fixed["pair"],"raw_csv_ref":fixed["csv_path"],
                      "date_range":{"start":start,"end":end}},
         }
         result=self.store.record_evaluation(objid,report,revision=expected_revision)

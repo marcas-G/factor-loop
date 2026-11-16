@@ -14,33 +14,8 @@ from .admission_adapter import NativePersistBackend
 from .execution_adapter import EvidenceError, _metric_value, _float
 from .fusion_adapter import FusionAdapter
 from .holdout_adapter import NativeCPUHoldout, DEFAULT_HOLDOUT_START, DEFAULT_HOLDOUT_END, DEFAULT_SCREENING_END
+from .fixed_target import fixed_target_score
 from .workflow import CorpusAutoloop, WorkflowConflict, _json, _stamp
-
-
-def _score(evidence):
-    metrics=(evidence or {}).get("eval_metrics") or {}
-    core=((metrics.get("core_metrics") or {}).get("screening") or {})
-    zero=metrics.get("zero_rate",core.get("zero_ratio"))
-    if zero is None:
-        raise EvidenceError("cannot compare holdout without observed zero_ratio")
-    zero=_float(zero,"zero_ratio")
-    if not 0<=zero<=1:
-        raise EvidenceError("zero_ratio outside 0..1")
-    if zero>=0.5:
-        deep=metrics.get("deep_best") or {}
-        icir=_float(deep.get("daily_icir"),"daily_icir")
-        rank=_float(deep.get("daily_rank_ic"),"daily_rank_ic")
-    else:
-        icir=_metric_value(evidence,"icir")
-        rank=_metric_value(evidence,"spearman")
-    pair=core.get("pair")
-    if not isinstance(pair,str) or " vs " not in pair:
-        raise EvidenceError("holdout pair name required to prevent mismatched Y comparisons")
-    # X factor name differs by construction; compare exact Y label and horizon.
-    target=pair.split(" vs ",1)[1].strip()
-    if not target:
-        raise EvidenceError("empty holdout target")
-    return {"icir":icir,"rank_ic":rank,"target":target,"pair":pair}
 
 
 class FusionConfirmationAdapter:
@@ -162,7 +137,7 @@ class FusionConfirmationAdapter:
             outcomes[role]={
                 "task_id":task["run_id"],
                 "execution_ref":f"quant-cpu-holdout://{task['run_id']}/{task['feature']}",
-                "score":_score(checked.get("evidence")),
+                "score":fixed_target_score(checked, source, target=review["target"]),
             }
         targets={o["score"]["target"] for o in outcomes.values()}
         if len(targets)!=1:
