@@ -77,7 +77,8 @@ class CorpusSupervisor:
             model=self.executor_model,binary=self.executor_binary,backend=self.backend)
 
     def _adapter(self):
-        return CorpusExecutionAdapter(self.store,backend=self.backend)
+        return CorpusExecutionAdapter(self.store,backend=self.backend,
+                                      library_lookup=self.library_lookup)
 
     def _fusion(self):
         return FusionAdapter(self.store,backend=self.backend)
@@ -142,6 +143,11 @@ class CorpusSupervisor:
                 result=adapter.begin(oid,expected_revision=rev,dataset_ref=self.dataset_ref,
                                      library_snapshot_ref=self.library_snapshot_ref)
                 return self._out(obj,"execution-recover",result=result)
+            if (obj.get("evaluation") and
+                obj["evaluation"].get("executor_run_id")==link["run_id"]):
+                return self._out(obj,"execution-review",
+                    blocked="inconclusive evaluation already recorded for this quant run; "
+                            "new independent evidence or a new research object is required")
             state=adapter.backend.run_load(link["run_id"])
             factor=(state.get("factors") or [None])[0]
             if factor is None:

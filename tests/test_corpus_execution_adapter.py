@@ -99,7 +99,14 @@ class AdapterIntegrationTest(unittest.TestCase):
         obj = self.store.record_hypothesis(self.id, self.hyp, revision=1)
         self.store.record_factor(self.id, self.fac, revision=obj["revision"])
         self.backend = FakeBackend()
-        self.adapter = CorpusExecutionAdapter(self.store, self.backend)
+        self.nearest_file = self.path / "ExistingLiquidityFactor.h"
+        self.nearest_file.write_text("#pragma once\n// existing factor\n", encoding="utf-8")
+        def library_lookup(name):
+            if name != "ExistingLiquidityFactor":
+                raise KeyError(name)
+            return {"factor":{"xname":name,"file_path":str(self.nearest_file)}}
+        self.adapter = CorpusExecutionAdapter(
+            self.store, self.backend, library_lookup=library_lookup)
         self.factor_file = self.path / "DaoDeJing_Ch01_ImbalanceDisagreement.h"
         self.factor_file.write_text(
             "#pragma once\n// real C++ source placeholder for offline adapter test\n", encoding="utf-8"
@@ -174,6 +181,22 @@ class AdapterIntegrationTest(unittest.TestCase):
         inconclusive=self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
         self.assertEqual(inconclusive["report"]["independence"]["decision"],"inconclusive")
         self.assertEqual(inconclusive["research_object"]["status"],"awaiting_evaluation")
+
+    def test_duplicate_screening_report_cannot_be_replayed(self):
+        _,review=self.complete(r2=0.92,residual=0.002)
+        first=self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
+        self.assertEqual(first["research_object"]["status"],"awaiting_evaluation")
+        with self.assertRaises(WorkflowConflict):
+            self.adapter.collect(self.id,expected_revision=4,fidelity_review=review)
+        self.assertEqual(len(self.store.events(self.id)),4)
+
+    def test_redundant_neighbors_must_exist_in_actual_factor_db(self):
+        _,review=self.complete(r2=0.93,residual=0.001)
+        with self.assertRaises(EvidenceError):
+            self.adapter.collect(self.id,expected_revision=3,
+                                 fidelity_review=review,
+                                 nearest_factors=["InventedFactor"])
+        self.assertEqual(self.store.get(self.id)["revision"],3)
 
     def test_redundant_with_verified_nearest_enters_fusion(self):
         _,review=self.complete(r2=0.92,residual=0.002)
