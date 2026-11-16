@@ -1,5 +1,7 @@
 # factor-autoloop
 
+> **新增独立研究入口（语料驱动）**：以《道德经》81 章为章节级语料，执行“章节→假设→因子实验→独立性→融合→失败拆分（最多两层）”。见 [Corpus-Guided Autoloop](docs/corpus-autoloop.md) 与 [项目级 Skill](.agents/skills/corpus-autoloop/SKILL.md)。旧研究循环保持不变；执行器接入仍需真实平台证据。
+
 > **架构标准化 RFC（2026-11-16）**：参见 [Factor Autoloop 标准化与 TreEvo 扩展契约](docs/standardization/README.md)（[独立树原型](docs/standardization/06-tree-mvp.md) · [假设细化 Agent](docs/standardization/07-refinement-agent.md)）。这份 RFC 区分现有生产实现与拟议的自顶向下假设细化结构；**不代表 TreEvo 已接入现有因子研究执行链**。
 
 量化因子自动挖掘循环 —— 基于 Claude Code 的 `/research-loop` skill,无人值守批量产出因子。
