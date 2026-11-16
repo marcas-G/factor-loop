@@ -300,7 +300,8 @@ class AdapterIntegrationTest(unittest.TestCase):
         with self.assertRaises(EvidenceError):
             holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
         self.assertEqual(self.store.get(self.id)["status"],"awaiting_confirmation")
-        with self.assertRaises(WorkflowConflict):
+        # Second attempt resumes already-submitted CPU task without a second POST.
+        with self.assertRaises(EvidenceError):
             holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
         self.assertEqual(backend.calls,1)
 
