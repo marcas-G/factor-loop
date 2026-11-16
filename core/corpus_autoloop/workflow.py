@@ -47,7 +47,10 @@ class CorpusAutoloop:
     the same DB until explicit work ownership and lease expiry have been added.
     """
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, *, allow_fixture_receipts=False):
+        # Synthetic receipts are only for explicit offline tests. Production
+        # imports must be independently checked by the existing executor.
+        self.allow_fixture_receipts = allow_fixture_receipts
         self.path = Path(path).expanduser() if path is not None else _default_db()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as db:
@@ -227,18 +230,53 @@ class CorpusAutoloop:
             if hyp is None:
                 raise WorkflowConflict("no source-grounded hypothesis")
             contracts.factor_spec(doc, hyp["hypothesis"])
+            # Same C++ class name across independently scheduled research
+            # objects would silently overwrite/alias factor library rows.
+            for row in db.execute(
+                "SELECT object_id, factor_json FROM research_objects "
+                "WHERE factor_json IS NOT NULL AND object_id <> ?", (objid,)
+            ):
+                other = json.loads(row["factor_json"])
+                if other.get("name") == doc["name"]:
+                    raise WorkflowConflict(
+                        f"factor class name {doc['name']} already belongs to {row['object_id']}"
+                    )
             return self._change(db,objid,obj["revision"],"awaiting_evaluation",
                                 "factor_compiled",{"factor":doc},factor_json=doc)
+
+    def _guard_receipt(self, payload):
+        if self.allow_fixture_receipts:
+            return
+        def walk(value):
+            if isinstance(value, dict):
+                for entry in value.values():
+                    walk(entry)
+            elif isinstance(value, list):
+                for entry in value:
+                    walk(entry)
+            elif isinstance(value, str):
+                if value.startswith(("fixture://", "mock://", "example://", "synthetic-")):
+                    raise WorkflowConflict("synthetic fixture receipt is forbidden in production")
+        walk(payload)
 
     def record_evaluation(self, objid, report, *, revision):
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             obj = self._check(db, objid, revision, {"awaiting_evaluation","awaiting_confirmation"})
             contracts.evaluation(report, obj["factor"]["name"])
-            if obj["status"] == "awaiting_confirmation" and report["data_split"] != "holdout_confirmation":
-                raise WorkflowConflict("confirmation requires an untouched holdout assessment")
+            self._guard_receipt(report)
+            if obj["status"] == "awaiting_confirmation":
+                if report["data_split"] != "holdout_confirmation":
+                    raise WorkflowConflict("confirmation requires independent holdout assessment")
+                prior = obj["evaluation"]
+                if (report["dataset_ref"] == prior["dataset_ref"] or
+                    report["execution_ref"] == prior["execution_ref"] or
+                    report["predictive"]["evidence_ref"] == prior["predictive"]["evidence_ref"]):
+                    raise WorkflowConflict("holdout must use a different dataset and independent evidence")
+            elif report["data_split"] != "screening":
+                raise WorkflowConflict("holdout cannot bypass screening and selection stage")
             if not report["fidelity"]["passed"] or not report["predictive"]["passed"]:
-                next_status = "awaiting_split" if obj["depth"]<MAX_SPLIT_DEPTH else "terminal_exhausted"
+                next_status = "terminal_exhausted"
             elif report["independence"]["decision"] == "inconclusive":
                 next_status = "awaiting_evaluation"
             elif report["independence"]["decision"] == "redundant":
@@ -255,6 +293,11 @@ class CorpusAutoloop:
             db.execute("BEGIN IMMEDIATE")
             obj = self._check(db, objid, revision, {"awaiting_admission"})
             contracts.admission(report,obj["factor"]["name"])
+            self._guard_receipt(report)
+            final = obj["evaluation"]
+            if (not final or final["data_split"] != "holdout_confirmation" or
+                report["confirmation_ref"] != final["execution_ref"]):
+                raise WorkflowConflict("admission confirmation_ref must point to the recorded holdout execution")
             return self._change(db,objid,obj["revision"],"terminal_admitted",
                                 "admitted",report,admission_json=report)
 
@@ -263,7 +306,13 @@ class CorpusAutoloop:
             db.execute("BEGIN IMMEDIATE")
             obj = self._check(db, objid, revision, {"awaiting_fusion"})
             contracts.fusion(report,obj["factor"]["name"])
+            self._guard_receipt(report)
             if report["success"]:
+                if (report.get("source_evaluation_ref") != obj["evaluation"]["execution_ref"] or
+                    report.get("confirmed_dataset_ref") == obj["evaluation"]["dataset_ref"] or
+                    not isinstance(report.get("confirmed_dataset_ref"), str) or
+                    not report["confirmed_dataset_ref"].strip()):
+                    raise WorkflowConflict("fusion must cite current evaluation and a distinct confirmation dataset")
                 next_status = "terminal_fused"
             elif obj["depth"] < MAX_SPLIT_DEPTH:
                 next_status = "awaiting_split"
