@@ -1,0 +1,110 @@
+[
+  {
+    "unit_id": "daodejing-wangbi-001",
+    "chapter": 1,
+    "part": "道经",
+    "title": "第1章",
+    "text": "道可道，非常道。名可名，非常名。無名天地之始，有名萬物之母。故常無欲，以觀其妙；常有欲，以觀其徼。此兩者，同出而異名，同謂之玄。玄之又玄，眾妙之門。",
+    "source_file": "data/chapters/001.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-002",
+    "chapter": 2,
+    "part": "道经",
+    "title": "第2章",
+    "text": "天下皆知美之為美，斯惡已；皆知善之為善，斯不善已。故有無相生，難易相成，長短相較，高下相傾，音聲相和，前後相隨。是以聖人處無為之事，行不言之教。萬物作焉而不辭，生而不有，為而不恃，功成而弗居。夫唯弗居，是以不去。",
+    "source_file": "data/chapters/002.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-003",
+    "chapter": 3,
+    "part": "道经",
+    "title": "第3章",
+    "text": "不尚賢，使民不爭；不貴難得之貨，使民不為盜；不見可欲，使民心不亂。是以聖人之治，虛其心，實其腹，弱其志，強其骨。常使民無知無欲，使夫智者不敢為也。為無為，則無不治。",
+    "source_file": "data/chapters/003.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-004",
+    "chapter": 4,
+    "part": "道经",
+    "title": "第4章",
+    "text": "道沖，而用之或不盈。淵兮似萬物之宗。挫其銳，解其紛，和其光，同其塵。湛兮似或存。吾不知誰之子，象帝之先。",
+    "source_file": "data/chapters/004.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-005",
+    "chapter": 5,
+    "part": "道经",
+    "title": "第5章",
+    "text": "天地不仁，以萬物為芻狗；聖人不仁，以百姓為芻狗。天地之間，其猶橐籥乎？虛而不屈，動而愈出。多言數窮，不如守中。",
+    "source_file": "data/chapters/005.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-006",
+    "chapter": 6,
+    "part": "道经",
+    "title": "第6章",
+    "text": "谷神不死，是謂玄牝。玄牝之門，是謂天地根。綿綿若存，用之不勤。",
+    "source_file": "data/chapters/006.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-007",
+    "chapter": 7,
+    "part": "道经",
+    "title": "第7章",
+    "text": "天長地久。天地所以能長且久者，以其不自生，故能長生。是以聖人後其身而身先，外其身而身存。非以其無私邪？故能成其私。",
+    "source_file": "data/chapters/007.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-008",
+    "chapter": 8,
+    "part": "道经",
+    "title": "第8章",
+    "text": "上善若水。水善利萬物而不爭，處眾人之所惡，故幾於道。居善地，心善淵，與善仁，言善信，正善治，事善能，動善時。夫唯不爭，故無尤。",
+    "source_file": "data/chapters/008.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-009",
+    "chapter": 9,
+    "part": "道经",
+    "title": "第9章",
+    "text": "持而盈之，不如其已。揣而銳之，不可長保。金玉滿堂，莫之能守；富貴而驕，自遺其咎。功遂身退，天之道也。",
+    "source_file": "data/chapters/009.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-010",
+    "chapter": 10,
+    "part": "道经",
+    "title": "第10章",
+    "text": "載營魄抱一，能無離乎？專氣致柔，能嬰兒乎？滌除玄覽，能無疵乎？愛民治國，能無為乎？天門開闔，能為雌乎？明白四達，能無知乎？生之畜之，生而不有，為而不恃，長而不宰，是謂玄德。",
+    "source_file": "data/chapters/010.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-011",
+    "chapter": 11,
+    "part": "道经",
+    "title": "第11章",
+    "text": "三十輻共一轂，當其無，有車之用。埏埴以為器，當其無，有器之用。鑿戶牖以為室，當其無，有室之用。故有之以為利，無之以為用。",
+    "source_file": "data/chapters/011.json",
+    "source_status": "draft"
+  },
+  {
+    "unit_id": "daodejing-wangbi-012",
+    "chapter": 12,
+    "part": "道经",
+    "title": "第12章",
+    "text": "五色令人目盲，五音令人耳聾，五味令人口爽，馳騁畋獵令人心發狂，難得之貨令人行妨。是以聖人為腹不為目，故去彼取此。",
+    "source_file": "data/chapters/012.json",
+    "source_status": "draft"
+  }
+]
