@@ -27,3 +27,9 @@ _tmp_diag.txt
 .claude/settings.local.json
 .claude/scheduled_tasks.json
 .claude/scheduled_tasks.lock
+
+# ===== 本地 Corpus Autoloop SQLite =====
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
