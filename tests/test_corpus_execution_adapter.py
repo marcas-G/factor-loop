@@ -19,6 +19,18 @@ from core.corpus_autoloop.fusion_confirmation import FusionConfirmationAdapter
 from core.corpus_autoloop.workflow import CorpusAutoloop, WorkflowConflict
 from core.corpus_autoloop import contracts
 
+def _write_screening_csv(folder, h_file, rows):
+    """Fixture for the actual platform's per-factor feval screening.csv."""
+    stem=Path(h_file).stem
+    target=Path(folder)/stem/"dailyX"/(stem+"_feval")/"screening.csv"
+    target.parent.mkdir(parents=True,exist_ok=True)
+    content="x_col,y_col,ic_ir,spearman_r,zero_ratio\n"
+    for x,y,ic,rank,zero in rows:
+        content+=f"{x},{y},{ic},{rank},{zero}\n"
+    target.write_text(content,encoding="utf-8")
+    return target
+
+
 ROOT = Path(__file__).resolve().parents[1]
 EX = ROOT / "corpora" / "daodejing" / "examples"
 
@@ -246,10 +258,18 @@ class AdapterIntegrationTest(unittest.TestCase):
                         "tasks":{"csv_ic":{"run_id":"real-cpu-job-007",
                                            "feature":"CorpusFactor_test_007"}}}
             def check(self,**kwargs):
+                _write_screening_csv(
+                    kwargs["check_output"],kwargs["factor_file"],[
+                        ("X.signal","Y.target_5s",0.47,0.021,0.2),
+                        # Platform best is deliberately NOT the preselected Y.
+                        ("X.signal","Y.other_h",2.8,0.4,0.2),
+                    ])
                 return {"failureLayer":"check_done",
+                        "checkOutput":kwargs["check_output"],
                         "evidence":{"eval_metrics":{
                             "zero_rate":0.2,
-                            "core_metrics":{"screening":{"icir":0.47,"spearman":0.021,"pair":"X.signal vs Y.target_5s"}},
+                            "core_metrics":{"screening":{
+                                "icir":2.8,"spearman":0.4,"pair":"X.signal vs Y.other_h"}},
                         }}}
         platform=Platform()
         holdout=IndependentHoldoutAdapter(
@@ -260,6 +280,8 @@ class AdapterIntegrationTest(unittest.TestCase):
         self.assertEqual(platform.last_kwargs["end_date"],"2025-12-31")
         self.assertEqual(outcome["research_object"]["status"],"awaiting_admission")
         self.assertEqual(outcome["report"]["data_split"],"holdout_confirmation")
+        self.assertEqual(outcome["report"]["predictive"]["metric_value"],0.47)
+        self.assertEqual(outcome["report"]["audit"]["holdout_pair"],"X.signal vs Y.target_5s")
         self.assertEqual(outcome["report"]["audit"]["gpu_independence_reused_from_screening"],True)
         receipt=AdmissionAdapter(self.store,backend=self.backend).commit(
             self.id,expected_revision=5,review={
@@ -385,12 +407,17 @@ class AdapterIntegrationTest(unittest.TestCase):
                     "ExistingLiquidityFactor":0.43,
                     "DDJCh01FusionFactor":0.63,
                 }[stem]
-                return {"failureLayer":"check_done","evidence":{
-                    "eval_metrics":{"core_metrics":{"screening":{
-                        "icir":icir,"spearman":0.022,
-                        "zero_ratio":0.1,"pair":f"X.{stem} vs Y.target_5s"
-                    }}}
-                }}
+                _write_screening_csv(
+                    kwargs["check_output"],kwargs["factor_file"],[
+                        (f"X.{stem}","Y.target_5s",icir,0.022,0.1),
+                        (f"X.{stem}","Y.other_h",9.9,0.6,0.1),
+                    ])
+                return {"failureLayer":"check_done",
+                        "checkOutput":kwargs["check_output"],
+                        "evidence":{"eval_metrics":{"core_metrics":{"screening":{
+                            "icir":9.9,"spearman":0.6,
+                            "zero_ratio":0.1,"pair":f"X.{stem} vs Y.other_h"
+                        }}}}}
         platform=ThreeWayCPU()
         result=FusionConfirmationAdapter(self.store,backend=self.backend,platform=platform,
             library_lookup=lambda name: {"factor":{"xname":name,"file_path":str(similar)}}).confirm(
