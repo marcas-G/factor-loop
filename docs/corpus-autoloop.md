@@ -79,6 +79,30 @@ python3 -m core.corpus_autoloop.cli --db ./corpus-demo.sqlite handoff \
 
 **注意：** 这里的 CLI 只检查报告结构和关联标识，**尚不能自行验证外部 evidence_ref 是否真实存在**；此证据适配/审计责任仍属于执行器和 Agent，不能拿 fixture:// 字符串冒充正式试验。
 
+## 第一章离线研究样例（不会执行量化平台）
+
+仓库包含一组**完整原文锚定的教学假设和因子交接**，而不是虚构的回测结论：
+
+- `corpora/daodejing/examples/chapter_001_hypothesis.json`：引用第一章原文“此兩者，同出而異名”，将两个观察视角的关系类比为事前成交失衡与盘口失衡之间的冲突。
+- `corpora/daodejing/examples/chapter_001_factor.json`：给出一个非线性冲突信号的**描述性 FactorSpec**；`formula` 并非可直接运行的 C++。
+- `corpora/daodejing/examples/illustrative_capabilities.json`：仅为样例字段表；**不是对真实量化平台数据能力的认证**。
+
+~~~bash
+DB=./corpus-demo.sqlite3
+python3 -m core.corpus_autoloop.cli --db "$DB" seed
+python3 -m core.corpus_autoloop.cli --db "$DB" hypothesis \
+  --object-id RO-DDJ-001 --expected-revision 1 \
+  --response-file corpora/daodejing/examples/chapter_001_hypothesis.json
+python3 -m core.corpus_autoloop.cli --db "$DB" factor \
+  --object-id RO-DDJ-001 --expected-revision 2 \
+  --response-file corpora/daodejing/examples/chapter_001_factor.json \
+  --capabilities-file corpora/daodejing/examples/illustrative_capabilities.json
+python3 -m core.corpus_autoloop.cli --db "$DB" handoff \
+  --object-id RO-DDJ-001
+~~~
+
+运行到这里仅有一个候选 `FactorSpec`，状态是 `awaiting_evaluation`，**没有 C++ 生成/提交、没有 IC/ResIC/融合结果，也没有任何因子入库**。后续必须由真实 Agent 和 quant-mcp 负责执行。如果在同一个 DB 已处理过第一章，请改用全新隔离路径，否则版本检查会拒绝重复步骤。
+
 ## 决策表
 
 | 实测条件 | 下一步状态 | 含义 |
@@ -87,8 +111,9 @@ python3 -m core.corpus_autoloop.cli --db ./corpus-demo.sqlite handoff \
 | 独立确认通过且独立 | `awaiting_admission` | 等待真实因子入库回执 |
 | 预测/忠实通过，但与库高度冗余 | `awaiting_fusion` | 尝试与近邻因子融合 |
 | 融合有独立确认增益且已入库 | `terminal_fused` | 当前研究对象结束 |
-| 融合未增益或原因子无有效预测 | `awaiting_split`（depth<2） | 读取失败证据，进行具体机制拆分 |
-| 失败且 depth=2 | `terminal_exhausted` | 此分支结束 |
+| 融合无增益 | `awaiting_split`（depth<2） | 读取失败证据，进行具体机制拆分 |
+| 因子忠实度/预测能力不通过 | `terminal_exhausted` | 不盲目拆分没有发生融合的失败 |
+| 融合失败且 depth=2 | `terminal_exhausted` | 此分支结束 |
 | 各分支终止 | `next` 指向下一个章节 | 按章节顺序处理 |
 
 当独立性结论为 inconclusive 时，研究对象保持 `awaiting_evaluation`，需要更多真实证据而不是自动入库。
@@ -101,6 +126,7 @@ python3 -m core.corpus_autoloop.cli --db ./corpus-demo.sqlite handoff \
   "factor_xname":"<factor name>",
   "execution_ref":"<real execution artifact uri>",
   "library_snapshot_ref":"<factor library revision>",
+  "dataset_ref":"<real screening dataset identifier>",
   "data_split":"screening",
   "fidelity":{"passed":true,"evidence_ref":"<real fidelity audit>"},
   "predictive":{"passed":true,"metric_name":"ICIR","metric_value":0.0,
@@ -123,7 +149,15 @@ python3 -m core.corpus_autoloop.cli --db ./corpus-demo.sqlite handoff \
 
 ## 限制与下一阶段
 
-- 当前针对**单执行器**，没有多 Agent 分布式 lease。SQLite revision CAS 只保护写状态，不负责跨平台重复提交的幂等令牌。
+- **证据审计增强（v0.1）**：
+
+- Screening 与 holdout 必须使用不同的 `dataset_ref`、`execution_ref` 和预测指标证据引用，无法直接把同一批测试改名为独立验证。
+- 独立入库回执中的 `confirmation_ref` 必须精确引用已登记的 holdout `execution_ref`。
+- 融合成功须填写 `source_evaluation_ref`（当前候选的实际评价引用）、`confirmed_dataset_ref`（区别于此前评价的独立数据集），及真实 `persist_ref`。
+- 默认运行拒绝以 `fixture://`、`mock://`、`synthetic-` 开头的实验回执；合成测试需要显式设置仅供测试的 `allow_fixture_receipts=True`。
+- **重要边界**：仅做静态一致性和占位引用防护，仍**无法证明真实链接的文件必然存在、平台结果完整或统计结论可信**。外部执行器必须提供可审计原始产物。不要把通过静态合同误解为自动独立验证。
+
+当前针对**单执行器**，没有多 Agent 分布式 lease。SQLite revision CAS 只保护写状态，不负责跨平台重复提交的幂等令牌。
 - 因子库当前不在这个 SQLite 中，真实指标必须由现有服务查阅并形成报告；没有已实现的自动融合搜索器。
 - `FactorSpec.formula` 是描述性候选规范，必须经过真实 C++ 生成和未来函数审查，不能视为已可编译的 .h。
 - 自动循环可以由项目级 Skill 一轮轮调用本 CLI，但本模块**未启动无人值守后台任务**，也未发起实际 quant-mcp 会话。

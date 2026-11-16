@@ -272,6 +272,26 @@ class CorpusAutoloopTest(unittest.TestCase):
         self.assertEqual(self.w.next_object()["object_id"],"RO-DDJ-002")
         self.assertEqual(self.w.events(self.id)[-1]["kind"],"infeasible")
 
+    def test_chapter1_example_handoff_is_grounded_and_not_executed(self):
+        sample_root=ROOT/"corpora"/"daodejing"/"examples"
+        hyp=json.loads((sample_root/"chapter_001_hypothesis.json").read_text(encoding="utf-8"))
+        factor=json.loads((sample_root/"chapter_001_factor.json").read_text(encoding="utf-8"))
+        caps=json.loads((sample_root/"illustrative_capabilities.json").read_text(encoding="utf-8"))
+        original=self.w.get(self.id)
+        self.assertIn(hyp["source_quote"],original["source"]["text"])
+        self.assertEqual(generate_hypothesis(original,response=hyp),hyp)
+        stage1=self.w.record_hypothesis(self.id,hyp,revision=original["revision"])
+        self.assertEqual(stage1["status"],"awaiting_factor")
+        self.assertEqual(generate_factor(self.w.get(self.id),response=factor,capabilities=caps),factor)
+        stage2=self.w.record_factor(self.id,factor,revision=stage1["revision"])
+        self.assertEqual(stage2["status"],"awaiting_evaluation")
+        handoff=factor_handoff(self.w.get(self.id))
+        self.assertEqual(handoff["workflow"],"corpus_autoloop_v1")
+        self.assertEqual(handoff["execution_status"],"not_submitted")
+        self.assertEqual(handoff["factors"][0]["hypothesis"],hyp["hypothesis"])
+        self.assertEqual(len(self.w.events(self.id)),3)
+        self.assertNotIn("execution_ref",handoff)
+
     def test_cli_source_to_research_hypothesis(self):
         fixture=Path(self.tmp.name)/"hypothesis.json"
         fixture.write_text(json.dumps(research_hypothesis(),ensure_ascii=False),encoding="utf-8")
