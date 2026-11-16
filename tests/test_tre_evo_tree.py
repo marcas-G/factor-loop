@@ -132,7 +132,7 @@ class TreeTest(unittest.TestCase):
             validate("phenomenon", ungrounded)
         bad_root = copy.deepcopy(self.root)
         bad_root["parent_id"] = "P"
-        with self.assertRaises(TreeInvariantError):
+        with self.assertRaises(ContractError):
             self.store.create_root(bad_root)
 
     def test_cli_end_to_end(self):
