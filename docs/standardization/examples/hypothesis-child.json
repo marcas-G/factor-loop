@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "tree_id": "TREE-DEMO-001",
+  "node_id": "H-DEMO-CHILD",
+  "parent_id": "H-DEMO-ROOT",
+  "node_type": "mechanistic_hypothesis",
+  "statement": "在事件前交易压力相似时，可观察的补单活动差异可能对应不同的未来价格响应路径。",
+  "mechanism_roles": [
+    "预先可观察的补单活动",
+    "盘口失衡",
+    "未来价格响应"
+  ],
+  "assumptions": [
+    "补单活动代理只使用事件前信息",
+    "存在足够的对照事件"
+  ],
+  "unknowns": [
+    "已知波动状态能否解释这一关联"
+  ],
+  "next_refinement_questions": [
+    "加入事件前波动状态后，补单差异仍能区分未来响应吗？"
+  ],
+  "source_phenomena": [
+    "P-DEMO-001"
+  ],
+  "node_status": "ready_to_test",
+  "evidence_status": "untested"
+}

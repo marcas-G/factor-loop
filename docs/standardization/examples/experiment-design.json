@@ -1,0 +1,49 @@
+{
+  "schema_version": "0.1",
+  "example_status": "illustrative_only",
+  "experiment_id": "EXP-DEMO-001",
+  "source_node_id": "H-DEMO-CHILD",
+  "research_question": "在事件前失衡和成交强度匹配后，事先可观察的补单代理是否对应未来路径差异？",
+  "hypotheses": [
+    {
+      "hypothesis_id": "H0",
+      "unique_prediction": "条件化以后，补单分组不表现出稳定的额外响应差异"
+    },
+    {
+      "hypothesis_id": "H1",
+      "unique_prediction": "条件化以后，补单强弱分组呈现预先定义且跨时段稳定的响应差异"
+    }
+  ],
+  "controls": [
+    "pre_t_order_imbalance",
+    "pre_t_traded_volume",
+    "pre_t_volatility_state"
+  ],
+  "variation": [
+    "pre_t_replenishment_proxy"
+  ],
+  "required_observations": [
+    "future_midprice_response_1_to_10s"
+  ],
+  "confounders": [
+    "市场波动状态",
+    "订单簿更新频率",
+    "同一市场日内聚集"
+  ],
+  "design_type": "observational_comparison",
+  "causal_claim_level": "associational",
+  "data_plan": {
+    "dataset_ref": "synthetic-example/no-market-data",
+    "feature_end_offset_ms": 0,
+    "label_start_offset_ms": 1,
+    "label_end_offset_ms": 10000,
+    "data_usage": "discovery",
+    "comparison_definition": "先匹配事件前变量，再用事件前补单代理分组，比较未来路径的预定义统计量"
+  },
+  "expected_outcomes": {
+    "distinguishing_pattern": "H1 预计分组间有稳定的条件差异；H0 预计没有",
+    "non_distinguishing_pattern": "无法稳定区分时保留假设开放状态，不因一个统计量不显著直接证明 H0"
+  },
+  "stage": "planned",
+  "evidence_refs": []
+}

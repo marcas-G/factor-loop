@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TreEvoExperimentDesignV0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "example_status": {
+      "enum": [
+        "illustrative_only",
+        "measured"
+      ]
+    },
+    "experiment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "research_question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "hypothesis_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "unique_prediction": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "unique_prediction"
+        ]
+      }
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "variation": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "required_observations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "confounders": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "design_type": {
+      "enum": [
+        "observational_comparison",
+        "negative_control",
+        "randomized_intervention",
+        "simulation"
+      ]
+    },
+    "causal_claim_level": {
+      "enum": [
+        "associational",
+        "interventional"
+      ]
+    },
+    "data_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dataset_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "feature_end_offset_ms": {
+          "type": "integer"
+        },
+        "label_start_offset_ms": {
+          "type": "integer"
+        },
+        "label_end_offset_ms": {
+          "type": "integer"
+        },
+        "data_usage": {
+          "enum": [
+            "discovery",
+            "screening",
+            "holdout_confirmation"
+          ]
+        },
+        "comparison_definition": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "dataset_ref",
+        "feature_end_offset_ms",
+        "label_start_offset_ms",
+        "label_end_offset_ms",
+        "data_usage",
+        "comparison_definition"
+      ]
+    },
+    "expected_outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "distinguishing_pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "non_distinguishing_pattern": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "distinguishing_pattern",
+        "non_distinguishing_pattern"
+      ]
+    },
+    "stage": {
+      "const": "planned"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "schema_version",
+    "example_status",
+    "experiment_id",
+    "source_node_id",
+    "research_question",
+    "hypotheses",
+    "controls",
+    "variation",
+    "required_observations",
+    "confounders",
+    "design_type",
+    "causal_claim_level",
+    "data_plan",
+    "expected_outcomes",
+    "stage",
+    "evidence_refs"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "design_type": {
+            "enum": [
+              "observational_comparison",
+              "negative_control"
+            ]
+          }
+        },
+        "required": [
+          "design_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "causal_claim_level": {
+            "const": "associational"
+          }
+        }
+      }
+    }
+  ]
+}

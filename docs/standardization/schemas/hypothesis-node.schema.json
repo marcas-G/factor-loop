@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HypothesisNodeV0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "example_status": {
+      "enum": [
+        "illustrative_only",
+        "measured"
+      ]
+    },
+    "tree_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "node_type": {
+      "enum": [
+        "research_theme",
+        "mechanistic_hypothesis",
+        "operational_hypothesis"
+      ]
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mechanism_roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "next_refinement_questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "source_phenomena": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "node_status": {
+      "enum": [
+        "open",
+        "ready_to_test",
+        "blocked",
+        "archived"
+      ]
+    },
+    "evidence_status": {
+      "enum": [
+        "untested",
+        "provisional_support",
+        "provisional_conflict",
+        "mixed",
+        "unidentifiable"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "example_status",
+    "tree_id",
+    "node_id",
+    "parent_id",
+    "node_type",
+    "statement",
+    "mechanism_roles",
+    "assumptions",
+    "unknowns",
+    "next_refinement_questions",
+    "source_phenomena",
+    "node_status",
+    "evidence_status"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "node_type": {
+            "const": "research_theme"
+          }
+        },
+        "required": [
+          "node_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "parent_id": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

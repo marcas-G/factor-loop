@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FactorHandoffV0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "example_status": {
+      "enum": [
+        "illustrative_only",
+        "measured"
+      ]
+    },
+    "source_node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "experiment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "derivation_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "factor_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "formula": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intuition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hypothesis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "params": {
+          "type": "object"
+        },
+        "categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "AG",
+              "AU",
+              "CU",
+              "AL",
+              "NI"
+            ]
+          }
+        }
+      },
+      "required": [
+        "name",
+        "formula",
+        "intuition",
+        "hypothesis",
+        "tags",
+        "params",
+        "categories"
+      ]
+    },
+    "status": {
+      "const": "draft"
+    }
+  },
+  "required": [
+    "schema_version",
+    "example_status",
+    "source_node_id",
+    "experiment_id",
+    "derivation_reason",
+    "factor_spec",
+    "status"
+  ]
+}

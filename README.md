@@ -1,5 +1,7 @@
 # factor-autoloop
 
+> **架构标准化 RFC（2026-11-16）**：参见 [Factor Autoloop 标准化与 TreEvo 扩展契约](docs/standardization/README.md)。这份 RFC 区分现有生产实现与拟议的自顶向下假设细化结构；**不代表 TreEvo 已接入运行时**。
+
 量化因子自动挖掘循环 —— 基于 Claude Code 的 `/research-loop` skill,无人值守批量产出因子。
 全流程纯 Python,自动完成 **cog-protocol(认知协议发现缺口/发明算子)→ runFactor(write→submit→check)→ assess(评估入库)** 全流程,所有搬砖走 `quant-mcp` MCP server。
 
