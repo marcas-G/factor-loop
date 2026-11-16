@@ -16,6 +16,8 @@ from .generator import generate_hypothesis, generate_factor, generate_split, fac
 from .workflow import CorpusAutoloop, WorkflowConflict
 from .execution_adapter import CorpusExecutionAdapter, EvidenceError
 from .agent_runner import OpenCodeRunner
+from .holdout_adapter import IndependentHoldoutAdapter
+from .admission_adapter import AdmissionAdapter
 
 
 def _read(path):
@@ -101,6 +103,29 @@ def parse(argv=None):
     p.add_argument("--enable-platform-writes", action="store_true",
                    help="allow writing result to isolated corpus ledger (not production factor DB)")
 
+    p = commands.add_parser(
+        "execution-confirm",
+        help="REAL SIDE EFFECT: run dated CPU-only holdout; source SHA-256 frozen"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--fidelity-file", required=True)
+    p.add_argument("--start-date", default="2025-07-01")
+    p.add_argument("--end-date", default="2025-12-31")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize real independent CPU platform task")
+
+    p = commands.add_parser(
+        "execution-admit",
+        help="REAL SIDE EFFECT: call existing persist_factor(commit) only after independent holdout"
+    )
+    p.add_argument("--object-id", required=True)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--assessment-file", required=True,
+                   help="full trading/stability/fidelity assessment (not model summary)")
+    p.add_argument("--enable-platform-writes", action="store_true",
+                   help="explicitly authorize production factor library commit")
+
     p = commands.add_parser("execution-status", help="show authoritative quant run binding")
     p.add_argument("--object-id", required=True)
 
@@ -153,6 +178,19 @@ def main(argv=None):
                 fidelity_review=_read(args.fidelity_file),
                 nearest_factors=_read(args.nearest_file) if args.nearest_file else None,
                 zero_rate=args.zero_rate)
+        elif cmd == "execution-confirm":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=IndependentHoldoutAdapter(store).confirm(
+                args.object_id,expected_revision=args.expected_revision,
+                fidelity_review=_read(args.fidelity_file),
+                start_date=args.start_date,end_date=args.end_date)
+        elif cmd == "execution-admit":
+            if not args.enable_platform_writes:
+                raise WorkflowConflict("explicit --enable-platform-writes required")
+            result=AdmissionAdapter(store).commit(
+                args.object_id,expected_revision=args.expected_revision,
+                review=_read(args.assessment_file))
         elif cmd == "execution-status":
             adapter=CorpusExecutionAdapter(store)
             link=adapter._link(args.object_id)
