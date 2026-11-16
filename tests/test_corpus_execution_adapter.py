@@ -12,6 +12,8 @@ from core.corpus_autoloop.agent_runner import OpenCodeRunner
 from core.corpus_autoloop.execution_adapter import (
     CorpusExecutionAdapter, EvidenceError, evaluate_state,
 )
+from core.corpus_autoloop.holdout_adapter import IndependentHoldoutAdapter
+from core.corpus_autoloop.admission_adapter import AdmissionAdapter
 from core.corpus_autoloop.workflow import CorpusAutoloop, WorkflowConflict
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,8 +52,19 @@ class FakeBackend:
 
     def run_save(self, run_id, patch):
         self.saves += 1
-        self.runs[run_id].update(copy.deepcopy(patch))
+        for key,value in patch.items():
+            if key.startswith("factors.0."):
+                self.runs[run_id]["factors"][0][key[len("factors.0."):]]=copy.deepcopy(value)
+            else:
+                self.runs[run_id][key]=copy.deepcopy(value)
         return {"ok": True}
+
+    def persist_factor(self, run_id, factor_index, mode, verdict):
+        self.persist_calls=getattr(self,"persist_calls",0)+1
+        if mode!="commit" or verdict.get("verdict")!="pass":
+            return {"ok":False,"error":"bad test contract"}
+        return {"xname":self.runs[run_id]["factors"][factor_index]["name"],
+                "status":"evaluated","metrics":{"icir":0.55}}
 
     def run_list(self):
         return [{"run_id": x} for x in self.runs]
@@ -214,6 +227,79 @@ class AdapterIntegrationTest(unittest.TestCase):
         with self.assertRaises(WorkflowConflict):
             runner.execute(self.store.get(self.id),started["run_id"])
         self.assertEqual(task_path.read_text(encoding="utf-8"),"occupied")
+
+    def test_cpu_holdout_and_real_admission_are_separate_committed_steps(self):
+        _,review=self.complete()
+        screening=self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
+        self.assertEqual(screening["research_object"]["status"],"awaiting_confirmation")
+        class Platform:
+            def __init__(self):
+                self.submit_count=0
+                self.last_kwargs=None
+            def submit(self,**kwargs):
+                self.submit_count+=1
+                self.last_kwargs=kwargs
+                return {"ok":True,"features":self.last_kwargs["features"],
+                        "tasks":{"csv_ic":{"run_id":"real-cpu-job-007",
+                                           "feature":"CorpusFactor_test_007"}}}
+            def check(self,**kwargs):
+                return {"failureLayer":"check_done",
+                        "evidence":{"eval_metrics":{
+                            "zero_rate":0.2,
+                            "core_metrics":{"screening":{"icir":0.47,"spearman":0.021}},
+                        }}}
+        platform=Platform()
+        holdout=IndependentHoldoutAdapter(
+            self.store,backend=self.backend,platform=platform)
+        outcome=holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
+        self.assertEqual(platform.submit_count,1)
+        self.assertEqual(platform.last_kwargs["start_date"],"2025-07-01")
+        self.assertEqual(platform.last_kwargs["end_date"],"2025-12-31")
+        self.assertEqual(outcome["research_object"]["status"],"awaiting_admission")
+        self.assertEqual(outcome["report"]["data_split"],"holdout_confirmation")
+        self.assertEqual(outcome["report"]["audit"]["gpu_independence_reused_from_screening"],True)
+        receipt=AdmissionAdapter(self.store,backend=self.backend).commit(
+            self.id,expected_revision=5,review={
+                "verdict":"pass","reviewer":"actual-human-reviewer",
+                "assess_ref":"research://assess/report-001",
+                "tradability_ref":"research://tradability/001",
+                "stability_ref":"research://stability/001",
+                "tradability_passed":True,"stability_passed":True,
+                "key_strengths":["OOS daily ICIR above threshold"],
+                "key_weaknesses":["Ridge measured in screening only"],
+            })
+        self.assertEqual(receipt["research_object"]["status"],"terminal_admitted")
+        self.assertEqual(self.backend.persist_calls,1)
+        with self.assertRaises(WorkflowConflict):
+            AdmissionAdapter(self.store,backend=self.backend).commit(
+                self.id,expected_revision=5,review={"verdict":"pass"})
+
+    def test_cpu_holdout_prevents_reuse_of_screening_dates(self):
+        _,review=self.complete()
+        self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
+        holdout=IndependentHoldoutAdapter(self.store,backend=self.backend,platform=object())
+        with self.assertRaises(WorkflowConflict):
+            holdout.confirm(self.id,expected_revision=4,fidelity_review=review,
+                            start_date="2025-06-01",end_date="2025-06-30")
+
+    def test_missing_holdout_evidence_blocks_confirmation_without_resubmitting(self):
+        _,review=self.complete()
+        self.adapter.collect(self.id,expected_revision=3,fidelity_review=review)
+        class MissingMetrics:
+            calls=0
+            def submit(self,**kwargs):
+                self.calls+=1
+                return {"ok":True,"tasks":{"csv_ic":{"run_id":"task-52","feature":"fake_test_52"}}}
+            def check(self,**kwargs):
+                return {"failureLayer":"check_done","evidence":{}}
+        backend=MissingMetrics()
+        holdout=IndependentHoldoutAdapter(self.store,backend=self.backend,platform=backend)
+        with self.assertRaises(EvidenceError):
+            holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
+        self.assertEqual(self.store.get(self.id)["status"],"awaiting_confirmation")
+        with self.assertRaises(WorkflowConflict):
+            holdout.confirm(self.id,expected_revision=4,fidelity_review=review)
+        self.assertEqual(backend.calls,1)
 
     def test_begin_requires_unmodified_dataset_identity_and_correct_revision(self):
         self.begin()
