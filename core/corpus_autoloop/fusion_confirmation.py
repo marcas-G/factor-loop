@@ -44,10 +44,11 @@ def _score(evidence):
 
 
 class FusionConfirmationAdapter:
-    def __init__(self,store:CorpusAutoloop,*,backend=None,platform=None):
+    def __init__(self,store:CorpusAutoloop,*,backend=None,platform=None,library_lookup=None):
         self.store=store
         self.backend=backend or NativePersistBackend()
         self.platform=platform or NativeCPUHoldout()
+        self.library_lookup=library_lookup
         self.trials=FusionAdapter(store,backend=self.backend)
         with store._connection() as db:
             db.execute("""
@@ -75,6 +76,13 @@ class FusionConfirmationAdapter:
             raise EvidenceError("identified confirmation reviewer required")
         if not isinstance(review.get("evaluation_ref"),str) or len(review["evaluation_ref"])<8:
             raise EvidenceError("predeclared same-horizon comparison protocol required")
+        for required in ("target","tradability_ref","stability_ref","statistical_protocol_ref"):
+            if not isinstance(review.get(required),str) or len(review[required].strip())<5:
+                raise EvidenceError(f"missing predeclared fusion review field {required}")
+        if (review.get("tradability_passed") is not True or
+            review.get("stability_passed") is not True or
+            review.get("multiplicity_controlled") is not True):
+            raise EvidenceError("fusion needs independent tradability, stability and multiplicity review")
         if review.get("allow_single_holdout_comparison") is not True:
             raise EvidenceError("explicit one-shot holdout authorization required")
         try:
@@ -86,6 +94,20 @@ class FusionConfirmationAdapter:
         if type(delta_icir_floor) not in (int,float) or not 0<delta_icir_floor<1:
             raise WorkflowConflict("invalid predeclared fusion improvement threshold")
         plan=trial["plan"]
+        # The nearest factor must really be the one recorded in the production
+        # library. A model-provided path is not accepted as proof of identity.
+        if self.library_lookup is None:
+            from core.mcp.tools.factor_db import factor_detail
+            library_detail=factor_detail(plan["similar_factor_name"])
+        else:
+            library_detail=self.library_lookup(plan["similar_factor_name"])
+        fmeta=library_detail.get("factor") if isinstance(library_detail,dict) else None
+        if (not isinstance(fmeta,dict) or
+            fmeta.get("xname")!=plan["similar_factor_name"] or
+            not fmeta.get("file_path") or
+            Path(fmeta["file_path"]).expanduser().resolve()!=
+                Path(nearest_source_file).expanduser().resolve()):
+            raise EvidenceError("nearest C++ source not verified against actual factor library")
         original_run=self.backend.run_load(obj["evaluation"]["executor_run_id"])
         fused_run=self.backend.run_load(trial["run_id"])
         if (fused_run.get("parent_session")!=trial["token"] or
@@ -143,6 +165,8 @@ class FusionConfirmationAdapter:
         if len(targets)!=1:
             raise EvidenceError(
                 "fused/original/nearest evaluated different Y targets; aligned comparison required")
+        if next(iter(targets))!=review["target"]:
+            raise EvidenceError("observed Y target differs from predeclared fusion target")
         old=max(abs(outcomes["original"]["score"]["icir"]),
                 abs(outcomes["similar"]["score"]["icir"]))
         fused_score=abs(outcomes["fused"]["score"]["icir"])
@@ -194,6 +218,14 @@ class FusionConfirmationAdapter:
         receipt={"objects":outcomes,"delta_abs_icir":delta,
                  "holdout_window":{"start":str(start),"end":str(end)},
                  "evaluation_protocol":review["evaluation_ref"],
+                 "target":review["target"],
+                 "research_review":{
+                     "reviewer":review["reviewer"],
+                     "statistical_protocol_ref":review["statistical_protocol_ref"],
+                     "tradability_ref":review["tradability_ref"],
+                     "stability_ref":review["stability_ref"],
+                     "multiplicity_controlled":True,
+                 },
                  "result_status":result["status"],"decision":decision}
         with self.store._connection() as db:
             db.execute("UPDATE corpus_fusion_holdout SET status='done',receipt_json=?,updated_at=? "
