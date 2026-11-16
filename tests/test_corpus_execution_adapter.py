@@ -107,7 +107,7 @@ class AdapterIntegrationTest(unittest.TestCase):
             "factor_file": str(self.factor_file),
             "evidence": {
                 "eval_metrics": {
-                    "core_metrics": {"screening": {"icir": 0.55, "spearman": 0.021}},
+                    "core_metrics": {"screening": {"icir": 0.55, "spearman": 0.021, "pair":"X.signal vs Y.target_5s"}},
                     "deep_best": {"daily_icir": 0.42, "daily_rank_ic": 0.018},
                     "zero_rate": zero_rate,
                 },
@@ -249,7 +249,7 @@ class AdapterIntegrationTest(unittest.TestCase):
                 return {"failureLayer":"check_done",
                         "evidence":{"eval_metrics":{
                             "zero_rate":0.2,
-                            "core_metrics":{"screening":{"icir":0.47,"spearman":0.021}},
+                            "core_metrics":{"screening":{"icir":0.47,"spearman":0.021,"pair":"X.signal vs Y.target_5s"}},
                         }}}
         platform=Platform()
         holdout=IndependentHoldoutAdapter(

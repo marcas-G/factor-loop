@@ -195,6 +195,14 @@ class IndependentHoldoutAdapter:
         taskid=str(task["run_id"])
         # The CPU holdout is genuinely new execution evidence, unlike the
         # screening GPU ridge test; keep this distinction in the audit.
+        original_pair=screening.get("audit",{}).get("screening_pair")
+        holdout_pair=((metrics.get("core_metrics") or {}).get("screening") or {}).get("pair")
+        if (not isinstance(original_pair,str) or not original_pair.strip() or
+            not isinstance(holdout_pair,str) or
+            holdout_pair.strip()!=original_pair.strip()):
+            raise EvidenceError(
+                "holdout must validate the exact preselected X-Y pair and horizon; "
+                "independently choosing the best holdout pair is prohibited")
         report={
             "factor_xname":obj["factor"]["name"],
             "executor_run_id":f"cpu-holdout-{taskid}",
